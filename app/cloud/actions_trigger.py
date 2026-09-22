@@ -1,9 +1,10 @@
 """GitHub Actions 触发与轮询 API 封装（基于 requests，无新依赖）。
 
-封装四类调用：
+封装以下调用：
     - trigger(workflow, branch) -> (ok, msg)：POST workflow_dispatch
-    - get_latest_run() -> dict | None：取最近一次 workflow_dispatch run
+    - get_latest_run(workflow=None, since=None) -> dict | None：取最近一次 workflow_dispatch run
     - get_run(run_id) -> dict：查指定 run 状态
+    - cancel_run(run_id) -> (ok, msg)：取消指定 run
     - test_auth() -> (ok, msg)：验证 token + repo 可访问
 
 workflow cron 与 Actions Secrets：
@@ -72,11 +73,14 @@ class ActionsTrigger:
             return True, "已触发"
         return False, self._fmt_err(r, "触发失败")
 
-    def get_latest_run(self, workflow: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def get_latest_run(self, workflow: Optional[str] = None,
+                       since: Optional[float] = None) -> Optional[Dict[str, Any]]:
         """取最近一次 workflow_dispatch run。
 
         :param workflow: 可选 workflow 文件名（GitHub 不支持按文件名直接过滤，
             这里仅在响应里校验 workflow_id/path 是否匹配）
+        :param since: 可选 epoch 秒时间戳；仅返回创建时间晚于该值（严格大于）的 run，
+            用于把轮询绑定到「刚触发的那次 run」，避免拿到历史 run 误判完成。
         :return: dict(id, status, conclusion, html_url, created_at, head_branch) 或 None
         """
         url = f"{self.API}/repos/{self.repo}/actions/runs"
@@ -98,6 +102,10 @@ class ActionsTrigger:
                 path = (run.get("path") or "").split("/")[-1]
                 if path != workflow:
                     continue
+            if since is not None:
+                created_ts = self._parse_iso8601(run.get("created_at") or "")
+                if created_ts is not None and created_ts <= since:
+                    continue
             return self._pick_run(run)
         return None
 
@@ -114,6 +122,34 @@ class ActionsTrigger:
             return self._pick_run(r.json())
         except Exception:
             return {"error": "响应解析失败"}
+
+    def cancel_run(self, run_id: int) -> Tuple[bool, str]:
+        """取消指定 workflow run。
+
+        POST /repos/{repo}/actions/runs/{run_id}/cancel
+        - 202：已接受取消请求（GitHub 会异步把 run 标记为 cancelled）
+        - 404：run 不存在
+        - 409：run 已完成，无法取消
+
+        :param run_id: workflow run id
+        :return: (ok, msg)
+        """
+        try:
+            run_id = int(run_id)
+        except (TypeError, ValueError):
+            return False, "run_id 无效"
+        url = f"{self.API}/repos/{self.repo}/actions/runs/{run_id}/cancel"
+        try:
+            r = self.s.post(url, timeout=15)
+        except requests.RequestException as e:
+            return False, f"网络请求失败：{e}"
+        if r.status_code == 202:
+            return True, "已请求取消远端 run"
+        if r.status_code == 404:
+            return False, "run 不存在"
+        if r.status_code == 409:
+            return False, "run 已完成，无需取消"
+        return False, self._fmt_err(r, "取消 run 失败")
 
     def test_auth(self) -> Tuple[bool, str]:
         """验证 token + repo 可访问。
@@ -411,6 +447,23 @@ class ActionsTrigger:
             "created_at": run.get("created_at", ""),
             "head_branch": run.get("head_branch", ""),
         }
+
+    @staticmethod
+    def _parse_iso8601(value: str) -> Optional[float]:
+        """把 GitHub 返回的 ISO-8601 时间解析为 epoch 秒；失败返回 None。"""
+        if not value:
+            return None
+        try:
+            from datetime import datetime, timezone
+            text = value.strip()
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            dt = datetime.fromisoformat(text)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except Exception:
+            return None
 
     @staticmethod
     def _fmt_err(r: requests.Response, prefix: str) -> str:

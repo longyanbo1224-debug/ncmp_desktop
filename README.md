@@ -10,6 +10,8 @@ ncmp 是什么：把网易云音乐「音乐合伙人」每日评分任务自动
 
 桌面版提供：可视化扫码/密码登录、实时任务执行视图（对标 Actions live log）、Cookie 到期提醒、参数表单配置、云端执行（关机也跑）。
 
+项目仓库：<https://github.com/longyanbo1224/ncmp>（作者：Galvin）
+
 ## 下载安装
 
 ### 方式一：exe 直接用（推荐）
@@ -54,7 +56,7 @@ ncmp 是什么：把网易云音乐「音乐合伙人」每日评分任务自动
 - 定时自动：到点自动执行（本地常驻 / 云端 / 两者都行）
 - 云端执行：触发 GitHub Actions 跑任务，电脑关机也能跑
 - 邮件通知：任务完成 / Cookie 失效 / 定时任务结果 / 云端执行完成均可发邮件，3 个开关可独立开关（默认全开）。云端执行统一走「定时任务结果」开关
-- 任务取消：点取消即时停任务，UI 区分「✅ 完成 / ⚠️ 用户手动取消 / ❌ 失败」三种状态，不再把取消当完成
+- 任务取消：本地取消即时停任务；云端取消会请求 GitHub 停止远端 run。UI 区分「✅ 完成 / ⚠️ 用户手动取消 / ❌ 失败」三种状态，不再把取消当完成
 - 系统托盘：最小化到托盘，右键菜单快捷操作
 - 单实例锁：重复启动会提示「已在运行」
 - 浅色扁平主题：界面简洁干净
@@ -65,7 +67,7 @@ ncmp 是什么：把网易云音乐「音乐合伙人」每日评分任务自动
 |---|---|
 | 网易云账号 | 手机号、密码 / MD5（可一键转 MD5） |
 | 任务参数 | 评分策略（1-4 分）、等待时间、是否完成所有额外任务 |
-| 邮件通知 | 接收邮箱、SMTP 授权码、服务器端口（可选）、3 个开关（任务完成 / Cookie 失效 / 定时结果，默认全开） |
+| 邮件通知 | 接收邮箱、SMTP 授权码、服务器端口（默认 `smtp.qq.com`）、3 个开关（任务完成 / Cookie 失效 / 定时结果，默认全开） |
 | GitHub Actions | 云端执行配置（见下节，可选） |
 | 定时执行 | 启用开关、触发时间、模式（本地 / 云端 / 两者） |
 
@@ -74,10 +76,12 @@ ncmp 是什么：把网易云音乐「音乐合伙人」每日评分任务自动
 电脑关机时任务也能自动跑——靠 GitHub Actions 云端定时。配置 5 步：
 
 1. fork ncmp 仓库到自己 GitHub 账号
-2. 把 resources/workflow_example.yml 复制到 fork 仓库的 .github/workflows/refresh_cookie.yml
+2. 在设置页点「同步完整 workflow」，把 resources/workflow_example.yml 一键写入 fork 仓库的 .github/workflows/refresh_cookie.yml（也可手动复制）
 3. 生成 GitHub Personal Access Token（头像 → Settings → Developer settings → Personal access tokens → 勾选 repo + workflow）
 4. 桌面程序「设置 → GitHub Actions」组填 4 个字段（鼠标悬停字段有详细获取说明）→ 点「保存」→「测试连接」
 5. 点「同步 Cookie 到 GitHub Secrets」把本地 Cookie 写到仓库（Actions 才能用最新 Cookie）
+
+如果不想让 GitHub 按 cron 自动执行，只保留手动「云端执行」：勾选「关闭云端定时」后再点「同步完整 workflow」。GitHub 原生 cron 是否自动跑，和桌面程序「定时执行」里选本地/云端无关。
 
 配好后：「任务」页点「云端执行」触发，或在「定时执行」组选「云端」模式定时触发。GitHub 仓库的 Actions 页能看到运行记录。云端执行完成后程序会收到邮件通知（受「定时任务结果」开关控制，失败也发）。
 
@@ -105,7 +109,7 @@ Cookie 大约 2 周过期。程序后台会定时验证，失效时弹托盘通�
 
 ### 填了 gh_repo 保存后重启又空了？
 
-之前版本有 bug（已修）：登录前先填 gh_repo 等参数保存，重启后参数读不回来（但 gh_token 还在）。请更新到最新版，重新填一次保存即可。
+已修复：`gh_repo`、`notify_email` 现在和 `gh_token`、`email_password` 一样存系统 keyring；其他普通参数写入用户目录 `~/.ncmp_desktop/setting.json`，重新打包后不会丢。
 
 ### gh_repo 填什么？
 
@@ -121,7 +125,7 @@ Cookie 大约 2 周过期。程序后台会定时验证，失效时弹托盘通�
 
 ## 反馈
 
-问题或建议欢迎提 GitHub Issue。
+问题或建议欢迎提 GitHub Issue：<https://github.com/longyanbo1224/ncmp/issues>。
 
 ## 后续计划
 

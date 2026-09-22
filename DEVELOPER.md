@@ -2,6 +2,8 @@
 
 基于 [ACAne0320/ncmp](https://github.com/ACAne0320/ncmp) 改造的 PySide6 桌面程序，把原本跑在 GitHub Actions 上的"网易云音乐音乐合伙人"任务脚本复用为本地 GUI 应用，支持**本地 / 云端双模式**执行任务、扫码与密码双通道登录、Cookie keyring 加密存储、实时任务可视化、本地定时与云端 Actions 触发、系统托盘常驻。
 
+项目仓库：<https://github.com/longyanbo1224/ncmp>（作者：Galvin），致谢上游 [ACAne0320/ncmp](https://github.com/ACAne0320/ncmp)。
+
 ---
 
 ## 一、项目简介
@@ -16,7 +18,7 @@
 - 实时任务执行可视化（流式日志 + 结构化步骤视图，对标 GitHub Actions live log 体验）
 - 参数表单化配置（13+ 项做成控件，4+1 分组）
 - 本地定时（QTimer 到点自动触发）+ 云端 Actions 触发双执行模式（电脑关机也能跑）
-- Cookie 一键同步到 GitHub Secrets（PyNaCl 加密）+ 云端 cron 远程修改
+- Cookie 一键同步到 GitHub Secrets（PyNaCl 加密）+ 云端 cron 远程修改 + 一键关闭 GitHub 原生定时
 - 品牌图标统一（窗口 / 任务栏 / 托盘 / exe，AppUserModelID）
 
 > 与原 ncmp 的关系：`core/` 层基于 ncmp 源码改造（4 个文件加回调/取消点/keyring，其余直接复用），`app/` 层为全新桌面应用层。原 `core/utils/github.py`（GitHub Secrets 回写）已废弃，改由 `app/cloud/actions_trigger.py` 触发 Actions 代替回写。
@@ -27,7 +29,7 @@
 
 - **扫码登录**：调用 pyncm `LoginQrcodeUnikey` / `GetLoginQRCodeUrl` 生成二维码（qrcode + Pillow 渲染 PNG），`LoginQrcodeCheck` 每 2 秒轮询，状态码 800（过期）/ 801（等待扫描）/ 802（已扫描待确认）/ 803（登录成功）全覆盖，登录成功自动写 keyring。
 - **密码登录**：包装 pyncm `LoginViaCellphone`，支持明文自动转 MD5（推荐仅存 MD5）。失败时区分风控：`code` 命中 502/503 或 `msg` 含「频繁/风险/验证/异常」关键词 → 提示「建议改用扫码登录」；其余（501 密码错误、506 参数错误等）保持普通失败文案。
-- **Cookie keyring 存储**：Windows 走 Credential Manager（DPAPI 加密），`service = "ncmp-desktop"`，替代原明文 `setting.json` 与 GH Secrets 回写，比远端回写更安全；keyring 不可用时降级内存字典（仅测试环境）。
+- **Cookie keyring 存储**：Windows 走 Credential Manager（DPAPI 加密），`service = "ncmp-desktop"`，替代原明文 `setting.json` 与 GH Secrets 回写，比远端回写更安全；`gh_token` / `gh_repo` / `notify_email` / 邮箱授权码等身份配置也统一走 keyring，重新打包不丢。
 - **任务可视化**：
   - 实时日志流——`GuiLogHandler` 挂 `logging` root，把 ncmp 全部日志通过 Qt 信号推到 UI 文本框（对标 Actions live log）；`emit` 内对 `pyncm.*` 的 DEBUG/INFO 噪音做过滤（双保险，避免扫码轮询刷屏）。
   - 结构化步骤视图——`StepList` 按 `running` / `success` / `failed` / `cancelled` / `pending` 五态推进，每步带语义色图标与耗时。
@@ -35,7 +37,7 @@
 - **本地执行**：`TaskWorker`（QThread）调 `core.bot.MusicPartnerBot.run()`，bot 带 `on_step(name, status, elapsed)` / `on_progress(done, total, song_name, score)` / `cancel_event` 三个回调，通过 Qt 信号转发到主线程 UI；`Signer._sleep` 分段循环 `cancel_event.wait(1)`，点取消即时响应。
 - **云端执行**：`ActionsTrigger`（GitHub REST API 封装）触发 `workflow_dispatch` + `CloudWorker`（QThread）每 5 秒轮询 run 状态，电脑关机也跑（Actions 在 GitHub 云端执行，桌面程序只看状态）。复用 `StepList` 展示「触发 / 等待 / 完成」三阶段。
 - **本地定时**：`QTimer`（`setSingleShot(True)`）到点触发 + 60 秒心跳校准（防系统休眠 / 时钟漂移后失准）；模式 `local`（启动 TaskWorker）/ `cloud`（触发 Actions）/ `both`（两者都启动）；到点弹托盘通知「定时任务已启动」。
-- **云端 cron 修改**：调 GitHub Contents API 读 workflow 文件 → 正则替换 `cron:` 行 → base64 编码 PUT 回仓库，远程修改 fork workflow 的 schedule。
+- **云端 cron 修改**：调 GitHub Contents API 读 workflow 文件 → 正则替换 `cron:` 行 → base64 编码 PUT 回仓库，远程修改 fork workflow 的 schedule；「同步完整 workflow」支持勾选「关闭云端定时」后上传注释掉 `schedule` 块的版本。
 - **Cookie 同步 GitHub Secrets**：`ActionsTrigger.set_secret` 用 PyNaCl `SealedBox` 加密 value 后 PUT 到 `/repos/{repo}/actions/secrets/{name}`；`sync_cookies` 一键把本地 `MUSIC_U` + `__csrf` 写入 `Cookie_MUSIC_U` + `Cookie___csrf` 两个 Secret 供 Actions 用。PyNaCl 未装时 deferred import 兜底返回明确错误。
 - **系统托盘 + Windows 通知 + 关闭确认**：`QSystemTrayIcon` 常驻，双击恢复，右键菜单（显示主窗口 / 立即执行 / 检查刷新 Cookie / 关于 / 退出）；通知优先用托盘气泡 `showMessage`，否则降级 plyer / print；`closeEvent` 拦截，按 `AppConfig.close_action`（`None`=每次弹确认框 / `"close"`=直接关 / `"minimize"`=最小化到托盘）决定，可选「不再提示」并持久化。
 - **后台 Cookie 验证**：`ValidateWorker`（QThread）每 6 小时（`validate_interval_sec` 可调）跑 `CookieValidator` 三步验证（Cookie 存在 / 用户信息有效 / 任务权限），失效即托盘通知 + 主窗口 `alert` 闪烁 + 自动跳登录页。失效时按 `notify_on_cookie_expired` 开关（默认 True）调 `NotificationService.send_notification("ncmp Cookie 失效", "Cookie 已失效，请重新登录获取")` 发邮件；邮件发送失败不吞掉 `expired` 信号，UI 仍照常弹托盘通知 + 跳登录页。
@@ -60,7 +62,7 @@
 | GUI 框架 | PySide6>=6.5 | Qt6 Python 原生绑定（LGPL），主窗口 / 页面 / 控件 / 信号槽 / QThread / QTimer / QSystemTrayIcon |
 | 网易云 API | [pyncm](https://github.com/sakarie9/pyncm) 1.8.1（sakarie9 fork） | 扫码登录 `LoginQrcodeUnikey` / `LoginQrcodeCheck` / `GetLoginQRCodeUrl`、密码登录 `LoginViaCellphone`、`Session` / `DumpSessionAsString` |
 | 图标 | qtawesome>=1.3 | FontAwesome 5/6 图标集，导航 / 步骤 / 按钮 / 托盘 / 品牌图标 |
-| 凭据存储 | keyring>=24 | Windows = Credential Manager / DPAPI 加密，存 Cookie / 密码 / 邮箱授权码 / gh_token |
+| 凭据存储 | keyring>=24 | Windows = Credential Manager / DPAPI 加密，存 Cookie / 密码 / 邮箱授权码 / gh_token / notify_email / gh_repo |
 | 加密 | pycryptodome>=3.16 | weapi 评分接口的 AES-CBC 加密（`Signer._aes_encrypt`） |
 | 加密 | PyNaCl>=1.5 | `SealedBox` 加密 GitHub Actions Secrets（deferred import，未装时降级返回错误） |
 | HTTP | requests>=2.28 | 网易云 API 调用、GitHub REST API 调用 |
@@ -147,7 +149,7 @@ e:\Users\yw\Desktop\ncmp\
 │   │   │   ├─ login_page.py          # 账号页：扫码 / 密码 Tab 切换
 │   │   │   ├─ task_page.py           # 任务页：日志流 + 步骤视图 + 本地/云端双执行按钮
 │   │   │   ├─ settings_page.py      # 设置页：5 分组表单 + GitHub 测试连接/cron同步/Cookie同步
-│   │   │   └─ about_page.py          # 关于页：版本 + 核心依赖 + GitHub 链接 + 版权
+│   │   │   └─ about_page.py          # 关于页：版本 + 作者 + 致谢 + 核心依赖 + GitHub 链接
 │   │   ├─ widgets/
 │   │   │   ├─ __init__.py
 │   │   │   ├─ log_view.py            # GuiLogHandler（实时日志）+ LogView（等宽只读）
@@ -176,7 +178,7 @@ e:\Users\yw\Desktop\ncmp\
 | `core/bot.py` | `MusicPartnerBot.__init__` 加 `on_step` / `on_progress` / `cancel_event` 三个回调参数；`run()` 在每个阶段（验证用户/拉取任务/评分基础/额外评分）前后调 `_step(name, status)` 推进步骤视图；`_check_cancel` 在每阶段开始处响应取消；异常分支区分 `CancelledError`（标 cancelled）与通用 Exception（标 failed） | ncmp 原 `run()` 是无回调阻塞流程，UI 无法实时显示进度 / 取消 |
 | `core/signer.py` | `Signer.__init__` 加 `on_progress` / `cancel_event` / `total` / `done_offset`；`sign()` 评分成功后调 `on_progress(done, total, work["name"], score)`；`_sleep` 改成分段循环 `cancel_event.wait(min(1.0, remaining))` 响应取消；新增 `_check_cancel` 在评分入口检查；`CancelledError` 单独 except 透传，不被通用 Exception 吞掉 | ncmp 原无取消点，`time.sleep(delay)` 是主要阻塞点；UI 需 per-song 进度 |
 | `core/tasks/cookie_refresh.py` | `CookieRefreshTask.__init__` 加 `on_cookie_refreshed` 回调；`execute()` 刷新成功后通过回调把新 Cookie 交给上层持久化，删除原 `GitHubService` 远端回写 | 桌面版不碰 GitHub Secrets，改由 `app/cookie_store.CookieStore` 写本地 keyring |
-| `core/utils/config.py` | `Config._load_config` 优先级改为 `keyring > env > json`；新增 `_load_keyring` / `_save_keyring` / `_delete_keyring` / `_has_keyring_cookies`；敏感字段（`Cookie_MUSIC_U` / `Cookie___csrf` / `netease_password` / `netease_md5_password` / `email_password`）映射到 keyring 用户名（`MUSIC_U` / `__csrf` / `netease_password` / `netease_md5_password` / `email_password`） | 让 ncmp 主流程（`bot.run` / `CookieValidator`）能直接从 keyring 拿 Cookie，无需明文 json |
+| `core/utils/config.py` | `Config._load_config` 优先级改为 `keyring > env > json`；新增 `_load_keyring` / `_save_keyring` / `_delete_keyring` / `_has_keyring_data` / `_load_json_config` / `write_file_config`；keyring 映射包含 Cookie、密码、`gh_token`、`notify_email`、`gh_repo`；普通字段写入 `~/.ncmp_desktop/setting.json`，并兼容旧 `config/setting.json` 迁移 | 让 ncmp 主流程能直接从 keyring 拿凭据；普通参数与凭据在重新打包后都保留 |
 
 ### `app/` 各子模块职责
 
@@ -197,7 +199,7 @@ e:\Users\yw\Desktop\ncmp\
 1. **QThread + Signal 线程安全**：所有跨线程数据传递走 `Signal/Slot`（Qt 自动切主线程槽），`GuiLogHandler.emit` 用信号推送日志，无需手动加锁。`logging.Handler` 不是 `QObject`，故 `GuiLogHandler` 内部持有一个 `_LogSignaler`（QObject）承载 `log_signal`，外部照常 `handler.log_signal.connect(...)`。
 2. **GuiLogHandler 日志流**：挂到 `logging` root，把 ncmp 全部日志实时推到 UI 文本框；`emit` 内对 `pyncm.*` 的 DEBUG/INFO 噪音做过滤（双保险），`main.py` 又把 `pyncm` logger 调到 WARNING，避免扫码轮询 `LoginQrcodeCheck` 刷屏。
 3. **三态状态驱动首页**：Dashboard 根据 Cookie 状态切 `unconfigured` / `valid` / `expired` 三态卡片，主按钮随状态变，闭环引导配置→登录→执行。
-4. **keyring 优先级**：`core/utils/config.py` 加载顺序 `keyring > env > json`，敏感字段（Cookie / 密码 / 邮箱授权码）走 keyring，非敏感字段仍兼容 env 与 `config/setting.json`。
+4. **keyring 优先级**：`core/utils/config.py` 加载顺序 `keyring > env > json`，凭据/身份字段走 keyring；普通业务字段写入用户目录 `~/.ncmp_desktop/setting.json`，旧 `config/setting.json` 仍兼容读取。
 5. **双执行模式**：本地 `MusicPartnerBot.run()` 直接执行（带 per-song 进度）；云端 `ActionsTrigger.trigger()` 走 GitHub API（无 per-song 进度，复用 StepList 展示触发/等待/完成三阶段）；两者均通过 QThread 信号反馈到 UI。
 6. **deferred import（延迟导入）**：`PyNaCl`（`actions_trigger.set_secret` 内 `from nacl.public import PublicKey, SealedBox`）、`plyer`（`desktop_notify`）、`keyring`（`cookie_store` / `config`）均为可选依赖，未安装时降级返回明确错误而非崩溃。`PyNaCl` 未装时「同步 Cookie 到 GitHub Secrets」返回 `"PyNaCl 未安装，无法加密 Secret（pip install PyNaCl）"`。
 7. **core 层不依赖 app 层**：core 通过回调（`on_step` / `on_progress` / `cancel_event` / `on_cookie_refreshed`）把结果交给上层，由 `app/` 决定怎么持久化（keyring 还是别的），保持核心层可独立测试与复用。
@@ -222,8 +224,8 @@ python app/main.py
 |---|---|---|
 | 桌面应用自身配置 | Qt `AppConfigLocation` 下 `config.json`（Windows 通常为 `%APPDATA%\ncmp-desktop\config.json`，无 PySide6 时降级到 `~/.ncmp_desktop/config.json`） | `AppConfig`：验证间隔 / 最小化 / 主题 / 关闭行为 / 定时执行 |
 | 任务历史 | 同上目录下 `task_history.json` | `TaskHistory`：最近 20 条任务结果 |
-| 业务非敏感字段 | 项目根 `config/setting.json` | 等待时间 / 评分策略 / SMTP 服务器等（兼容原 ncmp Actions 用户导入导出） |
-| Cookie / 密码 / 邮箱授权码 / gh_token | 系统 keyring，`service="ncmp-desktop"` | key 分别为 `MUSIC_U` / `__csrf` / `netease_password` / `netease_md5_password` / `email_password` / `gh_token` 等 |
+| 业务非敏感字段 | 用户目录 `~/.ncmp_desktop/setting.json` | 等待时间 / 评分策略 / SMTP 服务器 / workflow_name / workflow_branch 等；旧 `config/setting.json` 可兼容迁移 |
+| Cookie / 密码 / 邮箱授权码 / gh_token / notify_email / gh_repo | 系统 keyring，`service="ncmp-desktop"` | key 分别为 `MUSIC_U` / `__csrf` / `netease_password` / `netease_md5_password` / `email_password` / `gh_token` / `notify_email` / `gh_repo` |
 
 ### 设置页 5 分组字段清单
 
@@ -239,7 +241,7 @@ python app/main.py
 | | `score` | QComboBox | 1=1-2分 / 2=2-3分 / 3=3-4分（默认）/ 4=固定4分 |
 | | `full_extra_tasks` | QCheckBox | 勾选完成所有额外任务（忽略每日 7 个上限，默认勾选） |
 | 邮件通知 | `notify_email` / `email_password` | QLineEdit / Password | 接收通知邮箱 / SMTP 授权码（非登录密码） |
-| | `smtp_server` | QComboBox 可编辑 | 预设 Gmail / QQ / 163 / Outlook / 126，可手输 |
+| | `smtp_server` | QComboBox 可编辑 | 预设 QQ / Gmail / 163 / Outlook / 126，默认 `smtp.qq.com`，可手输 |
 | | `smtp_port` | QSpinBox（1-65535） | SSL 默认 465，TLS 为 587 |
 | | `notify_on_task_done` | QCheckBox（默认勾选） | 手动执行任务完成 / 失败 / 取消时发邮件（`TaskWorker._send_email` 按 `notify_context == "task"` 读取） |
 | | `notify_on_cookie_expired` | QCheckBox（默认勾选） | 后台 `ValidateWorker` 发现 Cookie 失效时发邮件（独立于 `expired` 信号，邮件失败不影响 UI 弹托盘通知） |
@@ -248,13 +250,14 @@ python app/main.py
 | | `schedule_time` | QTimeEdit HH:mm | 触发时间，24 小时制，默认 09:00 |
 | | `schedule_mode` | QComboBox | local / cloud / both |
 | GitHub Actions | `gh_token` | QLineEdit Password + eye 切换 | GitHub PAT（需 repo + workflow 权限），仅存 keyring 不上传 |
-| | `gh_repo` | QLineEdit | `owner/repo` 形式 |
+| | `gh_repo` | QLineEdit | `owner/repo` 形式，存 keyring，重新打包不丢 |
 | | `workflow_name` | QLineEdit | 如 `refresh_cookie.yml` |
 | | `workflow_branch` | QLineEdit | 如 `main` |
+| | `gh_disable_schedule` | QCheckBox | 勾选后「同步完整 workflow」会注释 GitHub 原生 `schedule`，仅保留手动触发 |
 
-附工具按钮：`保存` / `测试通知` / `验证 Cookie` / `明文→MD5` / `导入 setting.json` / `导出 setting.json`，以及 GitHub 区的 `测试连接` / `同步 cron` / `同步完整 workflow` / `同步 Cookie 到 GitHub Secrets`。
+附工具按钮：`保存` / `测试通知` / `验证 Cookie` / `明文→MD5` / `导入 setting.json` / `导出 setting.json`，以及 GitHub 区的 `测试连接` / `同步 cron` / `同步完整 workflow` / `同步 Cookie 到 GitHub Secrets`。四个 GitHub 网络操作均走 `_GitHubActionWorker` 后台线程，并显示 indeterminate 进度条。
 
-> 「同步完整 workflow」按钮（`_sync_full_workflow`）：读取打包内 / 源码目录的 `resources/workflow_example.yml` 模板，调 GitHub Contents API PUT 覆盖到 fork 仓库的 `.github/workflows/{workflow_name}`，一键同步最新 workflow 文件（含 `concurrency` / `continue-on-error` / `upload-artifact` 等配置），无需手动复制粘贴。
+> 「同步完整 workflow」按钮（`_sync_full_workflow`）：读取打包内 / 源码目录的 `resources/workflow_example.yml` 模板，调 GitHub Contents API PUT 覆盖到 fork 仓库的 `.github/workflows/{workflow_name}`，一键同步最新 workflow 文件（含 `concurrency` / `continue-on-error` / `upload-artifact` 等配置），无需手动复制粘贴。若勾选「关闭云端定时」，`_set_workflow_schedule()` 会先把 `schedule:` 与 `- cron:` 注释掉，再上传。
 
 ---
 
@@ -269,7 +272,7 @@ python app/main.py
 1. **fork ncmp 仓库**：打开 https://github.com/ACAne0320/ncmp → 右上角 Fork 到自己账号下。
 2. **复制 workflow 文件**：把本项目 `resources/workflow_example.yml` 内容复制到 fork 仓库的 `.github/workflows/refresh_cookie.yml`（文件名可自定义，需与下方 `workflow_name` 字段一致）。
 3. **生成 GitHub PAT**：头像 → Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token (classic) → 勾选 `repo`（全选）+ `workflow` → Generate → 复制 token（只显示一次，丢失需重新生成）。
-4. **填写 4 字段并保存**：在设置页 GitHub Actions 分组填 `gh_token` / `gh_repo` / `workflow_name` / `workflow_branch`，点「保存」。仅 `gh_token` 存 keyring，其余三项存 `setting.json`。
+4. **填写 4 字段并保存**：在设置页 GitHub Actions 分组填 `gh_token` / `gh_repo` / `workflow_name` / `workflow_branch`，点「保存」。`gh_token` / `gh_repo` 存 keyring，`workflow_name` / `workflow_branch` 写入 `~/.ncmp_desktop/setting.json`。
 5. **测试与同步**：点「测试连接」验证 token + repo 可访问（GET `/repos/{repo}`，成功返回仓库 `full_name`）；再点「同步 Cookie 到 GitHub Secrets」把本地 `MUSIC_U` + `__csrf` 用 PyNaCl 加密后写入 `Cookie_MUSIC_U` + `Cookie___csrf` 两个 Secret 供云端 workflow 用。
 
 ### 4 字段 tooltip（鼠标悬停可见）
@@ -294,7 +297,7 @@ python app/main.py
 | `NETEASE_MD5_PASSWORD` | 推荐 | MD5 密码（可用桌面程序「明文→MD5」按钮生成） |
 | `NOTIFY_EMAIL` | 可选 | 接收通知邮箱 |
 | `EMAIL_PASSWORD` | 可选 | SMTP 授权码 |
-| `SMTP_SERVER` | 可选 | 默认 `smtp.gmail.com` |
+| `SMTP_SERVER` | 可选 | 默认 `smtp.qq.com` |
 | `SMTP_PORT` | 可选 | 默认 465 |
 | `WAIT_TIME_MIN` / `WAIT_TIME_MAX` | 可选 | 评分等待秒数，默认 15 / 20 |
 | `FULL_EXTRA_TASKS` | 可选 | `true`/`false`，默认 false |
@@ -319,7 +322,7 @@ python app/main.py
 `refresh_cookie.yml` 支持两种入口：
 
 - `workflow_dispatch`（手动）：桌面程序「云端执行」按钮走这个入口，可选传入 `score`（1/2/3/4）/ `wait_time_min` / `wait_time_max` / `full_extra_tasks` inputs（inputs 优先于 Secrets 默认值）。
-- `schedule`（定时）：默认每天 08:00 UTC（北京时间 16:00）跑一次，可用桌面程序「同步 cron」按钮远程修改，不需要定时就注释掉 `schedule` 块。
+- `schedule`（定时）：默认每天 08:00 UTC（北京时间 16:00）跑一次，可用桌面程序「同步 cron」按钮远程修改；勾选「关闭云端定时」后点「同步完整 workflow」即可注释 `schedule` 块。GitHub 原生 cron 由仓库 workflow 决定，与桌面端 `schedule_mode` 无关。
 
 workflow 还含 `concurrency`（`ncmp-refresh` 组，`cancel-in-progress: false`，避免多 run 并发触发风控）、`continue-on-error: true`（失败不中断，继续上传日志）、`upload-artifact`（`run_output.log`，retention 14 天）。
 
@@ -330,7 +333,7 @@ workflow 还含 `concurrency`（`ncmp-refresh` 组，`cancel-in-progress: false`
 - **「立即执行(本地)」**：启动 `TaskWorker` 调 `bot.run()`，带 per-song 进度（`QProgressBar` + `StepList.addProgress`）。
 - **「云端执行」**：启动 `CloudWorker` 触发 `workflow_dispatch` + 5s 轮询 run 状态，无 per-song 进度（GitHub 不暴露），复用 StepList 展示「触发 / 等待 / 完成」三阶段。
 
-两个按钮互斥（运行中禁用），共用「取消」按钮（本地取消即停 bot，云端取消仅停本地轮询，远端 run 仍继续）。
+两个按钮互斥（运行中禁用），共用「取消」按钮。本地取消即停 bot；云端取消会定位本次 run 并调用 GitHub cancel API，尽量真正停止远端 run。
 
 > 桌面程序的 `gh_token` 仅本地保存到 keyring，绝不上传到任何远端。
 
@@ -345,7 +348,7 @@ workflow 还含 `concurrency`（`ncmp-refresh` 组，`cancel-in-progress: false`
 | 机制 | 触发者 | 电脑关机是否跑 | 修改方式 |
 |---|---|---|---|
 | 本地定时（QTimer） | 桌面程序自身到点触发 | 不跑（要求程序常驻运行） | 设置页「定时执行」分组 |
-| workflow cron（schedule） | GitHub 云端定时触发 | 仍跑（Actions 在 GitHub 跑） | 设置页「云端 cron」按钮远程改 fork 仓库 workflow |
+| workflow cron（schedule） | GitHub 云端定时触发 | 仍跑（Actions 在 GitHub 跑） | 设置页「云端 cron」按钮远程改；「关闭云端定时」+「同步完整 workflow」可注释 schedule |
 
 ### 本地定时（QTimer）
 
@@ -481,13 +484,13 @@ A：网络 / 代理不稳定。`ActionsTrigger.trigger` 走 `requests.post`，�
 A：这是单实例锁机制。`app/main.py` 入口在构造 QApplication 前用 `QLockFile` 加锁，锁文件位于 `%TEMP%\ncmp-desktop.lock`，`setStaleLockTime(0)` 让残留锁立即判 stale（防进程崩溃后锁死）。第二个实例 `tryLock()` 失败 → Windows 上用 `MessageBoxW` 弹「ncmp desktop 已在运行，请勿重复启动。」→ 退出。这是正常行为，避免多开相互覆盖 keyring / 定时器；如需强行启动第二个实例，先删 `%TEMP%\ncmp-desktop.lock` 或重启系统。
 
 **Q：云端执行跳设置页（提示 gh_repo 缺失）？**
-A：已修复。`core/utils/config.py` 的 `Config` 走 keyring 分支时，原逻辑不读 `setting.json` 的非敏感字段，导致 `gh_repo` / `workflow_name` / `workflow_branch` 读不到被判 missing，触发跳设置页引导。已加 `_load_file_non_sensitive()` 方法：keyring 模式下从 `config/setting.json` 兜底读这些非敏感字段（敏感字段 Cookie / 密码 / 邮箱授权码 仍走 keyring 不被覆盖），云端执行能正常拿到仓库信息。
+A：已修复。`core/utils/config.py` 的 `Config` 走 keyring 分支时，原逻辑不读普通配置，导致 `gh_repo` / `workflow_name` / `workflow_branch` 读不到被判 missing，触发跳设置页引导。现在 `gh_repo` 直接走 keyring，`workflow_name` / `workflow_branch` 从 `~/.ncmp_desktop/setting.json` 兜底读取，云端执行能正常拿到仓库信息。
 
 **Q：`gh_repo` 填完整 URL 行不行？**
 A：已兼容。`ActionsTrigger.__init__` 加了 URL 解析逻辑：检测到 `github.com/` 子串时，取其后的 `owner/repo` 部分（取前两段），如 `https://github.com/yourname/ncmp` → `yourname/ncmp`。填 `owner/repo` 或完整 URL 都行。
 
 **Q：填了 `gh_repo` 点保存，重启后回显不到（gh_token 还在）？**
-A：已修复。原 `core/utils/config.py` 的 `_load_from_file` 在 `setting.json` 缺 `Cookie_MUSIC_U` / `Cookie___csrf` 时会 `_validate_config` 抛 `ValueError`，导致 `Config()` 整体抛异常、`SettingsPage.load_from_config` 拿到 `config=None` 全字段回退默认值。但 `settings_page.save()` 按设计就不写 Cookie 到 `setting.json`（Cookie 走 keyring），所以登录前先填 `gh_repo` 保存的场景必然触发这个 bug。修复：`_load_from_file` 不再校验 Cookie，文件缺失或解析失败统一返回空字典 + `_apply_defaults`，`Config()` 永不抛异常。`gh_repo` / `workflow_name` / `workflow_branch` 等非敏感字段无论登录与否都能正确读回。
+A：已修复。`gh_repo`、`notify_email` 已纳入 keyring；普通字段写入用户目录 `~/.ncmp_desktop/setting.json`（兼容旧 `config/setting.json` 迁移），不再依赖打包目录，重新打包后仍能读回。
 
 **Q：打包后点「同步完整 workflow」报 `No such file or directory: '..._internal\app\resources\workflow_example.yml'`？**
 A：已修复。原 `_sync_full_workflow` 用 `os.path.dirname(os.path.dirname(os.path.dirname(__file__)))` 定位模板，打包后 `__file__` 在 `_internal/app/ui/pages/`，向上 3 级到 `_internal/app`，拼 `resources/workflow_example.yml` → `_internal/app/resources/...`（错，应为 `_internal/resources/...`）。修复：路径解析改用 `sys._MEIPASS`（打包）或项目根（开发，向上 4 级），并在 `build.bat` 加 `--add-data "resources\workflow_example.yml;resources"` 把 yml 打进 `_internal/resources/`，开发与打包路径都正确。

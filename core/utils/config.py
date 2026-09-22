@@ -3,6 +3,13 @@ import os
 import random
 from typing import Any, Dict, Optional
 
+
+def _default_config_file() -> str:
+    """业务配置写入用户目录固定路径，重新打包/更换启动目录也不会丢失。"""
+    base = os.path.join(os.path.expanduser("~"), ".ncmp_desktop")
+    os.makedirs(base, exist_ok=True)
+    return os.path.join(base, "setting.json")
+
 # keyring 为可选依赖：未安装时降级到 env/json
 try:
     import keyring
@@ -16,19 +23,22 @@ class Config:
 
     桌面版优先级：keyring > env > json 文件。
     - 敏感字段（Cookie / 密码 / 邮箱授权码）走 keyring（Windows 上即 Credential Manager / DPAPI）
-    - 非敏感字段仍支持 env 与 config/setting.json 兼容
+    - 非敏感字段写入用户目录固定路径，重新打包后仍保留
     - keyring 不可用时自动降级到原 env/json 链路
     """
 
     KEYRING_SERVICE = "ncmp-desktop"
 
-    # 敏感字段在配置字典与 keyring 用户名之间的映射
+    # 走 keyring 持久化的字段：配置键 -> keyring 用户名
     _KEYRING_KEY_MAP = {
         "Cookie_MUSIC_U": "MUSIC_U",
         "Cookie___csrf": "__csrf",
         "netease_password": "netease_password",
         "netease_md5_password": "netease_md5_password",
         "email_password": "email_password",
+        "gh_token": "gh_token",
+        "notify_email": "notify_email",
+        "gh_repo": "gh_repo",
     }
 
     def __init__(self):
@@ -39,11 +49,11 @@ class Config:
     # ------------------------------------------------------------------
     def _load_config(self) -> Dict:
         # 优先级：keyring > env > json 文件
-        if KEYRING_AVAILABLE and self._has_keyring_cookies():
+        if KEYRING_AVAILABLE and self._has_keyring_data():
             config: Dict = {}
             # 敏感字段来自 keyring
             config.update(self._load_keyring())
-            # 非敏感字段从 setting.json 兜底（gh_repo/workflow_name/branch 等）
+            # 非敏感字段从 setting.json 兜底（workflow_name/branch 等）
             config.update(self._load_file_non_sensitive())
             # 非敏感字段仍允许 env 覆盖
             config.update(self._load_env_overrides())
@@ -62,12 +72,13 @@ class Config:
     # ------------------------------------------------------------------
     # keyring 后端
     # ------------------------------------------------------------------
-    def _has_keyring_cookies(self) -> bool:
-        """检查 keyring 中是否已有可用 Cookie。"""
+    def _has_keyring_data(self) -> bool:
+        """检查 keyring 中是否已有任一已保存配置。"""
         try:
-            music_u = keyring.get_password(self.KEYRING_SERVICE, "MUSIC_U")
-            csrf = keyring.get_password(self.KEYRING_SERVICE, "__csrf")
-            return bool(music_u and csrf)
+            for kr_key in self._KEYRING_KEY_MAP.values():
+                if keyring.get_password(self.KEYRING_SERVICE, kr_key):
+                    return True
+            return False
         except Exception:
             return False
 
@@ -109,25 +120,41 @@ class Config:
                 pass
 
     def _load_file_non_sensitive(self) -> Dict:
-        """从 setting.json 读非敏感字段（keyring 模式下兜底 gh_repo 等）。
-
-        敏感字段（Cookie/密码/邮箱授权码）走 keyring，不在此覆盖。
-        路径与 _load_from_file 一致：config/setting.json（相对 cwd）。
-        """
+        """从稳定路径的 setting.json 读非敏感字段，keyring 字段不在此覆盖。"""
         config: Dict = {}
-        config_path = "config/setting.json"
-        try:
-            if os.path.exists(config_path):
-                with open(config_path, "r", encoding="utf-8") as f:
-                    data = json.loads(f.read())
-                sensitive = set(self._KEYRING_KEY_MAP.keys()) | {
-                    "Cookie_MUSIC_U", "Cookie___csrf"}
-                for k, v in data.items():
-                    if k not in sensitive:
-                        config.setdefault(k, v)
-        except Exception:
-            pass
+        data = self._load_json_config()
+        sensitive = set(self._KEYRING_KEY_MAP.keys())
+        for k, v in data.items():
+            if k not in sensitive:
+                config.setdefault(k, v)
         return config
+
+    @classmethod
+    def _load_json_config(cls) -> Dict:
+        """读取稳定路径 setting.json；兼容迁移旧的 config/setting.json。"""
+        paths = (cls.config_file(), os.path.join("config", "setting.json"))
+        for path in paths:
+            try:
+                if os.path.exists(path):
+                    with open(path, "r", encoding="utf-8") as f:
+                        data = json.loads(f.read())
+                    if isinstance(data, dict):
+                        return data
+            except Exception:
+                continue
+        return {}
+
+    @classmethod
+    def config_file(cls) -> str:
+        """返回业务配置的稳定 JSON 路径。"""
+        return _default_config_file()
+
+    @classmethod
+    def write_file_config(cls, config: Dict) -> None:
+        """把非敏感业务配置写入稳定 JSON 路径。"""
+        path = cls.config_file()
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
 
     # ------------------------------------------------------------------
     # env 后端
@@ -195,18 +222,10 @@ class Config:
         """从 setting.json 加载配置。
 
         不再因 Cookie 缺失就抛异常——Cookie 等敏感字段走 keyring，
-        setting.json 只剩非敏感字段（gh_repo/workflow_name/... 等），
-        用户可能在登录前就先填好 GitHub 仓库参数并保存，此时 setting.json
-        无 Cookie，应能正常读回 gh_repo 等非敏感字段。
+        普通字段写入用户目录固定路径，重新打包后仍能读回。
         """
         try:
-            config_path = "config/setting.json"
-            if not os.path.exists(config_path):
-                return {}
-            with open(config_path, "r", encoding="utf-8") as file:
-                config = json.loads(file.read())
-            if not isinstance(config, dict):
-                return {}
+            config = self._load_json_config()
             self._apply_defaults(config)
             return config
         except Exception:
@@ -224,7 +243,7 @@ class Config:
         """统一设置默认值。"""
         config.setdefault("wait_time_min", 15)
         config.setdefault("wait_time_max", 20)
-        config.setdefault("smtp_server", "smtp.gmail.com")
+        config.setdefault("smtp_server", "smtp.qq.com")
         config.setdefault("smtp_port", 465)
         config.setdefault("score", 3)  # 默认使用3-4分策略
         config.setdefault("full_extra_tasks", True)

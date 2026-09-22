@@ -34,17 +34,33 @@ class DailyTask(BaseTask):
         """处理未完成的任务"""
         self.logger.info("开始评分...")
         works = task_data.get("works", [])
-        total = len(works)
+        # 只统计待评分的作品，避免「已评分作品计入 total 但不会推进 done」导致进度条不动
+        pending_works = [task for task in works if not task.get("completed", False)]
+        total = len(pending_works)
+        if total <= 0:
+            self.logger.info("没有待评分作品")
+            return
         signer = Signer(
             self.session, task_data["id"], self.logger, self.config,
             on_progress=self.on_progress,
             cancel_event=self.cancel_event,
             total=total,
         )
+        self._emit_progress(0, total)
 
         for task in works:
             work = task["work"]
-            if task["completed"]:
+            if task.get("completed", False):
                 self.logger.info(f'{work["name"]}「{work["authorName"]}」已有评分：{int(task["score"])}分')
             else:
                 signer.sign(work)
+
+    def _emit_progress(self, done: int, total: int,
+                       song: str = "", score: str = "") -> None:
+        """发出进度回调；回调异常不影响任务主流程。"""
+        if not self.on_progress:
+            return
+        try:
+            self.on_progress(done, total, song, score)
+        except Exception as e:
+            self.logger.debug(f"on_progress 回调异常: {e}")

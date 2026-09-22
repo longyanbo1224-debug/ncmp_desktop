@@ -9,6 +9,7 @@ closeEvent 拦截：按 ``AppConfig.close_action`` 决定直接关或最小化�
 - 到点前发托盘通知「定时任务已启动」，本地完成由 _on_task_finished_from_tray 通知，
   云端完成由 TaskPage.cloud_finished_sig → _on_schedule_cloud_finished 通知。
 """
+import math
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
@@ -282,7 +283,11 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _seconds_until_next(hhmm: str) -> int:
-        """到下一次 (HH:MM) 壁钟时刻（今天已过则取明天）的秒数。"""
+        """到下一次 (HH:MM) 壁钟时刻（今天已过则取明天）的秒数。
+
+        使用向上取整，避免「距离目标不足 1 秒」被截断为 0，
+        导致 QTimer 立即触发并在整点前重复执行定时任务。
+        """
         try:
             h_str, m_str = (hhmm or "09:00").split(":")
             h, m = int(h_str), int(m_str)
@@ -292,7 +297,7 @@ class MainWindow(QMainWindow):
         target = now.replace(hour=h, minute=m, second=0, microsecond=0)
         if target <= now:
             target = target + timedelta(days=1)
-        return max(0, int((target - now).total_seconds()))
+        return max(0, math.ceil((target - now).total_seconds()))
 
     def _on_schedule_tick(self) -> None:
         """到点触发：按 schedule_mode 启动 local/cloud/both 任务。
@@ -322,7 +327,14 @@ class MainWindow(QMainWindow):
 
     def _on_schedule_cloud_finished(self, ok: bool, msg: str) -> None:
         """云端 worker 完成 → 托盘通知（定时 + 手动都走这条）。"""
-        text = "云端任务完成：成功" if ok else f"云端任务完成：失败（{msg}）"
+        if ok:
+            text = "云端任务完成：成功"
+        elif msg.startswith("已取消"):
+            text = "云端任务已取消"
+        elif msg.startswith("取消远端失败"):
+            text = f"云端任务取消失败（{msg}）"
+        else:
+            text = f"云端任务完成：失败（{msg}）"
         self._notify.notify("ncmp 定时任务", text)
         self._dashboard.set_last_task_summary(text)
 

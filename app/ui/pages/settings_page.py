@@ -4,7 +4,7 @@
     Cookie_MUSIC_U、Cookie___csrf、netease_phone、netease_password、
     netease_md5_password、wait_time_min、wait_time_max、score、
     full_extra_tasks、notify_email、email_password、smtp_server、smtp_port、
-    gh_token（keyring）、gh_repo、workflow_name、workflow_branch
+    gh_token / gh_repo / notify_email（keyring）、workflow_name、workflow_branch
 
 定时执行字段（AppConfig，不入 setting.json）：
     schedule_enabled、schedule_time（HH:MM）、schedule_mode（local/cloud/both）
@@ -21,11 +21,11 @@ import hashlib
 import json
 from typing import Any, Dict, Optional
 
-from PySide6.QtCore import Qt, QTime, Signal
+from PySide6.QtCore import Qt, QThread, QTime, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
-    QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QSpinBox,
-    QTimeEdit, QVBoxLayout, QWidget,
+    QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QScrollArea,
+    QSpinBox, QTimeEdit, QVBoxLayout, QWidget,
 )
 
 from app.app_config import AppConfig
@@ -61,6 +61,7 @@ SETTINGS_FIELDS = (
     "gh_repo",
     "workflow_name",
     "workflow_branch",
+    "gh_disable_schedule",
 )
 
 # 首次使用 / Config 加载失败时的默认值（与 core.utils.config._apply_defaults 对齐）
@@ -76,7 +77,7 @@ DEFAULTS: Dict[str, Any] = {
     "full_extra_tasks": True,
     "notify_email": "",
     "email_password": "",
-    "smtp_server": "smtp.gmail.com",
+    "smtp_server": "smtp.qq.com",
     "smtp_port": 465,
     "notify_on_task_done": True,
     "notify_on_cookie_expired": True,
@@ -85,6 +86,7 @@ DEFAULTS: Dict[str, Any] = {
     "gh_repo": "",
     "workflow_name": "refresh_cookie.yml",
     "workflow_branch": "main",
+    "gh_disable_schedule": False,
 }
 
 # keyring 服务名（与 CookieStore / Config 对齐，gh_token 用同一服务下的独立 key）
@@ -133,7 +135,7 @@ FIELD_HINTS: Dict[str, Dict[str, str]] = {
         "tooltip": "SMTP 授权码，如 Gmail 的「应用专用密码」、QQ/163 邮箱的授权码。",
     },
     "smtp_server": {
-        "tooltip": "SMTP 服务器地址，预设 Gmail/QQ/163，也可手动输入其他。",
+        "tooltip": "SMTP 服务器地址，预设 QQ/Gmail/163，也可手动输入其他。",
     },
     "smtp_port": {
         "tooltip": "SMTP 端口，SSL 通常 465（默认），TLS 为 587。",
@@ -201,6 +203,23 @@ FIELD_HINTS: Dict[str, Dict[str, str]] = {
 }
 
 
+class _GitHubActionWorker(QThread):
+    """后台执行一次 GitHub API 调用，避免网络等待卡住 UI。"""
+
+    result_ready = Signal(bool, str)
+
+    def __init__(self, fn, parent=None) -> None:
+        super().__init__(parent)
+        self._fn = fn
+
+    def run(self) -> None:
+        try:
+            ok, msg = self._fn()
+        except Exception as e:
+            ok, msg = False, f"异常：{e}"
+        self.result_ready.emit(ok, msg)
+
+
 class SettingsPage(QWidget):
     """参数配置表单。"""
 
@@ -210,6 +229,7 @@ class SettingsPage(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._controls: Dict[str, Any] = {}
+        self._gh_worker: Optional[_GitHubActionWorker] = None
         # 业务字段走 Config；定时字段走 AppConfig（独立文件，不入 setting.json）
         self._app_config = AppConfig()
         self._build_ui()
@@ -379,8 +399,8 @@ class SettingsPage(QWidget):
         # smtp_server（可编辑下拉，预设常用 SMTP 服务器）
         smtp_server = QComboBox()
         smtp_server.setEditable(True)
-        smtp_server.addItem("smtp.gmail.com")
         smtp_server.addItem("smtp.qq.com")
+        smtp_server.addItem("smtp.gmail.com")
         smtp_server.addItem("smtp.163.com")
         smtp_server.addItem("smtp.outlook.com")
         smtp_server.addItem("smtp.126.com")
@@ -500,6 +520,7 @@ class SettingsPage(QWidget):
         test_btn = QPushButton("测试连接")
         test_btn.setObjectName("secondaryButton")
         test_btn.clicked.connect(self._test_github_connection)
+        self._gh_test_btn = test_btn
         test_row.addWidget(test_btn)
         test_row.addStretch(1)
         self._gh_result_label = QLabel("")
@@ -525,6 +546,7 @@ class SettingsPage(QWidget):
         sync_cron_btn = QPushButton("同步 cron")
         sync_cron_btn.setObjectName("secondaryButton")
         sync_cron_btn.clicked.connect(self._sync_cron_to_workflow)
+        self._gh_cron_btn = sync_cron_btn
         cron_row.addWidget(sync_cron_btn)
         group_v.addLayout(cron_row)
 
@@ -538,6 +560,7 @@ class SettingsPage(QWidget):
             "把本地 CookieStore 中的 MUSIC_U 与 __csrf 用 PyNaCl 加密后写入 GitHub Actions Secrets\n"
             "（Cookie_MUSIC_U、Cookie___csrf），供云端 workflow 使用。需先填 gh_token/gh_repo。")
         sync_cookie_btn.clicked.connect(self._sync_cookies_to_github)
+        self._gh_cookie_btn = sync_cookie_btn
         cookie_row.addWidget(sync_cookie_btn)
         cookie_row.addStretch(1)
         group_v.addLayout(cookie_row)
@@ -554,9 +577,37 @@ class SettingsPage(QWidget):
             "该模板跑 python main.py 评分任务 + 用 Secrets 里的 Cookie，\n"
             "不依赖密码登录刷 Cookie（避免风控）。需先填 gh_token/gh_repo/workflow_name/branch。")
         sync_wf_btn.clicked.connect(self._sync_full_workflow)
+        self._gh_wf_btn = sync_wf_btn
         wf_row.addWidget(sync_wf_btn)
         wf_row.addStretch(1)
         group_v.addLayout(wf_row)
+
+        # 云端定时开关：勾选后，「同步完整 workflow」会上传注释掉 GitHub 原生 cron 的版本
+        schedule_switch_row = QHBoxLayout()
+        schedule_switch_row.setSpacing(8)
+        self._gh_disable_schedule_check = QCheckBox(
+            "关闭云端定时（同步时注释 GitHub 原生 cron）")
+        self._gh_disable_schedule_check.setToolTip(
+            "勾选后点「同步完整 workflow」，会把 workflow 的 schedule 块注释掉。\n"
+            "GitHub 将不再按 cron 自动执行，但「云端执行」手动触发仍可用。")
+        self._controls["gh_disable_schedule"] = self._gh_disable_schedule_check
+        schedule_switch_row.addWidget(self._gh_disable_schedule_check)
+        schedule_switch_row.addStretch(1)
+        group_v.addLayout(schedule_switch_row)
+
+        # GitHub 操作按钮的异步请求加载状态：indeterminate 进度条 + 文案
+        busy_row = QHBoxLayout()
+        busy_row.setSpacing(8)
+        self._gh_busy_bar = QProgressBar()
+        self._gh_busy_bar.setRange(0, 0)
+        self._gh_busy_bar.setTextVisible(False)
+        self._gh_busy_bar.setFixedWidth(140)
+        self._gh_busy_bar.hide()
+        busy_row.addWidget(self._gh_busy_bar)
+        self._gh_busy_label = QLabel("")
+        self._gh_busy_label.setObjectName("captionText")
+        busy_row.addWidget(self._gh_busy_label, 1)
+        group_v.addLayout(busy_row)
 
     def _apply_hint(self, ctrl: Any, key: str) -> None:
         """给控件套上 placeholder 与 tooltip（如有）。"""
@@ -676,6 +727,8 @@ class SettingsPage(QWidget):
         self._set_control("gh_repo", _val("gh_repo"))
         self._set_control("workflow_name", _val("workflow_name"))
         self._set_control("workflow_branch", _val("workflow_branch"))
+        self._set_control("gh_disable_schedule",
+                          bool(_val("gh_disable_schedule")))
 
     def _set_control(self, key: str, value: Any) -> None:
         ctrl = self._controls.get(key)
@@ -722,29 +775,35 @@ class SettingsPage(QWidget):
             store = CookieStore()
             if data.get("Cookie_MUSIC_U") and data.get("Cookie___csrf"):
                 store.save(data["Cookie_MUSIC_U"], data["Cookie___csrf"])
-            # netease_password / netease_md5_password / email_password / gh_token
-            # 也走 keyring（gh_token 与 Cookie 同 service，key 区分为 "gh_token"）
+            # 凭据/身份字段统一走 keyring，与打包目录无关
             try:
                 import keyring
                 if keyring is not None:
-                    for k in ("netease_password", "netease_md5_password",
-                              "email_password", "gh_token"):
-                        v = data.get(k)
+                    for cfg_key, kr_key in Config._KEYRING_KEY_MAP.items():
+                        if cfg_key in ("Cookie_MUSIC_U", "Cookie___csrf"):
+                            continue
+                        v = data.get(cfg_key)
                         if v:
-                            keyring.set_password(_KEYRING_SERVICE, k, str(v))
+                            try:
+                                keyring.set_password(
+                                    _KEYRING_SERVICE, kr_key, str(v))
+                            except Exception:
+                                pass
+                        else:
+                            try:
+                                keyring.delete_password(_KEYRING_SERVICE, kr_key)
+                            except Exception:
+                                pass
             except Exception:
                 pass
         except Exception as e:
             QMessageBox.warning(self, "保存失败", str(e))
             return
-        # 非敏感字段回写 config/setting.json（gh_token 不入 json，仅 keyring）
+        # 非敏感字段写入用户目录固定路径；keyring 字段不落 JSON
         try:
-            import os
-            os.makedirs("config", exist_ok=True)
             export = {k: v for k, v in data.items()
-                      if k not in ("Cookie_MUSIC_U", "Cookie___csrf", "gh_token")}
-            with open("config/setting.json", "w", encoding="utf-8") as f:
-                json.dump(export, f, ensure_ascii=False, indent=2)
+                      if k not in Config._KEYRING_KEY_MAP}
+            Config.write_file_config(export)
         except Exception as e:
             QMessageBox.warning(self, "部分保存失败",
                                 f"keyring 已写入，但 setting.json 写入失败：{e}")
@@ -806,11 +865,42 @@ class SettingsPage(QWidget):
         # objectName 改变后需重新 polish 才能套上新样式
         self._gh_result_label.style().polish(self._gh_result_label)
 
+    def _set_gh_busy(self, busy: bool) -> None:
+        """切换 GitHub 区加载状态：显示/隐藏进度条并禁用相关按钮。"""
+        for btn in (self._gh_test_btn, self._gh_cron_btn,
+                    self._gh_cookie_btn, self._gh_wf_btn):
+            btn.setEnabled(not busy)
+        if busy:
+            self._gh_busy_bar.show()
+        else:
+            self._gh_busy_bar.hide()
+            self._gh_busy_label.setText("")
+
+    def _run_gh_async(self, message: str, fn) -> None:
+        """启动后台 GitHub API 调用；请求期间显示加载状态。"""
+        if self._gh_worker is not None and self._gh_worker.isRunning():
+            return
+        self._set_gh_busy(True)
+        self._gh_busy_label.setText(message)
+        self._gh_result_label.setObjectName("captionText")
+        self._gh_result_label.setText("")
+        self._gh_result_label.style().polish(self._gh_result_label)
+        worker = _GitHubActionWorker(fn, parent=self)
+        worker.result_ready.connect(self._on_gh_async_finished)
+        self._gh_worker = worker
+        worker.start()
+
+    def _on_gh_async_finished(self, ok: bool, msg: str) -> None:
+        """GitHub API 后台调用结束：收起加载状态并回显结果。"""
+        self._set_gh_busy(False)
+        self._set_gh_result(ok, msg)
+
     def _sync_full_workflow(self) -> None:
         """把 resources/workflow_example.yml 全文 PUT 到 fork 仓库覆盖。
 
         用模板内容（跑 main.py 评分 + 用 Secrets Cookie，不密码登录刷 Cookie）
         覆盖 fork 仓库的 .github/workflows/{workflow_name}，避免用户手动复制。
+        若勾选「关闭云端定时」，会先注释掉 workflow 的 schedule 块。
         """
         import os
         import sys
@@ -832,15 +922,37 @@ class SettingsPage(QWidget):
         except Exception as e:
             self._set_gh_result(False, f"读取本地 workflow 模板失败：{e}")
             return
-        self._set_gh_result(True, "正在同步完整 workflow 到仓库…")
-        try:
-            ok, msg = ActionsTrigger(token, repo).sync_full_workflow(workflow, branch, content)
-        except Exception as e:
-            ok, msg = False, f"异常：{e}"
-        self._set_gh_result(ok, msg)
+        disable_schedule = self._gh_disable_schedule_check.isChecked()
+        content = self._set_workflow_schedule(content, not disable_schedule)
+        message = ("正在同步完整 workflow（已关闭云端定时）…"
+                   if disable_schedule
+                   else "正在同步完整 workflow 到仓库…")
+        self._run_gh_async(
+            message,
+            lambda: ActionsTrigger(token, repo).sync_full_workflow(
+                workflow, branch, content),
+        )
+
+    @staticmethod
+    def _set_workflow_schedule(content: str, enabled: bool) -> str:
+        """注释/恢复 workflow 里的 GitHub 原生 schedule 块。"""
+        out_lines = []
+        for raw in content.splitlines(keepends=True):
+            line = raw.rstrip("\r\n")
+            newline = raw[len(line):]
+            if line == "  schedule:":
+                line = "  schedule:" if enabled else "  # schedule:"
+            elif line.startswith("    - cron:"):
+                line = line if enabled else "    # " + line[4:]
+            out_lines.append(line + newline)
+        return "".join(out_lines)
 
     def _sync_cron_to_workflow(self) -> None:
         """读 cron 表达式 + workflow 配置，调 ActionsTrigger.update_workflow_cron。"""
+        if self._gh_disable_schedule_check.isChecked():
+            self._set_gh_result(
+                False, "已关闭云端定时，请先取消勾选后再同步 cron")
+            return
         token, repo, workflow, branch = self._read_gh_form()
         # 读北京时间 HH:MM，转 UTC cron（GitHub Actions 用 UTC）
         _t = self._gh_cron_edit.time()
@@ -852,12 +964,11 @@ class SettingsPage(QWidget):
         if not cron:
             self._set_gh_result(False, "请填写云端 cron 表达式（如 0 9 * * *）")
             return
-        self._set_gh_result(True, "正在同步 cron 到 workflow…")
-        try:
-            ok, msg = ActionsTrigger(token, repo).update_workflow_cron(workflow, branch, cron)
-        except Exception as e:
-            ok, msg = False, f"异常：{e}"
-        self._set_gh_result(ok, msg)
+        self._run_gh_async(
+            "正在同步 cron 到 workflow…",
+            lambda: ActionsTrigger(token, repo).update_workflow_cron(
+                workflow, branch, cron),
+        )
 
     def _sync_cookies_to_github(self) -> None:
         """从 CookieStore 读 MUSIC_U + __csrf，调 ActionsTrigger.sync_cookies 写入 Secrets。"""
@@ -873,12 +984,10 @@ class SettingsPage(QWidget):
         if not (music_u and csrf):
             self._set_gh_result(False, "本地无 Cookie，请先登录后再同步")
             return
-        self._set_gh_result(True, "正在加密并同步 Cookie 到 GitHub Secrets…")
-        try:
-            ok, msg = ActionsTrigger(token, repo).sync_cookies(music_u, csrf)
-        except Exception as e:
-            ok, msg = False, f"异常：{e}"
-        self._set_gh_result(ok, msg)
+        self._run_gh_async(
+            "正在加密并同步 Cookie 到 GitHub Secrets…",
+            lambda: ActionsTrigger(token, repo).sync_cookies(music_u, csrf),
+        )
 
     def test_notification(self) -> None:
         try:
@@ -930,21 +1039,10 @@ class SettingsPage(QWidget):
             self._gh_result_label.setText("❌ 请先填写 gh_token 与 gh_repo")
             self._gh_result_label.style().polish(self._gh_result_label)
             return
-        self._gh_result_label.setObjectName("captionText")
-        self._gh_result_label.setText("正在测试连接…")
-        self._gh_result_label.style().polish(self._gh_result_label)
-        try:
-            ok, msg = ActionsTrigger(token, repo).test_auth()
-        except Exception as e:
-            ok, msg = False, f"异常：{e}"
-        if ok:
-            self._gh_result_label.setObjectName("successText")
-            self._gh_result_label.setText(f"✅ {msg}")
-        else:
-            self._gh_result_label.setObjectName("dangerText")
-            self._gh_result_label.setText(f"❌ {msg}")
-        # objectName 改变后需重新 polish 才能套上新样式
-        self._gh_result_label.style().polish(self._gh_result_label)
+        self._run_gh_async(
+            "正在测试连接…",
+            lambda: ActionsTrigger(token, repo).test_auth(),
+        )
 
     def _convert_to_md5(self) -> None:
         """「明文 → MD5」按钮：取明文字段，hash 后填入 MD5 字段。"""

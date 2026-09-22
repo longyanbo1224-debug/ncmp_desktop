@@ -22,7 +22,7 @@ class NotificationService:
             self.logger.warning("未配置邮箱密码，无法发送通知")
             return False
 
-        smtp_server = self.config.get("smtp_server", "smtp.gmail.com")
+        smtp_server = self.config.get("smtp_server", "smtp.qq.com")
         smtp_ssl_port = int(self.config.get("smtp_port", 465))
         smtp_tls_port = 587
         # 创建邮件

@@ -58,7 +58,10 @@ on:
         type: choice
         options: ['true', 'false']
   # 定时触发：每天 08:00 UTC（北京时间 16:00）跑一次
-  # 桌面程序「设置 → 定时执行 → 云端 cron」可远程修改此 cron 表达式
+  # 桌面程序「设置 → GitHub Actions → 云端 cron」可远程修改此 cron 表达式
+  # 注意二选一，避免与桌面「设置 → 定时执行 → 模式=云端/both」重复触发：
+  #   - 只用 GitHub 原生定时：保留本 schedule 块
+  #   - 只用桌面定时触发云端：注释掉整个 schedule 块
   # 不需要定时则注释掉整个 schedule 块
   schedule:
     - cron: '0 8 * * *'

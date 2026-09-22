@@ -1,4 +1,4 @@
-"""关于页：应用名 / 版本号 / 核心依赖 / 说明 / GitHub 链接 / 版权。
+"""关于页：应用名 / 版本号 / 作者 / 致谢 / 核心依赖 / 说明 / GitHub 链接 / 版权。
 
 版本号硬编码在模块常量 ``__version__``（AppConfig 无版本字段）。
 核心依赖版本在运行时按需 import 获取，缺失则标记「未安装」。
@@ -13,8 +13,11 @@ APP_DESCRIPTION = (
     "基于 ACAne0320/ncmp 改造的桌面程序。本地执行音乐合伙人任务，"
     "支持扫码/密码登录、任务可视化、GitHub Actions 云端触发。"
 )
-GITHUB_URL = "https://github.com/ACAne0320/ncmp"
-GITHUB_LABEL = "ACAne0320/ncmp"
+AUTHOR = "Galvin"
+GITHUB_URL = "https://github.com/longyanbo1224/ncmp"
+GITHUB_LABEL = "longyanbo1224/ncmp"
+UPSTREAM_URL = "https://github.com/ACAne0320/ncmp"
+UPSTREAM_LABEL = "ACAne0320/ncmp"
 LICENSE = "MIT License"
 
 
@@ -40,6 +43,17 @@ class AboutPage(QWidget):
         version_label = QLabel(f"版本 {__version__}")
         version_label.setObjectName("subtitle")
         layout.addWidget(version_label)
+
+        author_label = QLabel(f"作者：{AUTHOR}")
+        author_label.setObjectName("captionText")
+        layout.addWidget(author_label)
+
+        upstream_label = QLabel(
+            f'致谢：<a href="{UPSTREAM_URL}">{UPSTREAM_LABEL}</a>')
+        upstream_label.setObjectName("captionText")
+        upstream_label.setOpenExternalLinks(True)
+        upstream_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        layout.addWidget(upstream_label)
 
         deps_label = QLabel(f"核心依赖：{self._deps_text()}")
         deps_label.setObjectName("captionText")

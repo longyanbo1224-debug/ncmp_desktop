@@ -2,6 +2,7 @@ import json
 import random
 import time
 from typing import Dict, List, Tuple, Optional
+from core import CancelledError
 from ..signer import Signer
 class ExtraTask:
     def __init__(self, session, logger, config, on_progress=None, cancel_event=None):
@@ -34,6 +35,12 @@ class ExtraTask:
             # 记录本次成功评分的数量
             success_count = 0
             remaining_tasks = total_tasks - completed_count
+            # 先给一个 0/total，进度条在等待第一首歌时就能显示任务总量
+            if self.on_progress:
+                try:
+                    self.on_progress(0, remaining_tasks, "", "")
+                except Exception as e:
+                    self.logger.warning(f"on_progress 回调异常: {e}")
 
             for task in extra_tasks:
                 if success_count >= remaining_tasks:
@@ -43,7 +50,7 @@ class ExtraTask:
                 # 任务循环开始处响应取消
                 if self.cancel_event is not None and self.cancel_event.is_set():
                     self.logger.info("用户取消任务，停止额外评分")
-                    break
+                    raise CancelledError("用户取消任务，停止额外评分")
 
                 try:
                     work_name = task['work']['name']
@@ -62,6 +69,9 @@ class ExtraTask:
                         self.logger.info(f"等待 {delay:.1f} 秒后继续...")
                         time.sleep(delay)
 
+                except CancelledError:
+                    # 取消异常必须向上传递，不能按单首失败吞掉
+                    raise
                 except Exception as e:
                     self.logger.warning(f"处理歌曲 {task['work']['name']} 失败，尝试下一个: {str(e)}")
                     continue
@@ -69,6 +79,8 @@ class ExtraTask:
 
             if success_count < remaining_tasks:
                 self.logger.warning(f"未能完成所有额外评分任务，仅完成 {success_count}/{remaining_tasks} 个")
+        except CancelledError:
+            raise
         except Exception as e:
             self.logger.error(f"处理额外评分任务时出错: {str(e)}")
             raise
@@ -107,6 +119,9 @@ class ExtraTask:
                 done_offset=done_offset,
             )
             signer.sign(work, is_extra=True)
+        except CancelledError:
+            # 用户在评分入口处取消，直接透传，不按失败记录日志
+            raise
         except Exception as e:
             self.logger.error(f"处理额外任务失败 - {work['name']}: {str(e)}")
             raise

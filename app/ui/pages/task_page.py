@@ -34,6 +34,14 @@ from app.workers.task_worker import TaskWorker
 # keyring 服务名（与 CookieStore / Config 对齐，gh_token 同 service 不同 key）
 _KEYRING_SERVICE = "ncmp-desktop"
 
+# 本地任务阶段 → 粗粒度进度百分比（歌曲级 on_progress 会在阶段内继续细化）
+_LOCAL_STEP_PROGRESS = {
+    "验证用户信息": 5,
+    "拉取每日任务": 15,
+    "评分基础任务": 35,
+    "额外评分任务": 75,
+}
+
 
 class TaskPage(QWidget):
     """任务执行页。"""
@@ -195,6 +203,7 @@ class TaskPage(QWidget):
             try:
                 self._cloud_worker.step.disconnect()
                 self._cloud_worker.log.disconnect()
+                self._cloud_worker.progress.disconnect()
                 self._cloud_worker.finished_sig.disconnect()
             except Exception:
                 pass
@@ -204,6 +213,7 @@ class TaskPage(QWidget):
         )
         self._cloud_worker.step.connect(self._on_step)
         self._cloud_worker.log.connect(self._on_cloud_log)
+        self._cloud_worker.progress.connect(self._on_cloud_progress)
         self._cloud_worker.finished_sig.connect(self._on_cloud_finished)
         self._step_list.clear()
         self._progress.setValue(0)
@@ -218,7 +228,7 @@ class TaskPage(QWidget):
             self._worker.cancel()
             return
         if self._cloud_worker is not None and self._cloud_worker.isRunning():
-            self._status_label.setText("正在取消云端轮询…")
+            self._status_label.setText("正在取消云端任务…")
             self._cloud_worker.cancel()
 
     # ------------------------------------------------------------------
@@ -296,12 +306,27 @@ class TaskPage(QWidget):
     # ------------------------------------------------------------------
     def _on_step(self, name: str, status: str, elapsed: float) -> None:
         self._step_list.updateStep(name, status, elapsed)
+        base = _LOCAL_STEP_PROGRESS.get(name)
+        if base is not None and status in ("running", "success"):
+            self._update_progress(base)
 
     def _on_progress(self, done: int, total: int, song: str, score: str) -> None:
-        self._step_list.addProgress(done, total, song, score)
+        # 初始进度（song/score 为空）只刷新进度条，不在步骤树里挂空行
+        if song or score:
+            self._step_list.addProgress(done, total, song, score)
         if total and total > 0:
             pct = int(done * 100 / total)
-            self._progress.setValue(max(0, min(100, pct)))
+            self._update_progress(pct)
+
+    def _on_cloud_progress(self, pct: int) -> None:
+        """云端阶段进度（0-100）。"""
+        self._update_progress(pct)
+
+    def _update_progress(self, pct: int) -> None:
+        """单调推进进度条，避免阶段粗粒度进度回退覆盖更精确的歌曲进度。"""
+        pct = max(0, min(100, int(pct)))
+        if pct >= self._progress.value():
+            self._progress.setValue(pct)
 
     def _on_finished(self, ok: bool, status: str) -> None:
         """本地 worker 完成：按 status 显示 success/cancelled/failed 文案。
@@ -360,6 +385,22 @@ class TaskPage(QWidget):
             if msg:
                 # 追加 html_url（QPlainTextEdit 不渲染可点链接，但可复制）
                 self._log_view.appendLog(f"Run 详情（可复制）：{msg}")
+        elif msg.startswith("已取消"):
+            summary = "云端任务已取消"
+            self._status_label.setText("⚠️ 已取消云端任务")
+            self._status_label.setObjectName("warningText")
+            try:
+                self._status_label.style().polish(self._status_label)
+            except Exception:
+                pass
+        elif msg.startswith("取消远端失败"):
+            summary = f"云端任务取消失败（{msg}）"
+            self._status_label.setText(f"⚠️ {msg}")
+            self._status_label.setObjectName("warningText")
+            try:
+                self._status_label.style().polish(self._status_label)
+            except Exception:
+                pass
         else:
             summary = f"云端执行未完成（{msg}）"
             self._status_label.setText(summary)
