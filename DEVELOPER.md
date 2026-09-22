@@ -2,7 +2,7 @@
 
 基于 [ACAne0320/ncmp](https://github.com/ACAne0320/ncmp) 改造的 PySide6 桌面程序，把原本跑在 GitHub Actions 上的"网易云音乐音乐合伙人"任务脚本复用为本地 GUI 应用，支持**本地 / 云端双模式**执行任务、扫码与密码双通道登录、Cookie keyring 加密存储、实时任务可视化、本地定时与云端 Actions 触发、系统托盘常驻。
 
-项目仓库：<https://github.com/longyanbo1224/ncmp>（作者：Galvin），致谢上游 [ACAne0320/ncmp](https://github.com/ACAne0320/ncmp)。
+项目仓库（上游）：[ACAne0320/ncmp](https://github.com/ACAne0320/ncmp)（作者：ACAne0320），本项目为其 fork 改造的桌面版。
 
 ---
 
