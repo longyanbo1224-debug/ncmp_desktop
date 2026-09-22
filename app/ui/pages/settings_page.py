@@ -62,6 +62,7 @@ SETTINGS_FIELDS = (
     "workflow_name",
     "workflow_branch",
     "gh_disable_schedule",
+    "gh_random_delay_minutes",
 )
 
 # 首次使用 / Config 加载失败时的默认值（与 core.utils.config._apply_defaults 对齐）
@@ -87,6 +88,7 @@ DEFAULTS: Dict[str, Any] = {
     "workflow_name": "refresh_cookie.yml",
     "workflow_branch": "main",
     "gh_disable_schedule": False,
+    "gh_random_delay_minutes": 0,
 }
 
 # keyring 服务名（与 CookieStore / Config 对齐，gh_token 用同一服务下的独立 key）
@@ -574,6 +576,7 @@ class SettingsPage(QWidget):
         sync_wf_btn.setToolTip(
             "把桌面程序自带的 workflow 模板（resources/workflow_example.yml）\n"
             "完整覆盖到 fork 仓库的 .github/workflows/{workflow_name}。\n"
+            "同步时会把「云端 cron」时间（北京时间）一并写入 schedule。\n"
             "该模板跑 python main.py 评分任务 + 用 Secrets 里的 Cookie，\n"
             "不依赖密码登录刷 Cookie（避免风控）。需先填 gh_token/gh_repo/workflow_name/branch。")
         sync_wf_btn.clicked.connect(self._sync_full_workflow)
@@ -594,6 +597,24 @@ class SettingsPage(QWidget):
         schedule_switch_row.addWidget(self._gh_disable_schedule_check)
         schedule_switch_row.addStretch(1)
         group_v.addLayout(schedule_switch_row)
+
+        # 随机延迟启动：0=不启用；N=「同步完整 workflow」时把 0–N 分钟随机延迟写入 workflow
+        delay_row = QHBoxLayout()
+        delay_row.setSpacing(8)
+        delay_label = QLabel("随机延迟启动")
+        delay_label.setToolTip(
+            "0=不启用。设为 N 分钟后，点「同步完整 workflow」会在 workflow 里写入 0–N 分钟随机延迟，\n"
+            "用于错开每日固定时间，降低风控风险。")
+        delay_row.addWidget(delay_label)
+        self._gh_random_delay_spin = QSpinBox()
+        self._gh_random_delay_spin.setRange(0, 30)
+        self._gh_random_delay_spin.setSuffix(" 分钟")
+        self._gh_random_delay_spin.setSpecialValueText("不启用")
+        self._gh_random_delay_spin.setToolTip(
+            "0=不启用；N=0–N 分钟随机延迟（同步 workflow 时写入）。")
+        self._controls["gh_random_delay_minutes"] = self._gh_random_delay_spin
+        delay_row.addWidget(self._gh_random_delay_spin, 1)
+        group_v.addLayout(delay_row)
 
         # GitHub 操作按钮的异步请求加载状态：indeterminate 进度条 + 文案
         busy_row = QHBoxLayout()
@@ -729,6 +750,8 @@ class SettingsPage(QWidget):
         self._set_control("workflow_branch", _val("workflow_branch"))
         self._set_control("gh_disable_schedule",
                           bool(_val("gh_disable_schedule")))
+        self._set_control("gh_random_delay_minutes",
+                          int(_val("gh_random_delay_minutes")))
 
     def _set_control(self, key: str, value: Any) -> None:
         ctrl = self._controls.get(key)
@@ -924,6 +947,10 @@ class SettingsPage(QWidget):
             return
         disable_schedule = self._gh_disable_schedule_check.isChecked()
         content = self._set_workflow_schedule(content, not disable_schedule)
+        if not disable_schedule:
+            content = self._set_workflow_cron(content, self._cloud_cron_from_editor())
+        random_delay = self._gh_random_delay_spin.value()
+        content = self._set_workflow_random_delay(content, random_delay)
         message = ("正在同步完整 workflow（已关闭云端定时）…"
                    if disable_schedule
                    else "正在同步完整 workflow 到仓库…")
@@ -947,6 +974,42 @@ class SettingsPage(QWidget):
             out_lines.append(line + newline)
         return "".join(out_lines)
 
+    def _cloud_cron_from_editor(self) -> str:
+        """把「云端 cron」的北京时间 HH:MM 转成 GitHub Actions UTC cron。"""
+        _t = self._gh_cron_edit.time()
+        _utc_h = (_t.hour() - 8) % 24
+        return f"{_t.minute()} {_utc_h} * * *"
+
+    @staticmethod
+    def _set_workflow_cron(content: str, cron: str) -> str:
+        """把 workflow 里第一个 cron 行替换为新的 cron 表达式。"""
+        import re
+
+        pattern = re.compile(
+            r'^([ \t]*(?:-[ \t]+)?cron[ \t]*:[ \t]*)([\'"]?)([^\'"\n#]+)([\'"]?)([ \t]*(?:#.*)?)$',
+            re.MULTILINE,
+        )
+        return pattern.sub(
+            lambda m: f"{m.group(1)}'{cron}'{m.group(5)}", content, count=1)
+
+    @staticmethod
+    def _set_workflow_random_delay(content: str, minutes: int) -> str:
+        """把随机延迟启动的最大分钟数写入 workflow 的默认值。
+
+        workflow 模板里该行为：
+          RANDOM_DELAY_MINUTES: ${{ secrets.RANDOM_DELAY_MINUTES || '0' }}
+        本方法只替换 ``|| '0'`` 里的数字，保留 Secret 覆盖能力。
+        """
+        import re
+        value = max(0, int(minutes or 0))
+        pattern = re.compile(
+            r"^(\s*RANDOM_DELAY_MINUTES:\s*\$\{\{\s*secrets\.RANDOM_DELAY_MINUTES\s*\|\|\s*')"
+            r"([0-9]+)('\s*\}\}\s*)$",
+            re.MULTILINE,
+        )
+        return pattern.sub(
+            lambda m: f"{m.group(1)}{value}{m.group(3)}", content)
+
     def _sync_cron_to_workflow(self) -> None:
         """读 cron 表达式 + workflow 配置，调 ActionsTrigger.update_workflow_cron。"""
         if self._gh_disable_schedule_check.isChecked():
@@ -955,9 +1018,7 @@ class SettingsPage(QWidget):
             return
         token, repo, workflow, branch = self._read_gh_form()
         # 读北京时间 HH:MM，转 UTC cron（GitHub Actions 用 UTC）
-        _t = self._gh_cron_edit.time()
-        _utc_h = (_t.hour() - 8) % 24
-        cron = f"{_t.minute()} {_utc_h} * * *"
+        cron = self._cloud_cron_from_editor()
         if not (token and repo and workflow and branch):
             self._set_gh_result(False, "请先填写 gh_token / gh_repo / workflow_name / workflow_branch")
             return

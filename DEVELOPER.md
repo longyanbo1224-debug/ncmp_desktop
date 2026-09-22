@@ -18,7 +18,7 @@
 - 实时任务执行可视化（流式日志 + 结构化步骤视图，对标 GitHub Actions live log 体验）
 - 参数表单化配置（13+ 项做成控件，4+1 分组）
 - 本地定时（QTimer 到点自动触发）+ 云端 Actions 触发双执行模式（电脑关机也能跑）
-- Cookie 一键同步到 GitHub Secrets（PyNaCl 加密）+ 云端 cron 远程修改 + 一键关闭 GitHub 原生定时
+- Cookie 一键同步到 GitHub Secrets（PyNaCl 加密）+ 云端 cron 远程修改 + 一键关闭 GitHub 原生定时 + 随机延迟启动（可 Secret 覆盖）
 - 品牌图标统一（窗口 / 任务栏 / 托盘 / exe，AppUserModelID）
 
 > 与原 ncmp 的关系：`core/` 层基于 ncmp 源码改造（4 个文件加回调/取消点/keyring，其余直接复用），`app/` 层为全新桌面应用层。原 `core/utils/github.py`（GitHub Secrets 回写）已废弃，改由 `app/cloud/actions_trigger.py` 触发 Actions 代替回写。
@@ -37,7 +37,7 @@
 - **本地执行**：`TaskWorker`（QThread）调 `core.bot.MusicPartnerBot.run()`，bot 带 `on_step(name, status, elapsed)` / `on_progress(done, total, song_name, score)` / `cancel_event` 三个回调，通过 Qt 信号转发到主线程 UI；`Signer._sleep` 分段循环 `cancel_event.wait(1)`，点取消即时响应。
 - **云端执行**：`ActionsTrigger`（GitHub REST API 封装）触发 `workflow_dispatch` + `CloudWorker`（QThread）每 5 秒轮询 run 状态，电脑关机也跑（Actions 在 GitHub 云端执行，桌面程序只看状态）。复用 `StepList` 展示「触发 / 等待 / 完成」三阶段。
 - **本地定时**：`QTimer`（`setSingleShot(True)`）到点触发 + 60 秒心跳校准（防系统休眠 / 时钟漂移后失准）；模式 `local`（启动 TaskWorker）/ `cloud`（触发 Actions）/ `both`（两者都启动）；到点弹托盘通知「定时任务已启动」。
-- **云端 cron 修改**：调 GitHub Contents API 读 workflow 文件 → 正则替换 `cron:` 行 → base64 编码 PUT 回仓库，远程修改 fork workflow 的 schedule；「同步完整 workflow」支持勾选「关闭云端定时」后上传注释掉 `schedule` 块的版本。
+- **云端 cron 修改**：调 GitHub Contents API 读 workflow 文件 → 正则替换 `cron:` 行 → base64 编码 PUT 回仓库，远程修改 fork workflow 的 schedule；「同步完整 workflow」支持勾选「关闭云端定时」后上传注释掉 `schedule` 块的版本；未勾选时会把「云端 cron」北京时间转 UTC 写入 schedule，并按「随机延迟启动」设置写入 `RANDOM_DELAY_MINUTES` 默认值（仓库 Secret 可覆盖）。
 - **Cookie 同步 GitHub Secrets**：`ActionsTrigger.set_secret` 用 PyNaCl `SealedBox` 加密 value 后 PUT 到 `/repos/{repo}/actions/secrets/{name}`；`sync_cookies` 一键把本地 `MUSIC_U` + `__csrf` 写入 `Cookie_MUSIC_U` + `Cookie___csrf` 两个 Secret 供 Actions 用。PyNaCl 未装时 deferred import 兜底返回明确错误。
 - **系统托盘 + Windows 通知 + 关闭确认**：`QSystemTrayIcon` 常驻，双击恢复，右键菜单（显示主窗口 / 立即执行 / 检查刷新 Cookie / 关于 / 退出）；通知优先用托盘气泡 `showMessage`，否则降级 plyer / print；`closeEvent` 拦截，按 `AppConfig.close_action`（`None`=每次弹确认框 / `"close"`=直接关 / `"minimize"`=最小化到托盘）决定，可选「不再提示」并持久化。
 - **后台 Cookie 验证**：`ValidateWorker`（QThread）每 6 小时（`validate_interval_sec` 可调）跑 `CookieValidator` 三步验证（Cookie 存在 / 用户信息有效 / 任务权限），失效即托盘通知 + 主窗口 `alert` 闪烁 + 自动跳登录页。失效时按 `notify_on_cookie_expired` 开关（默认 True）调 `NotificationService.send_notification("ncmp Cookie 失效", "Cookie 已失效，请重新登录获取")` 发邮件；邮件发送失败不吞掉 `expired` 信号，UI 仍照常弹托盘通知 + 跳登录页。
@@ -254,10 +254,11 @@ python app/main.py
 | | `workflow_name` | QLineEdit | 如 `refresh_cookie.yml` |
 | | `workflow_branch` | QLineEdit | 如 `main` |
 | | `gh_disable_schedule` | QCheckBox | 勾选后「同步完整 workflow」会注释 GitHub 原生 `schedule`，仅保留手动触发 |
+| | `gh_random_delay_minutes` | QSpinBox（0-30） | 「随机延迟启动」最大分钟数；0=不启用，同步完整 workflow 时写入 `RANDOM_DELAY_MINUTES` 默认值（仓库 Secret 可覆盖） |
 
 附工具按钮：`保存` / `测试通知` / `验证 Cookie` / `明文→MD5` / `导入 setting.json` / `导出 setting.json`，以及 GitHub 区的 `测试连接` / `同步 cron` / `同步完整 workflow` / `同步 Cookie 到 GitHub Secrets`。四个 GitHub 网络操作均走 `_GitHubActionWorker` 后台线程，并显示 indeterminate 进度条。
 
-> 「同步完整 workflow」按钮（`_sync_full_workflow`）：读取打包内 / 源码目录的 `resources/workflow_example.yml` 模板，调 GitHub Contents API PUT 覆盖到 fork 仓库的 `.github/workflows/{workflow_name}`，一键同步最新 workflow 文件（含 `concurrency` / `continue-on-error` / `upload-artifact` 等配置），无需手动复制粘贴。若勾选「关闭云端定时」，`_set_workflow_schedule()` 会先把 `schedule:` 与 `- cron:` 注释掉，再上传。
+> 「同步完整 workflow」按钮（`_sync_full_workflow`）：读取打包内 / 源码目录的 `resources/workflow_example.yml` 模板，调 GitHub Contents API PUT 覆盖到 fork 仓库的 `.github/workflows/{workflow_name}`，一键同步最新 workflow 文件（含 `concurrency` / `continue-on-error` / `upload-artifact` 等配置），无需手动复制粘贴。若勾选「关闭云端定时」，`_set_workflow_schedule()` 会先把 `schedule:` 与 `- cron:` 注释掉，再上传；未勾选时还会用 `_cloud_cron_from_editor()` 把「云端 cron」北京时间转 UTC 后经 `_set_workflow_cron()` 写入 `schedule`，随后 `_set_workflow_random_delay()` 把「随机延迟启动」分钟数写入 `RANDOM_DELAY_MINUTES` 默认值（只替换 `|| '0'` 里的数字，保留 Secret 覆盖能力）。
 
 ---
 
@@ -301,6 +302,7 @@ python app/main.py
 | `SMTP_PORT` | 可选 | 默认 465 |
 | `WAIT_TIME_MIN` / `WAIT_TIME_MAX` | 可选 | 评分等待秒数，默认 15 / 20 |
 | `FULL_EXTRA_TASKS` | 可选 | `true`/`false`，默认 false |
+| `RANDOM_DELAY_MINUTES` | 可选 | 随机延迟启动最大分钟数，默认 0（不启用）；桌面程序「同步完整 workflow」可写入默认值，设 Secret 可覆盖 |
 
 > 也可以用桌面程序「同步 Cookie 到 GitHub Secrets」按钮自动写 `Cookie_MUSIC_U` + `Cookie___csrf`，workflow 示例同时兼容 `MUSIC_U` / `CSRF` 与 `Cookie_MUSIC_U` / `Cookie___csrf` 两套名字。
 
@@ -323,8 +325,9 @@ python app/main.py
 
 - `workflow_dispatch`（手动）：桌面程序「云端执行」按钮走这个入口，可选传入 `score`（1/2/3/4）/ `wait_time_min` / `wait_time_max` / `full_extra_tasks` inputs（inputs 优先于 Secrets 默认值）。
 - `schedule`（定时）：默认每天 08:00 UTC（北京时间 16:00）跑一次，可用桌面程序「同步 cron」按钮远程修改；勾选「关闭云端定时」后点「同步完整 workflow」即可注释 `schedule` 块。GitHub 原生 cron 由仓库 workflow 决定，与桌面端 `schedule_mode` 无关。
+- 执行结果判定：`Run ncmp` 步骤会同时检查退出码与日志失败标记（`执行失败` / `程序异常` / `Cookie失效` / `Cookie已失效` / `Cookie未正确设置` / `Cookie验证失败` / `没有音乐合伙人权限`），命中即 `::error::` 并 exit 1，确保失败邮件步骤能触发。
 
-workflow 还含 `concurrency`（`ncmp-refresh` 组，`cancel-in-progress: false`，避免多 run 并发触发风控）、`continue-on-error: true`（失败不中断，继续上传日志）、`upload-artifact`（`run_output.log`，retention 14 天）。
+workflow 还含 `concurrency`（`ncmp-refresh` 组，`cancel-in-progress: false`，避免多 run 并发触发风控）、`continue-on-error: true`（失败不中断，继续上传日志）、`upload-artifact`（`run_output.log`，retention 14 天）、可选「Random delay start」步骤（读 `RANDOM_DELAY_MINUTES`，0–N 分钟随机 sleep）、失败邮件步骤（`Send failure email`：`steps.run_ncmp.outcome == 'failure'` 时用 `NOTIFY_EMAIL` / `EMAIL_PASSWORD` / `SMTP_SERVER` / `SMTP_PORT` 发信并附日志末尾，缺配置则跳过）。
 
 ### 任务页双按钮
 

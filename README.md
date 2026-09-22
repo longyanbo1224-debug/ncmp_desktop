@@ -76,12 +76,18 @@ ncmp 是什么：把网易云音乐「音乐合伙人」每日评分任务自动
 电脑关机时任务也能自动跑——靠 GitHub Actions 云端定时。配置 5 步：
 
 1. fork ncmp 仓库到自己 GitHub 账号
-2. 在设置页点「同步完整 workflow」，把 resources/workflow_example.yml 一键写入 fork 仓库的 .github/workflows/refresh_cookie.yml（也可手动复制）
+2. 在设置页点「同步完整 workflow」，把 resources/workflow_example.yml 一键写入 fork 仓库的 .github/workflows/refresh_cookie.yml，并把你设置的「云端 cron」时间一并写入 schedule（也可手动复制）
 3. 生成 GitHub Personal Access Token（头像 → Settings → Developer settings → Personal access tokens → 勾选 repo + workflow）
 4. 桌面程序「设置 → GitHub Actions」组填 4 个字段（鼠标悬停字段有详细获取说明）→ 点「保存」→「测试连接」
 5. 点「同步 Cookie 到 GitHub Secrets」把本地 Cookie 写到仓库（Actions 才能用最新 Cookie）
 
 如果不想让 GitHub 按 cron 自动执行，只保留手动「云端执行」：勾选「关闭云端定时」后再点「同步完整 workflow」。GitHub 原生 cron 是否自动跑，和桌面程序「定时执行」里选本地/云端无关。
+
+可选「随机延迟启动」：设置页设为 0–30 分钟，点「同步完整 workflow」时会写入 workflow（也可用仓库 Secret `RANDOM_DELAY_MINUTES` 覆盖），把每日固定时间错开为随机延迟，降低风控风险。
+
+workflow 已内置失败邮件步骤：云端执行失败会通过 `NOTIFY_EMAIL` / `EMAIL_PASSWORD` / `SMTP_SERVER` / `SMTP_PORT` 发邮件并附日志末尾；这些 Secret 不填则跳过。
+
+若 fork 仓库还保留上游的 `.github/workflows/auto_score.yml`，会与本 workflow 重复执行；请删除 `auto_score.yml`，或注释/删除其 `schedule` 块，只保留一个评分 workflow。
 
 配好后：「任务」页点「云端执行」触发，或在「定时执行」组选「云端」模式定时触发。GitHub 仓库的 Actions 页能看到运行记录。云端执行完成后程序会收到邮件通知（受「定时任务结果」开关控制，失败也发）。
 
@@ -122,6 +128,10 @@ Cookie 大约 2 周过期。程序后台会定时验证，失效时弹托盘通�
 ### 云端执行触发失败？
 
 网络 / 代理不稳定（`ProxyError` / `ConnectionError`）。requests 会自动重试底层连接，多试几次或换网络 / 关代理最终都会成功；稳定复现可换网络环境再触发。
+
+### 云端执行提示「Actions has been disabled for this user」？
+
+这不是程序或 workflow 配置问题，而是 GitHub 把你的账号级 Actions 禁用了（通常是账号风控）。需要到 <https://support.github.com/> 提交恢复申请；解封前云端定时和手动触发都不会执行，可暂时改用本地执行模式。
 
 ## 反馈
 
