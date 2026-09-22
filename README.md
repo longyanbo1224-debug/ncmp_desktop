@@ -144,4 +144,4 @@ Cookie 大约 2 周过期。程序后台会定时验证，失效时弹托盘通�
 
 - 基于 [ACAne0320/ncmp](https://github.com/ACAne0320/ncmp)（MIT）
 - 使用 [pyncm](https://github.com/sakarie9/pyncm)、[qtawesome](https://github.com/spyder-ide/qtawesome)、PySide6
-- MIT License（附加非商业使用限制，详见 [LICENSE](LICENSE)）
+- YanboLong Non-Commercial License（基于 MIT 修改的非商业许可，详见 [LICENSE](LICENSE)）
