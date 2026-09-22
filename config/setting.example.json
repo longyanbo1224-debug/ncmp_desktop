@@ -1,0 +1,16 @@
+{
+  "netease_phone": "",
+  "netease_password": "",
+  "netease_md5_password": "",
+  "wait_time_min": 15,
+  "wait_time_max": 20,
+  "score": 3,
+  "full_extra_tasks": true,
+  "notify_email": "",
+  "email_password": "",
+  "smtp_server": "smtp.163.com",
+  "smtp_port": 465,
+  "gh_repo": "",
+  "workflow_name": "refresh_cookie.yml",
+  "workflow_branch": "main"
+}

@@ -1,0 +1,325 @@
+/* ncmp desktop - 扁平浅色主题 */
+
+QWidget {
+    background-color: #ffffff;
+    color: #1f2933;
+    font-family: "Microsoft YaHei UI", "Segoe UI", "Helvetica Neue", Arial;
+    font-size: 13px;
+}
+
+/* 主窗口背景 */
+QMainWindow, QWidget#centralWidget {
+    background-color: #f5f7fa;
+}
+
+/* 左侧导航 */
+QListWidget#navList {
+    background-color: #ffffff;
+    border: none;
+    border-right: 1px solid #e3e8ef;
+    outline: none;
+}
+
+QListWidget#navList::item {
+    padding: 12px 16px;
+    border: none;
+}
+
+QListWidget#navList::item:hover {
+    background-color: #eef2f7;
+}
+
+QListWidget#navList::item:selected {
+    background-color: #e3f0ff;
+    color: #2E7DDE;
+    border-left: 3px solid #2E7DDE;
+}
+
+/* 通用按钮 */
+QPushButton {
+    background-color: #ffffff;
+    color: #1f2933;
+    border: 1px solid #d0d7de;
+    border-radius: 4px;
+    padding: 6px 14px;
+}
+
+QPushButton:hover {
+    background-color: #f0f3f7;
+    border-color: #b3becd;
+}
+
+QPushButton:pressed {
+    background-color: #e3e8ef;
+}
+
+QPushButton:disabled {
+    color: #9aa4b2;
+    background-color: #f5f7fa;
+    border-color: #e3e8ef;
+}
+
+/* 主按钮（蓝色） */
+QPushButton#primaryButton {
+    background-color: #2E7DDE;
+    color: #ffffff;
+    border: 1px solid #2E7DDE;
+}
+
+QPushButton#primaryButton:hover {
+    background-color: #2670c8;
+    border-color: #2670c8;
+}
+
+QPushButton#primaryButton:pressed {
+    background-color: #1f63b3;
+}
+
+QPushButton#primaryButton:disabled {
+    background-color: #aacbe9;
+    border-color: #aacbe9;
+    color: #ffffff;
+}
+
+/* 次按钮（浅色） */
+QPushButton#secondaryButton {
+    background-color: #ffffff;
+    color: #2E7DDE;
+    border: 1px solid #2E7DDE;
+}
+
+QPushButton#secondaryButton:hover {
+    background-color: #eef4fd;
+}
+
+/* 输入控件 */
+QLineEdit, QSpinBox, QComboBox, QPlainTextEdit, QTextEdit {
+    background-color: #ffffff;
+    border: 1px solid #d0d7de;
+    border-radius: 4px;
+    padding: 4px 6px;
+    selection-background-color: #2E7DDE;
+    selection-color: #ffffff;
+}
+
+QLineEdit:focus, QSpinBox:focus, QComboBox:focus,
+QPlainTextEdit:focus, QTextEdit:focus {
+    border: 1px solid #2E7DDE;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 18px;
+}
+
+/* Cookie 卡片 */
+QFrame#cookieCard {
+    background-color: #ffffff;
+    border: 1px solid #e3e8ef;
+    border-radius: 6px;
+}
+
+/* Dashboard 状态卡 */
+QFrame#card {
+    background-color: #ffffff;
+    border: 1px solid #e3e8ef;
+    border-radius: 6px;
+}
+
+/* Dashboard toast 提示（登录闭环） */
+QLabel#toast {
+    background-color: #e3f0ff;
+    color: #2E7DDE;
+    border-radius: 6px;
+    padding: 8px 12px;
+}
+
+/* 进度条 */
+QProgressBar {
+    background-color: #f0f3f7;
+    border: 1px solid #d0d7de;
+    border-radius: 4px;
+    text-align: center;
+    height: 18px;
+}
+
+QProgressBar::chunk {
+    background-color: #2E7DDE;
+    border-radius: 3px;
+}
+
+/* 树形视图 */
+QTreeWidget {
+    background-color: #ffffff;
+    border: 1px solid #e3e8ef;
+    border-radius: 4px;
+    outline: none;
+}
+
+QTreeWidget::item:hover {
+    background-color: #f0f3f7;
+}
+
+QTreeWidget::item:selected {
+    background-color: #e3f0ff;
+    color: #1f2933;
+}
+
+QHeaderView::section {
+    background-color: #f5f7fa;
+    color: #52606d;
+    padding: 6px;
+    border: none;
+    border-right: 1px solid #e3e8ef;
+    border-bottom: 1px solid #e3e8ef;
+}
+
+/* 滚动条 */
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 0;
+}
+
+QScrollBar::handle:vertical {
+    background: #cdd5e0;
+    border-radius: 5px;
+    min-height: 30px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #b3becd;
+}
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+    margin: 0;
+}
+
+QScrollBar::handle:horizontal {
+    background: #cdd5e0;
+    border-radius: 5px;
+    min-width: 30px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: #b3becd;
+}
+
+/* 菜单 */
+QMenu {
+    background-color: #ffffff;
+    border: 1px solid #d0d7de;
+    border-radius: 4px;
+    padding: 4px;
+}
+
+QMenu::item {
+    padding: 6px 24px;
+    border-radius: 3px;
+}
+
+QMenu::item:selected {
+    background-color: #e3f0ff;
+    color: #2E7DDE;
+}
+
+/* 标签页 */
+QTabWidget::pane {
+    border: none;
+    background: #ffffff;
+}
+
+QTabBar::tab {
+    background: #f5f7fa;
+    color: #52606d;
+    padding: 6px 16px;
+    border: 1px solid #e3e8ef;
+    border-bottom: none;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    margin-right: 2px;
+}
+
+QTabBar::tab:selected {
+    background: #ffffff;
+    color: #2E7DDE;
+    border-bottom: 1px solid #ffffff;
+}
+
+/* 工具提示 */
+QToolTip {
+    background-color: #1f2933;
+    color: #ffffff;
+    border: none;
+    padding: 4px 8px;
+    border-radius: 3px;
+}
+
+/* === S2 设计系统：语义色文本与字体分级 === */
+
+/* 语义色文本（替代 page 内硬编码 color） */
+QLabel#successText { color: #2E9E55; }
+QLabel#dangerText  { color: #C62828; }
+QLabel#warningText { color: #E0A32E; }
+QLabel#infoText    { color: #2E7DDE; }
+QLabel#captionText { color: #52606d; font-size: 12px; }
+
+/* 字体分级（替代 page 内硬编码 font-size/font-weight） */
+QLabel#pageTitle { font-size: 18px; font-weight: 600; color: #1f2933; }
+QLabel#sectionTitle { font-size: 14px; font-weight: 600; color: #1f2933; }
+QLabel#subtitle { color: #52606d; font-size: 12px; }
+
+/* === S4 信息架构：设置页分组与空状态 === */
+
+/* 设置页分组容器 */
+QGroupBox {
+    background-color: #ffffff;
+    border: 1px solid #e3e8ef;
+    border-radius: 6px;
+    margin-top: 10px;
+    padding: 14px 10px 10px 10px;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 12px;
+    padding: 0 6px;
+    color: #1f2933;
+    font-size: 14px;
+    font-weight: 600;
+    background-color: #ffffff;
+}
+
+/* 空状态占位文本 */
+QLabel#emptyState {
+    color: #9aa4b2;
+    font-size: 13px;
+}
+
+/* === S5 打磨：二维码区描边 === */
+
+/* 扫码页二维码容器（替代 login_page 内硬编码 background/border） */
+QLabel#qrFrame {
+    background: #ffffff;
+    border: 1px solid #d0d7de;
+    border-radius: 4px;
+}
+
+/* === 关闭确认对话框 === */
+
+QDialog#closeConfirm {
+    background-color: #ffffff;
+}
+
+QDialog#closeConfirm QLabel#captionText {
+    color: #1f2933;
+    font-size: 13px;
+}
+
+QDialog#closeConfirm QCheckBox {
+    color: #52606d;
+    font-size: 12px;
+}

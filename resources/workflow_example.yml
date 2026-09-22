@@ -1,0 +1,125 @@
+# ncmp GitHub Actions workflow 示例（云端执行模板）
+#
+# 用法：
+#   1. fork ncmp 仓库到自己账号下（https://github.com/ACAne0320/ncmp）
+#   2. 把本文件复制到 fork 仓库的 .github/workflows/refresh_cookie.yml
+#   3. 在仓库 Settings → Secrets and variables → Actions 加下列 Secrets：
+#        MUSIC_U              云音乐 Cookie 的 MUSIC_U（必填）
+#        CSRF                 云音乐 Cookie 的 __csrf（必填）
+#        NETEASE_PHONE        手机号（密码登录用，与密码二选一）
+#        NETEASE_PASSWORD     明文密码（与 MD5 二选一）
+#        NETEASE_MD5_PASSWORD MD5 密码（推荐，可用桌面程序「明文→MD5」按钮生成）
+#        NOTIFY_EMAIL         接收通知的邮箱（可选）
+#        EMAIL_PASSWORD       SMTP 授权码（可选，非邮箱登录密码）
+#        SMTP_SERVER          SMTP 服务器（默认 smtp.gmail.com）
+#        SMTP_PORT            SMTP 端口（默认 465）
+#        WAIT_TIME_MIN        每次评分最小等待秒数（默认 15）
+#        WAIT_TIME_MAX        每次评分最大等待秒数（默认 20）
+#        FULL_EXTRA_TASKS     是否完成所有额外任务（true/false，默认 false）
+#   4. 在桌面程序「设置 → GitHub Actions」组填：
+#        gh_token        GitHub Personal Access Token（需 repo + workflow 权限，存 keyring）
+#        gh_repo         owner/repo（如 yourname/ncmp）
+#        workflow_name   refresh_cookie.yml
+#        workflow_branch main
+#   5. 点「测试连接」验证 token+repo；点「同步 Cookie 到 GitHub Secrets」把本地 Cookie 写到仓库 Secrets
+#   6. 「任务」页点「云端执行(本地)」旁的「云端执行」按钮触发，或在「定时执行」组配云端 cron
+#
+# 注：gh_token 仅本地 keyring 保存，不上传。桌面程序通过 GitHub REST API 触发 dispatch + 轮询状态。
+#
+# 测试：到仓库 Actions 页 → 选 refresh_cookie workflow → Run workflow → 手动触发验证
+#       关机也能跑：触发后 Actions 在 GitHub 云端执行，桌面程序只看状态，电脑可关机
+
+name: refresh_cookie
+
+on:
+  # 手动触发：桌面程序「云端执行」按钮走这个入口（workflow_dispatch API）
+  workflow_dispatch:
+    inputs:
+      score:
+        description: '评分策略 1/2/3/4（1=1-2分, 2=2-3分, 3=3-4分默认, 4=固定4分）'
+        required: false
+        default: '3'
+        type: choice
+        options: ['1', '2', '3', '4']
+      wait_time_min:
+        description: '每次评分最小等待秒数（覆盖 Secrets 默认值）'
+        required: false
+        default: '15'
+        type: string
+      wait_time_max:
+        description: '每次评分最大等待秒数（覆盖 Secrets 默认值）'
+        required: false
+        default: '20'
+        type: string
+      full_extra_tasks:
+        description: '是否完成所有额外任务（true/false）'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['true', 'false']
+  # 定时触发：每天 08:00 UTC（北京时间 16:00）跑一次
+  # 桌面程序「设置 → 定时执行 → 云端 cron」可远程修改此 cron 表达式
+  # 不需要定时则注释掉整个 schedule 块
+  schedule:
+    - cron: '0 8 * * *'
+
+# 同一仓库并发限制：避免多个 run 同时跑触发风控
+concurrency:
+  group: ncmp-refresh
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30  # 超时保护，防止卡死占用 runner
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run ncmp
+        id: run_ncmp
+        continue-on-error: true  # 失败不中断，继续上传日志便于排查
+        env:
+          MUSIC_U: ${{ secrets.Cookie_MUSIC_U }}
+          CSRF: ${{ secrets.Cookie___csrf }}
+          NETEASE_PHONE: ${{ secrets.NETEASE_PHONE }}
+          NETEASE_PASSWORD: ${{ secrets.NETEASE_PASSWORD }}
+          NETEASE_MD5_PASSWORD: ${{ secrets.NETEASE_MD5_PASSWORD }}
+          NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          # inputs 优先于 Secrets，手动触发时可用参数覆盖
+          WAIT_TIME_MIN: ${{ github.event.inputs.wait_time_min || secrets.WAIT_TIME_MIN }}
+          WAIT_TIME_MAX: ${{ github.event.inputs.wait_time_max || secrets.WAIT_TIME_MAX }}
+          SCORE: ${{ github.event.inputs.score || '3' }}
+          FULL_EXTRA_TASKS: ${{ github.event.inputs.full_extra_tasks || secrets.FULL_EXTRA_TASKS }}
+        run: |
+          python main.py 2>&1 | tee run_output.log
+          echo "##[set-output name=exitcode;]${PIPESTATUS[0]}"
+          exit ${PIPESTATUS[0]}
+
+      - name: Upload run log artifact
+        if: always()  # 无论成功失败都上传，便于排查
+        uses: actions/upload-artifact@v4
+        with:
+          name: ncmp-run-${{ github.run_id }}
+          path: run_output.log
+          retention-days: 14  # 14 天后自动清理，节省空间
+
+      - name: Check result
+        if: ${{ steps.run_ncmp.outcome == 'failure' }}
+        run: |
+          echo "::error::ncmp 执行失败，请下载上方 artifact 查看日志"
+          exit 1
