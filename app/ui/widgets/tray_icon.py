@@ -21,6 +21,7 @@ class TrayIcon(QSystemTrayIcon):
     run_task = Signal()
     refresh_cookie = Signal()
     about = Signal()
+    quit_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(self._make_icon(), parent)
@@ -63,7 +64,7 @@ class TrayIcon(QSystemTrayIcon):
         menu.addSeparator()
 
         act_quit = QAction(op_icon(ICON_QUIT), "退出", menu)
-        act_quit.triggered.connect(QApplication.quit)
+        act_quit.triggered.connect(self._on_quit)
         menu.addAction(act_quit)
 
         self.setContextMenu(menu)
@@ -87,3 +88,6 @@ class TrayIcon(QSystemTrayIcon):
 
     def _on_about(self) -> None:
         self.about.emit()
+
+    def _on_quit(self) -> None:
+        self.quit_requested.emit()

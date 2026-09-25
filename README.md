@@ -10,14 +10,14 @@ ncmp 是什么：把网易云音乐「音乐合伙人」每日评分任务自动
 
 桌面版提供：可视化扫码/密码登录、实时任务执行视图（对标 Actions live log）、Cookie 到期提醒、参数表单配置、云端执行（关机也跑）。
 
-项目仓库（上游）：<https://github.com/longyanbo1224/ncmp>（作者：ACAne0320），本项目为其 fork 改造的桌面版。
+项目仓库：<https://github.com/longyanbo1224/ncmp_desktop>（fork 自上游 [ACAne0320/ncmp](https://github.com/ACAne0320/ncmp)）
 
 ## 下载安装
 
 ### 方式一：exe 直接用（推荐）
 
-1. 到 Releases 页下载 ncmp.zip
-2. 解压，双击 ncmp.exe
+1. 到 Releases 页下载 ncmp desktop.zip
+2. 解压，双击 ncmp desktop.exe
 3. 首次启动 Windows 可能提示「未识别发布者」→ 点「更多信息」→「仍要运行」（程序未签名，介意可自行编译）
 
 ### 方式二：源码运行
@@ -39,7 +39,7 @@ ncmp 是什么：把网易云音乐「音乐合伙人」每日评分任务自动
 ### 第 2 步：配置参数
 
 - 切到「设置」页：默认值已预填，按需修改即可
-- 包含网易云账号、任务参数（评分策略、等待时间）、邮件通知、GitHub Actions、定时执行五组
+- 包含常规（关闭按钮行为）、网易云账号、任务参数（评分策略、等待时间）、邮件通知、GitHub Actions、定时执行六组
 - 改完点「保存」
 
 ### 第 3 步：执行任务
@@ -57,14 +57,16 @@ ncmp 是什么：把网易云音乐「音乐合伙人」每日评分任务自动
 - 云端执行：触发 GitHub Actions 跑任务，电脑关机也能跑
 - 邮件通知：任务完成 / Cookie 失效 / 定时任务结果 / 云端执行完成均可发邮件，3 个开关可独立开关（默认全开）。云端执行统一走「定时任务结果」开关
 - 任务取消：本地取消即时停任务；云端取消会请求 GitHub 停止远端 run。UI 区分「✅ 完成 / ⚠️ 用户手动取消 / ❌ 失败」三种状态，不再把取消当完成
-- 系统托盘：最小化到托盘，右键菜单快捷操作
+- 系统托盘：最小化到托盘，右键菜单快捷操作，托盘「退出」也会先停后台线程再退出
+- 关闭行为可配置：点击关闭按钮可设为「每次询问 / 最小化到托盘 / 直接退出」（设置页「常规」组）
 - 单实例锁：重复启动会提示「已在运行」
 - 浅色扁平主题：界面简洁干净
 
-## 配置说明（设置页 5 组）
+## 配置说明（设置页 6 组）
 
 | 组 | 说明 |
 |---|---|
+| 常规 | 关闭按钮行为（每次询问 / 最小化到托盘 / 直接退出） |
 | 网易云账号 | 手机号、密码 / MD5（可一键转 MD5） |
 | 任务参数 | 评分策略（1-4 分）、等待时间、是否完成所有额外任务 |
 | 邮件通知 | 接收邮箱、SMTP 授权码、服务器端口（默认 `smtp.qq.com`）、3 个开关（任务完成 / Cookie 失效 / 定时结果，默认全开） |
@@ -117,6 +119,16 @@ Cookie 大约 2 周过期。程序后台会定时验证，失效时弹托盘通�
 
 已修复：`gh_repo`、`notify_email` 现在和 `gh_token`、`email_password` 一样存系统 keyring；其他普通参数写入用户目录 `~/.ncmp_desktop/setting.json`，重新打包后不会丢。
 
+### 重新打包 / 升级会丢配置吗？
+
+不会。配置数据都存在用户目录或系统凭据管理器，不在 `build/`、`dist/` 打包目录里，重新打包只重建打包产物：
+- 行为配置（主题 / 最小化 / 定时 / 通知开关）：`%APPDATA%\ncmp desktop\config.json`
+- 任务历史：`%APPDATA%\ncmp desktop\task_history.json`
+- 业务非敏感字段（评分策略 / SMTP 等）：`~/.ncmp_desktop\setting.json`
+- 凭据（Cookie / 密码 / `gh_token` / 邮箱授权码）：Windows 凭据管理器（keyring，service `ncmp desktop`）
+
+从旧版（程序名 `ncmp-desktop`）升级时，前两项会从 `%APPDATA%\ncmp-desktop` 自动迁移；凭据因 keyring 服务名变更不会迁移，需重新登录 / 重填一次，之后打包升级不再受影响。
+
 ### gh_repo 填什么？
 
 填「你的GitHub用户名/ncmp」（如 ACAne0320/ncmp），或完整 URL https://github.com/你的用户名/ncmp 也行，程序会自动识别。
@@ -135,7 +147,7 @@ Cookie 大约 2 周过期。程序后台会定时验证，失效时弹托盘通�
 
 ## 反馈
 
-问题或建议欢迎提 GitHub Issue：<https://github.com/ACAne0320/ncmp/issues>。
+问题或建议欢迎提 GitHub Issue：<https://github.com/longyanbo1224/ncmp_desktop/issues>。
 
 ## 后续计划
 

@@ -133,12 +133,14 @@ class MainWindow(QMainWindow):
 
         # 设置页定时配置保存 → 重排定时器
         self._settings.schedule_config_changed.connect(self._on_schedule_config_changed)
+        self._settings.close_action_changed.connect(self._on_close_action_changed)
 
         # 托盘
         self._tray.show_main.connect(self._show_and_raise)
         self._tray.run_task.connect(self._goto_task_and_run)
         self._tray.refresh_cookie.connect(self._refresh_cookie_status)
         self._tray.about.connect(self._goto_about)
+        self._tray.quit_requested.connect(self.quit_app)
         self._tray.activated.connect(self._on_tray_activated)
 
         # 后台验证
@@ -177,6 +179,9 @@ class MainWindow(QMainWindow):
             if row == 1:
                 # 进入登录页时启动扫码
                 self._login.start()
+            elif row == 3:
+                # 进入设置页时从磁盘重读 AppConfig（close_action 可能被关闭弹窗修改）
+                self._settings.refresh_app_config()
 
     def _goto_page(self, index: int) -> None:
         self._nav.setCurrentRow(index)
@@ -255,6 +260,13 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         self._setup_schedule()
+
+    def _on_close_action_changed(self) -> None:
+        """设置页改了关闭按钮行为 → 重读 AppConfig。"""
+        try:
+            self.app_config.load()
+        except Exception:
+            pass
 
     def _setup_schedule(self) -> None:
         """根据 AppConfig 重排定时器。幂等：重复调用不会改变目标触发时刻。
@@ -355,8 +367,8 @@ class MainWindow(QMainWindow):
             action = choice
 
         if action == "close":
-            self._shutdown_workers()
-            super().closeEvent(event)
+            self.quit_app()
+            event.accept()
         else:  # "minimize"
             event.ignore()
             self.hide()
@@ -429,3 +441,18 @@ class MainWindow(QMainWindow):
                 self._validate_worker.wait(2000)
         except Exception:
             pass
+        try:
+            self._task_worker.cancel()
+            if self._task_worker.isRunning():
+                self._task_worker.wait(2000)
+        except Exception:
+            pass
+
+    def quit_app(self) -> None:
+        """彻底退出：停掉后台线程、移除托盘图标并退出应用。"""
+        self._shutdown_workers()
+        try:
+            self._tray.hide()
+        except Exception:
+            pass
+        QApplication.quit()

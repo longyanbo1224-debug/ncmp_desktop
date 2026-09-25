@@ -32,7 +32,7 @@ from app.workers.cloud_worker import CloudWorker
 from app.workers.task_worker import TaskWorker
 
 # keyring 服务名（与 CookieStore / Config 对齐，gh_token 同 service 不同 key）
-_KEYRING_SERVICE = "ncmp-desktop"
+_KEYRING_SERVICE = "ncmp desktop"
 
 # 本地任务阶段 → 粗粒度进度百分比（歌曲级 on_progress 会在阶段内继续细化）
 _LOCAL_STEP_PROGRESS = {

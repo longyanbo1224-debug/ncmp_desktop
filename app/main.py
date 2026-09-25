@@ -63,7 +63,7 @@ def main() -> int:
     # 单实例锁：已有实例运行则弹窗提示并退出，避免重复执行
     import tempfile
     from PySide6.QtCore import QLockFile
-    _lock = QLockFile(os.path.join(tempfile.gettempdir(), "ncmp-desktop.lock"))
+    _lock = QLockFile(os.path.join(tempfile.gettempdir(), "ncmp desktop.lock"))
     _lock.setStaleLockTime(0)  # 进程崩溃残留锁立即判 stale，下次可正常加锁
     if not _lock.tryLock(0):  # 0=不等待立即返回（PySide6 打包后 tryLock 需显式传 timeout）
         _msg = "ncmp desktop 已在运行，请勿重复启动。"
@@ -78,7 +78,7 @@ def main() -> int:
         return 1
 
     app = QApplication(sys.argv)
-    app.setApplicationName("ncmp-desktop")
+    app.setApplicationName("ncmp desktop")
     app.setQuitOnLastWindowClosed(False)  # 关闭主窗口时托盘仍在
 
     # 加载样式

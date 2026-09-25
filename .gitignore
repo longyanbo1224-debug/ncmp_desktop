@@ -8,6 +8,8 @@ config/task_history.json
 dist/
 build/
 ncmp.spec
+ncmp desktop.spec
+_internal/
 
 # Python 缓存
 __pycache__/

@@ -27,7 +27,7 @@ class Config:
     - keyring 不可用时自动降级到原 env/json 链路
     """
 
-    KEYRING_SERVICE = "ncmp-desktop"
+    KEYRING_SERVICE = "ncmp desktop"
 
     # 走 keyring 持久化的字段：配置键 -> keyring 用户名
     _KEYRING_KEY_MAP = {

@@ -92,7 +92,7 @@ DEFAULTS: Dict[str, Any] = {
 }
 
 # keyring 服务名（与 CookieStore / Config 对齐，gh_token 用同一服务下的独立 key）
-_KEYRING_SERVICE = "ncmp-desktop"
+_KEYRING_SERVICE = "ncmp desktop"
 
 # 每个字段的提示文本（placeholder）与悬停说明（tooltip）
 FIELD_HINTS: Dict[str, Dict[str, str]] = {
@@ -227,6 +227,7 @@ class SettingsPage(QWidget):
 
     # 定时配置保存后通知主窗口重排定时器
     schedule_config_changed = Signal()
+    close_action_changed = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -237,6 +238,7 @@ class SettingsPage(QWidget):
         self._build_ui()
         self.load_from_config()
         self._load_schedule_config()
+        self._load_close_action_config()
 
     # ------------------------------------------------------------------
     # UI
@@ -263,11 +265,12 @@ class SettingsPage(QWidget):
         subtitle.setWordWrap(True)
         content_layout.addWidget(subtitle)
 
-        # 4 个分组区
+        # 各分组区
         self._sections = QVBoxLayout()
         self._sections.setSpacing(14)
         content_layout.addLayout(self._sections)
 
+        self._build_general_section()
         self._build_account_section()
         self._build_task_section()
         self._build_email_section()
@@ -437,6 +440,20 @@ class SettingsPage(QWidget):
         notify_schedule.setChecked(DEFAULTS["notify_on_schedule"])
         form.addRow("定时通知", notify_schedule)
         self._controls["notify_on_schedule"] = notify_schedule
+
+    def _build_general_section(self) -> None:
+        """应用自身行为配置（写入 AppConfig，不入 setting.json）。"""
+        form = self._new_section("常规")
+
+        close_combo = QComboBox()
+        close_combo.addItem("每次询问", "ask")
+        close_combo.addItem("最小化到托盘", "minimize")
+        close_combo.addItem("直接退出", "close")
+        close_combo.setCurrentIndex(0)
+        close_combo.setToolTip(
+            "点击关闭按钮时的行为：每次询问 / 最小化到托盘后台运行 / 直接退出程序。")
+        form.addRow("关闭按钮行为", close_combo)
+        self._close_action_combo = close_combo
 
     def _build_schedule_section(self) -> None:
         """定时执行配置（写入 AppConfig，不入 setting.json）。"""
@@ -833,6 +850,7 @@ class SettingsPage(QWidget):
             return
         # 定时执行配置进 AppConfig（独立文件，不入 setting.json）
         self._save_schedule_config()
+        self._save_close_action_config()
         QMessageBox.information(self, "保存", "配置已保存。")
 
     # ------------------------------------------------------------------
@@ -866,6 +884,38 @@ class SettingsPage(QWidget):
             pass
         # 通知主窗口重排定时器
         self.schedule_config_changed.emit()
+
+    def refresh_app_config(self) -> None:
+        """进入设置页时从磁盘重读 AppConfig 字段，避免与主窗口的改动不同步。"""
+        try:
+            self._app_config.load()
+        except Exception:
+            pass
+        self._load_schedule_config()
+        self._load_close_action_config()
+
+    def _load_close_action_config(self) -> None:
+        """从 AppConfig 读 close_action 到下拉框。"""
+        try:
+            value = self._app_config.close_action
+            data = "ask" if value is None else value
+            for i in range(self._close_action_combo.count()):
+                if self._close_action_combo.itemData(i) == data:
+                    self._close_action_combo.setCurrentIndex(i)
+                    break
+        except Exception:
+            pass
+
+    def _save_close_action_config(self) -> None:
+        """把下拉框选择写回 AppConfig（None=每次询问），并通知主窗口重读。"""
+        try:
+            data = self._close_action_combo.currentData() or "ask"
+            value = None if data == "ask" else data
+            self._app_config.set("close_action", value)
+            self._app_config.save()
+        except Exception:
+            pass
+        self.close_action_changed.emit()
 
     # ------------------------------------------------------------------
     # GitHub cron / Cookie Secrets 同步

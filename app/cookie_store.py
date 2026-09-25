@@ -27,7 +27,7 @@ class CookieStore:
     以便核心层在加载配置时可直接读到此处写入的 Cookie。
     """
 
-    SERVICE = "ncmp-desktop"
+    SERVICE = "ncmp desktop"
 
     def __init__(self) -> None:
         self._available = _KEYRING_AVAILABLE

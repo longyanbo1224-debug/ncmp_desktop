@@ -38,7 +38,7 @@ class ActionsTrigger:
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "ncmp-desktop",
+            "User-Agent": "ncmp desktop",
         })
         # repo 兼容完整 URL：https://github.com/owner/repo -> owner/repo
         repo = (repo or "").strip()
@@ -255,7 +255,7 @@ class ActionsTrigger:
         url = (f"{self.API}/repos/{self.repo}/contents/"
                f".github/workflows/{workflow}")
         body: Dict[str, Any] = {
-            "message": "chore: sync full workflow from ncmp-desktop",
+            "message": "chore: sync full workflow from ncmp desktop",
             "content": new_b64,
             "branch": branch,
         }

@@ -5,6 +5,7 @@
 """
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Any, Dict
 
@@ -23,7 +24,32 @@ def _default_config_path() -> Path:
         # PySide6 不可用或未构造 QCoreApplication 时降级到 pathlib
         base = Path.home() / ".ncmp_desktop"
     base.mkdir(parents=True, exist_ok=True)
+    _migrate_legacy_config(base)
     return base / "config.json"
+
+
+def _legacy_config_base() -> Path | None:
+    """旧版配置目录：Windows 下为 ``%APPDATA%`` 里的 ``ncmp-desktop`` 目录。"""
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "ncmp-desktop"
+    return None
+
+
+def _migrate_legacy_config(new_base: Path) -> None:
+    """把旧版配置目录迁移到新目录；只在目标不存在时复制，绝不覆盖，失败静默跳过。"""
+    legacy = _legacy_config_base()
+    if legacy is None or not legacy.is_dir() or legacy == new_base:
+        return
+    try:
+        for name in ("config.json", "task_history.json"):
+            src = legacy / name
+            dst = new_base / name
+            if src.is_file() and not dst.exists():
+                shutil.copy2(src, dst)
+    except Exception:
+        pass
 
 
 class AppConfig:

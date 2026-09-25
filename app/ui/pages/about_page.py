@@ -14,8 +14,8 @@ APP_DESCRIPTION = (
     "支持扫码/密码登录、任务可视化、GitHub Actions 云端触发。"
 )
 AUTHOR = "Galvin"
-GITHUB_URL = "https://github.com/longyanbo1224/ncmp"
-GITHUB_LABEL = "longyanbo1224/ncmp"
+GITHUB_URL = "https://github.com/longyanbo1224/ncmp_desktop"
+GITHUB_LABEL = "longyanbo1224/ncmp_desktop"
 UPSTREAM_URL = "https://github.com/ACAne0320/ncmp"
 UPSTREAM_LABEL = "ACAne0320/ncmp"
 LICENSE = "MIT License"
