@@ -10,7 +10,7 @@ ncmp 是什么：把网易云音乐「音乐合伙人」每日评分任务自动
 
 桌面版提供：可视化扫码/密码登录、实时任务执行视图（对标 Actions live log）、Cookie 到期提醒、参数表单配置、云端执行（关机也跑）。
 
-项目仓库：<https://github.com/longyanbo1224/ncmp_desktop>（fork 自上游 [ACAne0320/ncmp](https://github.com/ACAne0320/ncmp)）
+项目仓库：<https://github.com/longyanbo1224-debug/ncmp_desktop>（fork 自上游 [ACAne0320/ncmp](https://github.com/ACAne0320/ncmp)）
 
 ## 下载安装
 
@@ -147,7 +147,7 @@ Cookie 大约 2 周过期。程序后台会定时验证，失效时弹托盘通�
 
 ## 反馈
 
-问题或建议欢迎提 GitHub Issue：<https://github.com/longyanbo1224/ncmp_desktop/issues>。
+问题或建议欢迎提 GitHub Issue：<https://github.com/longyanbo1224-debug/ncmp_desktop/issues>。
 
 ## 后续计划
 
