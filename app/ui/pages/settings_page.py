@@ -63,6 +63,7 @@ SETTINGS_FIELDS = (
     "workflow_branch",
     "gh_disable_schedule",
     "gh_random_delay_minutes",
+    "gh_success_email",
 )
 
 # 首次使用 / Config 加载失败时的默认值（与 core.utils.config._apply_defaults 对齐）
@@ -89,6 +90,7 @@ DEFAULTS: Dict[str, Any] = {
     "workflow_branch": "main",
     "gh_disable_schedule": False,
     "gh_random_delay_minutes": 0,
+    "gh_success_email": False,
 }
 
 # keyring 服务名（与 CookieStore / Config 对齐，gh_token 用同一服务下的独立 key）
@@ -233,6 +235,7 @@ class SettingsPage(QWidget):
         super().__init__(parent)
         self._controls: Dict[str, Any] = {}
         self._gh_worker: Optional[_GitHubActionWorker] = None
+        self._loading_controls = False
         # 业务字段走 Config；定时字段走 AppConfig（独立文件，不入 setting.json）
         self._app_config = AppConfig()
         self._build_ui()
@@ -428,18 +431,24 @@ class SettingsPage(QWidget):
         notify_task_done.setChecked(DEFAULTS["notify_on_task_done"])
         form.addRow("完成通知", notify_task_done)
         self._controls["notify_on_task_done"] = notify_task_done
+        notify_task_done.toggled.connect(
+            lambda _checked: self._save_notify_options())
 
         notify_cookie_expired = QCheckBox("Cookie 失效时邮件通知")
         self._apply_hint(notify_cookie_expired, "notify_on_cookie_expired")
         notify_cookie_expired.setChecked(DEFAULTS["notify_on_cookie_expired"])
         form.addRow("失效通知", notify_cookie_expired)
         self._controls["notify_on_cookie_expired"] = notify_cookie_expired
+        notify_cookie_expired.toggled.connect(
+            lambda _checked: self._save_notify_options())
 
         notify_schedule = QCheckBox("定时执行结果邮件通知")
         self._apply_hint(notify_schedule, "notify_on_schedule")
         notify_schedule.setChecked(DEFAULTS["notify_on_schedule"])
         form.addRow("定时通知", notify_schedule)
         self._controls["notify_on_schedule"] = notify_schedule
+        notify_schedule.toggled.connect(
+            lambda _checked: self._save_notify_options())
 
     def _build_general_section(self) -> None:
         """应用自身行为配置（写入 AppConfig，不入 setting.json）。"""
@@ -498,7 +507,7 @@ class SettingsPage(QWidget):
             "2. 把 resources/workflow_example.yml 复制到 fork 仓库 .github/workflows/refresh_cookie.yml\n"
             "3. 生成 GitHub PAT（头像 → Settings → Developer settings → Personal access tokens → 勾 repo+workflow）\n"
             "4. 下方填 gh_token / gh_repo / workflow_name / workflow_branch → 点「保存」\n"
-            "5. 点「测试连接」验证；点「同步 Cookie 到 GitHub Secrets」把本地 Cookie 写到仓库\n"
+            "5. 点「测试连接」验证；点「同步 Cookie 和邮件到 GitHub Secrets」把本地 Cookie 和邮件写到仓库\n"
             "鼠标悬停各字段可见详细获取说明。")
         caption.setObjectName("captionText")
         caption.setWordWrap(True)
@@ -573,11 +582,12 @@ class SettingsPage(QWidget):
         cookie_row = QHBoxLayout()
         cookie_row.setSpacing(8)
         cookie_row.addStretch(0)
-        sync_cookie_btn = QPushButton("同步 Cookie 到 GitHub Secrets")
+        sync_cookie_btn = QPushButton("同步 Cookie 和邮件到 GitHub Secrets")
         sync_cookie_btn.setObjectName("secondaryButton")
         sync_cookie_btn.setToolTip(
-            "把本地 CookieStore 中的 MUSIC_U 与 __csrf 用 PyNaCl 加密后写入 GitHub Actions Secrets\n"
-            "（Cookie_MUSIC_U、Cookie___csrf），供云端 workflow 使用。需先填 gh_token/gh_repo。")
+            "把本地 CookieStore 中的 MUSIC_U 与 __csrf，以及「邮件通知」里的 NOTIFY_EMAIL、\n"
+            "EMAIL_PASSWORD、SMTP_SERVER、SMTP_PORT 一起加密写入 GitHub Actions Secrets，\n"
+            "供云端 workflow 使用。需先填 gh_token/gh_repo。")
         sync_cookie_btn.clicked.connect(self._sync_cookies_to_github)
         self._gh_cookie_btn = sync_cookie_btn
         cookie_row.addWidget(sync_cookie_btn)
@@ -602,18 +612,41 @@ class SettingsPage(QWidget):
         wf_row.addStretch(1)
         group_v.addLayout(wf_row)
 
-        # 云端定时开关：勾选后，「同步完整 workflow」会上传注释掉 GitHub 原生 cron 的版本
+        # 云端定时：像随机延迟一样用“标签 + 选择框”，不再用长文案勾选框
         schedule_switch_row = QHBoxLayout()
         schedule_switch_row.setSpacing(8)
-        self._gh_disable_schedule_check = QCheckBox(
-            "关闭云端定时（同步时注释 GitHub 原生 cron）")
-        self._gh_disable_schedule_check.setToolTip(
-            "勾选后点「同步完整 workflow」，会把 workflow 的 schedule 块注释掉。\n"
+        schedule_label = QLabel("云端定时")
+        schedule_label.setToolTip(
+            "选择「关闭」后点「同步完整 workflow」，会把 workflow 的 schedule 块注释掉。\n"
             "GitHub 将不再按 cron 自动执行，但「云端执行」手动触发仍可用。")
-        self._controls["gh_disable_schedule"] = self._gh_disable_schedule_check
-        schedule_switch_row.addWidget(self._gh_disable_schedule_check)
-        schedule_switch_row.addStretch(1)
+        schedule_switch_row.addWidget(schedule_label)
+        self._gh_disable_schedule_combo = QComboBox()
+        self._gh_disable_schedule_combo.addItem("启用", False)
+        self._gh_disable_schedule_combo.addItem("关闭", True)
+        self._gh_disable_schedule_combo.setToolTip(schedule_label.toolTip())
+        self._controls["gh_disable_schedule"] = self._gh_disable_schedule_combo
+        self._gh_disable_schedule_combo.currentIndexChanged.connect(
+            lambda _index: self._save_gh_workflow_options())
+        schedule_switch_row.addWidget(self._gh_disable_schedule_combo, 1)
         group_v.addLayout(schedule_switch_row)
+
+        # 成功邮件通知：同样改成下拉选择「开启 / 关闭」
+        success_email_row = QHBoxLayout()
+        success_email_row.setSpacing(8)
+        success_email_label = QLabel("成功邮件通知")
+        success_email_label.setToolTip(
+            "选择「开启」后点「同步完整 workflow」，workflow 会在任务成功时也发送邮件到 NOTIFY_EMAIL。\n"
+            "选择「关闭」则只在任务失败时发送失败邮件。")
+        success_email_row.addWidget(success_email_label)
+        self._gh_success_email_combo = QComboBox()
+        self._gh_success_email_combo.addItem("关闭", False)
+        self._gh_success_email_combo.addItem("开启", True)
+        self._gh_success_email_combo.setToolTip(success_email_label.toolTip())
+        self._controls["gh_success_email"] = self._gh_success_email_combo
+        self._gh_success_email_combo.currentIndexChanged.connect(
+            lambda _index: self._save_gh_workflow_options())
+        success_email_row.addWidget(self._gh_success_email_combo, 1)
+        group_v.addLayout(success_email_row)
 
         # 随机延迟启动：0=不启用；N=「同步完整 workflow」时把 0–N 分钟随机延迟写入 workflow
         delay_row = QHBoxLayout()
@@ -630,6 +663,8 @@ class SettingsPage(QWidget):
         self._gh_random_delay_spin.setToolTip(
             "0=不启用；N=0–N 分钟随机延迟（同步 workflow 时写入）。")
         self._controls["gh_random_delay_minutes"] = self._gh_random_delay_spin
+        self._gh_random_delay_spin.valueChanged.connect(
+            lambda _value: self._save_gh_workflow_options())
         delay_row.addWidget(self._gh_random_delay_spin, 1)
         group_v.addLayout(delay_row)
 
@@ -727,6 +762,7 @@ class SettingsPage(QWidget):
 
     def load_from_config(self) -> None:
         """从 Config（keyring>env>json）加载到表单；Config 不可用时用默认值预填。"""
+        self._loading_controls = True
         config: Optional[Config] = None
         try:
             config = Config()
@@ -769,6 +805,9 @@ class SettingsPage(QWidget):
                           bool(_val("gh_disable_schedule")))
         self._set_control("gh_random_delay_minutes",
                           int(_val("gh_random_delay_minutes")))
+        self._set_control("gh_success_email",
+                          bool(_val("gh_success_email")))
+        self._loading_controls = False
 
     def _set_control(self, key: str, value: Any) -> None:
         ctrl = self._controls.get(key)
@@ -782,7 +821,14 @@ class SettingsPage(QWidget):
             except Exception:
                 pass
         elif isinstance(ctrl, QComboBox):
-            ctrl.setCurrentText("" if value is None else str(value))
+            if key in ("gh_disable_schedule", "gh_success_email"):
+                target = bool(value)
+                for i in range(ctrl.count()):
+                    if bool(ctrl.itemData(i)) == target:
+                        ctrl.setCurrentIndex(i)
+                        break
+            else:
+                ctrl.setCurrentText("" if value is None else str(value))
         elif isinstance(ctrl, QCheckBox):
             ctrl.setChecked(bool(value))
 
@@ -795,14 +841,53 @@ class SettingsPage(QWidget):
             elif isinstance(ctrl, QSpinBox):
                 data[key] = ctrl.value()
             elif isinstance(ctrl, QComboBox):
-                # score 下拉用 userData（1/2/3/4），其它取文本
-                if key == "score":
+                # score 下拉用 userData（1/2/3/4），GitHub 开关也用 userData
+                if key in ("score", "gh_disable_schedule", "gh_success_email"):
                     data[key] = ctrl.currentData()
                 else:
                     data[key] = ctrl.currentText()
             elif isinstance(ctrl, QCheckBox):
                 data[key] = ctrl.isChecked()
         return data
+
+    def _save_form_keys(self, keys) -> None:
+        """把指定表单字段立即写入 setting.json，重启后仍保留。"""
+        if getattr(self, "_loading_controls", False):
+            return
+        import os
+        path = Config.config_file()
+        data: Dict[str, Any] = {}
+        try:
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                    if isinstance(loaded, dict):
+                        data = loaded
+        except Exception:
+            data = {}
+        for key in keys:
+            ctrl = self._controls.get(key)
+            if isinstance(ctrl, QCheckBox):
+                data[key] = ctrl.isChecked()
+            elif isinstance(ctrl, QComboBox):
+                data[key] = bool(ctrl.currentData())
+            elif isinstance(ctrl, QSpinBox):
+                data[key] = ctrl.value()
+        try:
+            Config.write_file_config(data)
+        except Exception:
+            pass
+
+    def _save_gh_workflow_options(self) -> None:
+        """GitHub workflow 选项变更后立即持久化。"""
+        self._save_form_keys(
+            ("gh_disable_schedule", "gh_random_delay_minutes", "gh_success_email"))
+
+    def _save_notify_options(self) -> None:
+        """邮件通知开关变更后立即持久化。"""
+        self._save_form_keys(
+            ("notify_on_task_done", "notify_on_cookie_expired",
+             "notify_on_schedule"))
 
     # ------------------------------------------------------------------
     # 按钮行为
@@ -973,7 +1058,7 @@ class SettingsPage(QWidget):
 
         用模板内容（跑 main.py 评分 + 用 Secrets Cookie，不密码登录刷 Cookie）
         覆盖 fork 仓库的 .github/workflows/{workflow_name}，避免用户手动复制。
-        若勾选「关闭云端定时」，会先注释掉 workflow 的 schedule 块。
+        若选择「关闭云端定时」，会先注释掉 workflow 的 schedule 块。
         """
         import os
         import sys
@@ -995,12 +1080,16 @@ class SettingsPage(QWidget):
         except Exception as e:
             self._set_gh_result(False, f"读取本地 workflow 模板失败：{e}")
             return
-        disable_schedule = self._gh_disable_schedule_check.isChecked()
+        disable_schedule = bool(self._gh_disable_schedule_combo.currentData())
+        self._save_gh_workflow_options()
         content = self._set_workflow_schedule(content, not disable_schedule)
         if not disable_schedule:
             content = self._set_workflow_cron(content, self._cloud_cron_from_editor())
         random_delay = self._gh_random_delay_spin.value()
         content = self._set_workflow_random_delay(content, random_delay)
+        success_email = bool(self._gh_success_email_combo.currentData())
+        self._save_gh_workflow_options()
+        content = self._set_workflow_success_email(content, success_email)
         message = ("正在同步完整 workflow（已关闭云端定时）…"
                    if disable_schedule
                    else "正在同步完整 workflow 到仓库…")
@@ -1060,11 +1149,29 @@ class SettingsPage(QWidget):
         return pattern.sub(
             lambda m: f"{m.group(1)}{value}{m.group(3)}", content)
 
+    @staticmethod
+    def _set_workflow_success_email(content: str, enabled: bool) -> str:
+        """把 workflow 成功邮件通知的默认开关写成 true/false。
+
+        workflow 模板里对应行：
+            SEND_SUCCESS_EMAIL: ${{ secrets.SEND_SUCCESS_EMAIL || 'false' }}
+        只替换 || 后面的默认值，保留仓库 Secret 覆盖能力。
+        """
+        import re
+        pattern = re.compile(
+            r"^(\s*SEND_SUCCESS_EMAIL:\s*\$\{\{\s*secrets\.SEND_SUCCESS_EMAIL\s*\|\|\s*')"
+            r"(true|false)('\s*\}\}\s*)$",
+            re.MULTILINE,
+        )
+        return pattern.sub(
+            lambda m: f"{m.group(1)}{'true' if enabled else 'false'}{m.group(3)}",
+            content)
+
     def _sync_cron_to_workflow(self) -> None:
         """读 cron 表达式 + workflow 配置，调 ActionsTrigger.update_workflow_cron。"""
-        if self._gh_disable_schedule_check.isChecked():
+        if bool(self._gh_disable_schedule_combo.currentData()):
             self._set_gh_result(
-                False, "已关闭云端定时，请先取消勾选后再同步 cron")
+                False, "已关闭云端定时，请先在「云端定时」选择启用后再同步 cron")
             return
         token, repo, workflow, branch = self._read_gh_form()
         # 读北京时间 HH:MM，转 UTC cron（GitHub Actions 用 UTC）
@@ -1082,7 +1189,7 @@ class SettingsPage(QWidget):
         )
 
     def _sync_cookies_to_github(self) -> None:
-        """从 CookieStore 读 MUSIC_U + __csrf，调 ActionsTrigger.sync_cookies 写入 Secrets。"""
+        """把 Cookie 和邮件通知配置一起写入 GitHub Actions Secrets。"""
         token, repo, _wf, _br = self._read_gh_form()
         if not token or not repo:
             self._set_gh_result(False, "请先填写 gh_token 与 gh_repo")
@@ -1095,9 +1202,28 @@ class SettingsPage(QWidget):
         if not (music_u and csrf):
             self._set_gh_result(False, "本地无 Cookie，请先登录后再同步")
             return
+        form = self._collect_form()
+        notify_email = str(form.get("notify_email") or "").strip()
+        email_password = str(form.get("email_password") or "").strip()
+        smtp_server = str(form.get("smtp_server") or "").strip()
+        smtp_port = str(form.get("smtp_port") or "").strip()
+
+        def _do_sync():
+            trigger = ActionsTrigger(token, repo)
+            ok, msg = trigger.sync_cookies(music_u, csrf)
+            if not ok:
+                return ok, msg
+            if notify_email and email_password:
+                ok2, msg2 = trigger.sync_email(
+                    notify_email, email_password, smtp_server, smtp_port)
+                if not ok2:
+                    return ok2, msg2
+                return True, f"{msg}；{msg2}"
+            return True, msg
+
         self._run_gh_async(
-            "正在加密并同步 Cookie 到 GitHub Secrets…",
-            lambda: ActionsTrigger(token, repo).sync_cookies(music_u, csrf),
+            "正在加密并同步 Cookie 和邮件到 GitHub Secrets…",
+            _do_sync,
         )
 
     def test_notification(self) -> None:

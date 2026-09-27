@@ -81,13 +81,13 @@ ncmp 是什么：把网易云音乐「音乐合伙人」每日评分任务自动
 2. 在设置页点「同步完整 workflow」，把 resources/workflow_example.yml 一键写入 fork 仓库的 .github/workflows/refresh_cookie.yml，并把你设置的「云端 cron」时间一并写入 schedule（也可手动复制）
 3. 生成 GitHub Personal Access Token（头像 → Settings → Developer settings → Personal access tokens → 勾选 repo + workflow）
 4. 桌面程序「设置 → GitHub Actions」组填 4 个字段（鼠标悬停字段有详细获取说明）→ 点「保存」→「测试连接」
-5. 点「同步 Cookie 到 GitHub Secrets」把本地 Cookie 写到仓库（Actions 才能用最新 Cookie）
+5. 点「同步 Cookie 和邮件到 GitHub Secrets」把本地 Cookie 和邮件通知配置一起写到仓库（Actions 才能用最新 Cookie / 发邮件）
 
-如果不想让 GitHub 按 cron 自动执行，只保留手动「云端执行」：勾选「关闭云端定时」后再点「同步完整 workflow」。GitHub 原生 cron 是否自动跑，和桌面程序「定时执行」里选本地/云端无关。
+如果不想让 GitHub 按 cron 自动执行，只保留手动「云端执行」：在「云端定时」选择「关闭」后再点「同步完整 workflow」。GitHub 原生 cron 是否自动跑，和桌面程序「定时执行」里选本地/云端无关。
 
 可选「随机延迟启动」：设置页设为 0–30 分钟，点「同步完整 workflow」时会写入 workflow（也可用仓库 Secret `RANDOM_DELAY_MINUTES` 覆盖），把每日固定时间错开为随机延迟，降低风控风险。
 
-workflow 已内置失败邮件步骤：云端执行失败会通过 `NOTIFY_EMAIL` / `EMAIL_PASSWORD` / `SMTP_SERVER` / `SMTP_PORT` 发邮件并附日志末尾；这些 Secret 不填则跳过。
+workflow 已内置失败邮件步骤：云端执行失败会通过 `NOTIFY_EMAIL` / `EMAIL_PASSWORD` / `SMTP_SERVER` / `SMTP_PORT` 发邮件并附日志末尾；这些 Secret 不填则跳过。成功邮件默认关闭，可在设置页「成功邮件通知」选择「开启」后点「同步完整 workflow」打开（也可用仓库 Secret `SEND_SUCCESS_EMAIL=true` 覆盖）。
 
 若 fork 仓库还保留上游的 `.github/workflows/auto_score.yml`，会与本 workflow 重复执行；请删除 `auto_score.yml`，或注释/删除其 `schedule` 块，只保留一个评分 workflow。
 

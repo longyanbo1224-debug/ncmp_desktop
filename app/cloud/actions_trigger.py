@@ -13,6 +13,7 @@ workflow cron 与 Actions Secrets：
     - get_repo_public_key() -> (ok, key_b64_or_err, key_id)
     - set_secret(name, value) -> (ok, msg)：PyNaCl SealedBox 加密后 PUT
     - sync_cookies(music_u, csrf) -> (ok, msg)：写 Cookie_MUSIC_U + Cookie___csrf
+    - sync_email(notify_email, email_password, smtp_server, smtp_port) -> (ok, msg)：写邮件通知 Secrets
 
 错误处理统一返回 (False, msg)，不抛异常，便于上层直接 emit。
 状态码映射：
@@ -432,6 +433,35 @@ class ActionsTrigger:
         if not ok2:
             return False, f"同步 __csrf 失败：{msg2}"
         return True, "Cookie 已同步到 GitHub Secrets（Cookie_MUSIC_U + Cookie___csrf）"
+
+    def sync_email(self, notify_email: str, email_password: str,
+                   smtp_server: str = "", smtp_port: str = "") -> Tuple[bool, str]:
+        """把邮件通知配置同步到 GitHub Actions Secrets。
+
+        :param notify_email: 接收通知的邮箱
+        :param email_password: SMTP 授权码
+        :param smtp_server: SMTP 服务器（可选，留空则不写入）
+        :param smtp_port: SMTP 端口（可选，留空则不写入）
+        :return: (ok, msg)；所有非空字段全部写入才返回 True
+        """
+        notify_email = (notify_email or "").strip()
+        email_password = (email_password or "").strip()
+        if not notify_email or not email_password:
+            return False, "NOTIFY_EMAIL 和 EMAIL_PASSWORD 均不能为空"
+        written = []
+        for name, value in (
+            ("NOTIFY_EMAIL", notify_email),
+            ("EMAIL_PASSWORD", email_password),
+            ("SMTP_SERVER", (smtp_server or "").strip()),
+            ("SMTP_PORT", str(smtp_port or "").strip()),
+        ):
+            if not value:
+                continue
+            ok, msg = self.set_secret(name, value)
+            if not ok:
+                return False, f"同步 {name} 失败：{msg}"
+            written.append(name)
+        return True, f"邮件配置已同步到 GitHub Secrets（{', '.join(written)}）"
 
     # ------------------------------------------------------------------
     # 内部

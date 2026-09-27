@@ -215,6 +215,77 @@ jobs:
           print("已发送失败邮件")
           PY
 
+      - name: Send success email
+        if: ${{ always() && steps.run_ncmp.outcome == 'success' }}
+        env:
+          SEND_SUCCESS_EMAIL: ${{ secrets.SEND_SUCCESS_EMAIL || 'false' }}
+          NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_NUMBER: ${{ github.run_number }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "${SEND_SUCCESS_EMAIL:-false}" != "true" ]; then
+            echo "成功邮件通知未开启，跳过"
+            exit 0
+          fi
+          python - <<'PY'
+          import os
+          import smtplib
+          import ssl
+          from email.header import Header
+          from email.mime.text import MIMEText
+
+          receiver = os.environ.get("NOTIFY_EMAIL", "").strip()
+          password = os.environ.get("EMAIL_PASSWORD", "").strip()
+          if not receiver or not password:
+              print("未配置 NOTIFY_EMAIL / EMAIL_PASSWORD，跳过成功邮件")
+              raise SystemExit(0)
+
+          sender = receiver
+          server = os.environ.get("SMTP_SERVER", "").strip() or "smtp.gmail.com"
+          port = int(os.environ.get("SMTP_PORT", "465").strip() or "465")
+          repo = os.environ.get("REPO", "")
+          run_number = os.environ.get("RUN_NUMBER", "")
+          run_url = os.environ.get("RUN_URL", "")
+
+          tail = ""
+          try:
+              with open("run_output.log", encoding="utf-8", errors="ignore") as f:
+                  tail = "".join(f.readlines()[-40:])
+          except Exception:
+              pass
+
+          subject = f"ncmp 云端执行成功（{repo} run #{run_number}）"
+          body = (
+              "GitHub Actions 云端任务执行成功。\n"
+              f"仓库：{repo}\n"
+              f"Run：{run_url}\n\n"
+              f"日志末尾：\n{tail or '（无日志）'}"
+          )
+          msg = MIMEText(body, "plain", "utf-8")
+          msg["Subject"] = Header(subject, "utf-8")
+          msg["From"] = sender
+          msg["To"] = receiver
+
+          try:
+              if port == 465:
+                  with smtplib.SMTP_SSL(server, port, context=ssl.create_default_context(), timeout=30) as s:
+                      s.login(sender, password)
+                      s.sendmail(sender, [receiver], msg.as_string())
+              else:
+                  with smtplib.SMTP(server, port, timeout=30) as s:
+                      s.starttls(context=ssl.create_default_context())
+                      s.login(sender, password)
+                      s.sendmail(sender, [receiver], msg.as_string())
+          except Exception as e:
+              print(f"发送成功邮件失败：{e}")
+              raise SystemExit(0)
+          print("已发送成功邮件")
+          PY
+
       - name: Check result
         if: ${{ steps.run_ncmp.outcome == 'failure' }}
         run: |
