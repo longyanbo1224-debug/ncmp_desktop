@@ -81,7 +81,11 @@ ncmp 是什么：把网易云音乐「音乐合伙人」每日评分任务自动
 2. 在设置页点「同步完整 workflow」，把 resources/workflow_example.yml 一键写入 fork 仓库的 .github/workflows/refresh_cookie.yml，并把你设置的「云端 cron」时间一并写入 schedule（也可手动复制）
 3. 生成 GitHub Personal Access Token（头像 → Settings → Developer settings → Personal access tokens → 勾选 repo + workflow）
 4. 桌面程序「设置 → GitHub Actions」组填 4 个字段（鼠标悬停字段有详细获取说明）→ 点「保存」→「测试连接」
-5. 点「同步 Cookie 和邮件到 GitHub Secrets」把本地 Cookie 和邮件通知配置一起写到仓库（Actions 才能用最新 Cookie / 发邮件）
+5. 点「同步 Cookie、邮件和任务参数到 GitHub Secrets」把本地 Cookie、邮件通知配置和「完成所有额外任务」开关一起写到仓库（Actions 才能用最新 Cookie / 发邮件 / 按开关完成额外任务）
+
+也可以直接点「一键同步全部」，它会按当前设置依次完成第 2 步和第 5 步：先同步完整 workflow，再同步 Cookie、邮件和任务参数。
+
+两个同步按钮怎么选：改了 Cookie 或邮箱授权码 → 只点「同步 Cookie、邮件和任务参数到 GitHub Secrets」；改了 cron / 定时 / 成功邮件开关 → 点「同步完整 workflow」。
 
 如果不想让 GitHub 按 cron 自动执行，只保留手动「云端执行」：在「云端定时」选择「关闭」后再点「同步完整 workflow」。GitHub 原生 cron 是否自动跑，和桌面程序「定时执行」里选本地/云端无关。
 

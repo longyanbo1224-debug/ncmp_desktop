@@ -19,7 +19,7 @@
 """
 import hashlib
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from PySide6.QtCore import Qt, QThread, QTime, Signal
 from PySide6.QtWidgets import (
@@ -507,7 +507,7 @@ class SettingsPage(QWidget):
             "2. 把 resources/workflow_example.yml 复制到 fork 仓库 .github/workflows/refresh_cookie.yml\n"
             "3. 生成 GitHub PAT（头像 → Settings → Developer settings → Personal access tokens → 勾 repo+workflow）\n"
             "4. 下方填 gh_token / gh_repo / workflow_name / workflow_branch → 点「保存」\n"
-            "5. 点「测试连接」验证；点「同步 Cookie 和邮件到 GitHub Secrets」把本地 Cookie 和邮件写到仓库\n"
+            "5. 点「测试连接」验证；点「同步 Cookie、邮件和任务参数到 GitHub Secrets」把本地 Cookie、邮件和任务开关写到仓库\n"
             "鼠标悬停各字段可见详细获取说明。")
         caption.setObjectName("captionText")
         caption.setWordWrap(True)
@@ -582,12 +582,18 @@ class SettingsPage(QWidget):
         cookie_row = QHBoxLayout()
         cookie_row.setSpacing(8)
         cookie_row.addStretch(0)
-        sync_cookie_btn = QPushButton("同步 Cookie 和邮件到 GitHub Secrets")
+        sync_cookie_btn = QPushButton("同步 Cookie、邮件和任务参数到 GitHub Secrets")
         sync_cookie_btn.setObjectName("secondaryButton")
         sync_cookie_btn.setToolTip(
-            "把本地 CookieStore 中的 MUSIC_U 与 __csrf，以及「邮件通知」里的 NOTIFY_EMAIL、\n"
-            "EMAIL_PASSWORD、SMTP_SERVER、SMTP_PORT 一起加密写入 GitHub Actions Secrets，\n"
-            "供云端 workflow 使用。需先填 gh_token/gh_repo。")
+            "把本地配置加密写入 GitHub Actions Secrets：\n"
+            "  1. Cookie：MUSIC_U → Cookie_MUSIC_U\n"
+            "  2. Cookie：__csrf → Cookie___csrf\n"
+            "  3. 邮件通知：NOTIFY_EMAIL / EMAIL_PASSWORD / SMTP_SERVER / SMTP_PORT\n"
+            "  4. 完成所有额外任务开关 → FULL_EXTRA_TASKS（true/false）\n"
+            "怎么选：\n"
+            "  · 改了 Cookie 或邮箱授权码 → 点这里（只写 Secrets，不用重写 workflow 文件）。\n"
+            "  · 改了 cron / 定时 / 成功邮件开关 → 点上方「同步完整 workflow」。\n"
+            "需先填 gh_token/gh_repo。")
         sync_cookie_btn.clicked.connect(self._sync_cookies_to_github)
         self._gh_cookie_btn = sync_cookie_btn
         cookie_row.addWidget(sync_cookie_btn)
@@ -603,14 +609,36 @@ class SettingsPage(QWidget):
         sync_wf_btn.setToolTip(
             "把桌面程序自带的 workflow 模板（resources/workflow_example.yml）\n"
             "完整覆盖到 fork 仓库的 .github/workflows/{workflow_name}。\n"
-            "同步时会把「云端 cron」时间（北京时间）一并写入 schedule。\n"
-            "该模板跑 python main.py 评分任务 + 用 Secrets 里的 Cookie，\n"
-            "不依赖密码登录刷 Cookie（避免风控）。需先填 gh_token/gh_repo/workflow_name/branch。")
+            "按当前设置写入：\n"
+            "  1. 云端 cron：北京时间转 UTC 后写入 schedule\n"
+            "  2. 云端定时：选择「关闭」则注释 schedule 块\n"
+            "  3. 随机延迟启动：写入 RANDOM_DELAY_MINUTES 默认值\n"
+            "  4. 成功邮件通知：写入 SEND_SUCCESS_EMAIL 默认值\n"
+            "怎么选：\n"
+            "  · 改了 cron / 定时 / 成功邮件开关 → 点这里（只改 workflow 文件，不写 Secrets）。\n"
+            "  · 改了 Cookie 或邮箱授权码 → 点下方「同步 Cookie、邮件和任务参数到 GitHub Secrets」。\n"
+            "需先填 gh_token/gh_repo/workflow_name/branch。")
         sync_wf_btn.clicked.connect(self._sync_full_workflow)
         self._gh_wf_btn = sync_wf_btn
         wf_row.addWidget(sync_wf_btn)
         wf_row.addStretch(1)
         group_v.addLayout(wf_row)
+
+        all_row = QHBoxLayout()
+        all_row.setSpacing(8)
+        all_row.addStretch(0)
+        sync_all_btn = QPushButton("一键同步全部")
+        sync_all_btn.setObjectName("secondaryButton")
+        sync_all_btn.setToolTip(
+            "按当前设置依次执行：同步完整 workflow → 同步 Cookie → 同步邮件 → 同步任务参数。\n"
+            "任一步失败会停止并提示。\n"
+            "什么时候点这里：想一次把所有设置都同步到 GitHub。\n"
+            "需先填 gh_token/gh_repo/workflow_name/branch，并已登录保存本地 Cookie。")
+        sync_all_btn.clicked.connect(self._sync_all_to_github)
+        self._gh_all_btn = sync_all_btn
+        all_row.addWidget(sync_all_btn)
+        all_row.addStretch(1)
+        group_v.addLayout(all_row)
 
         # 云端定时：像随机延迟一样用“标签 + 选择框”，不再用长文案勾选框
         schedule_switch_row = QHBoxLayout()
@@ -1026,7 +1054,8 @@ class SettingsPage(QWidget):
     def _set_gh_busy(self, busy: bool) -> None:
         """切换 GitHub 区加载状态：显示/隐藏进度条并禁用相关按钮。"""
         for btn in (self._gh_test_btn, self._gh_cron_btn,
-                    self._gh_cookie_btn, self._gh_wf_btn):
+                    self._gh_cookie_btn, self._gh_wf_btn,
+                    self._gh_all_btn):
             btn.setEnabled(not busy)
         if busy:
             self._gh_busy_bar.show()
@@ -1060,12 +1089,81 @@ class SettingsPage(QWidget):
         覆盖 fork 仓库的 .github/workflows/{workflow_name}，避免用户手动复制。
         若选择「关闭云端定时」，会先注释掉 workflow 的 schedule 块。
         """
-        import os
-        import sys
         token, repo, workflow, branch = self._read_gh_form()
         if not (token and repo and workflow and branch):
             self._set_gh_result(False, "请先填写 gh_token / gh_repo / workflow_name / workflow_branch")
             return
+        content, err = self._read_workflow_template()
+        if content is None:
+            self._set_gh_result(False, err)
+            return
+        content = self._build_workflow_content(content)
+        message = ("正在同步完整 workflow（已关闭云端定时）…"
+                   if bool(self._gh_disable_schedule_combo.currentData())
+                   else "正在同步完整 workflow 到仓库…")
+        self._run_gh_async(
+            message,
+            lambda: ActionsTrigger(token, repo).sync_full_workflow(
+                workflow, branch, content),
+        )
+
+    def _sync_all_to_github(self) -> None:
+        """按当前设置依次同步 workflow、Cookie、邮件和任务参数。"""
+        token, repo, workflow, branch = self._read_gh_form()
+        if not (token and repo and workflow and branch):
+            self._set_gh_result(False, "请先填写 gh_token / gh_repo / workflow_name / workflow_branch")
+            return
+        content, err = self._read_workflow_template()
+        if content is None:
+            self._set_gh_result(False, err)
+            return
+        content = self._build_workflow_content(content)
+        try:
+            music_u, csrf, _ = CookieStore().load()
+        except Exception as e:
+            self._set_gh_result(False, f"读取本地 Cookie 失败：{e}")
+            return
+        if not (music_u and csrf):
+            self._set_gh_result(False, "本地无 Cookie，请先登录后再一键同步全部")
+            return
+        form = self._collect_form()
+        notify_email = str(form.get("notify_email") or "").strip()
+        email_password = str(form.get("email_password") or "").strip()
+        smtp_server = str(form.get("smtp_server") or "").strip()
+        smtp_port = str(form.get("smtp_port") or "").strip()
+        full_extra_tasks = bool(form.get("full_extra_tasks", True))
+
+        def _do_sync():
+            trigger = ActionsTrigger(token, repo)
+            ok, msg = trigger.sync_full_workflow(workflow, branch, content)
+            if not ok:
+                return False, f"同步 workflow 失败：{msg}"
+            parts = [msg]
+            ok2, msg2 = trigger.sync_cookies(music_u, csrf)
+            if not ok2:
+                return False, f"同步 Cookie 失败：{msg2}"
+            parts.append(msg2)
+            if notify_email and email_password:
+                ok3, msg3 = trigger.sync_email(
+                    notify_email, email_password, smtp_server, smtp_port)
+                if not ok3:
+                    return False, f"同步邮件配置失败：{msg3}"
+                parts.append(msg3)
+            ok4, msg4 = trigger.sync_full_extra_tasks(full_extra_tasks)
+            if not ok4:
+                return False, f"同步任务参数失败：{msg4}"
+            parts.append(msg4)
+            return True, "；".join(parts)
+
+        self._run_gh_async(
+            "正在一键同步 workflow 和 Secrets…",
+            _do_sync,
+        )
+
+    def _read_workflow_template(self) -> Tuple[Optional[str], str]:
+        """读取 resources/workflow_example.yml；失败返回 (None, 错误信息)。"""
+        import os
+        import sys
         # 定位 resources/workflow_example.yml
         # 打包后 __file__ 在 _internal/app/ui/pages/，sys._MEIPASS = _internal/
         # 开发模式 __file__ 在 <root>/app/ui/pages/settings_page.py，向上 4 级到项目根
@@ -1076,10 +1174,12 @@ class SettingsPage(QWidget):
         yml_path = os.path.join(base, "resources", "workflow_example.yml")
         try:
             with open(yml_path, "r", encoding="utf-8") as f:
-                content = f.read()
+                return f.read(), ""
         except Exception as e:
-            self._set_gh_result(False, f"读取本地 workflow 模板失败：{e}")
-            return
+            return None, f"读取本地 workflow 模板失败：{e}"
+
+    def _build_workflow_content(self, content: str) -> str:
+        """按当前 GitHub 区设置生成要上传的完整 workflow 内容。"""
         disable_schedule = bool(self._gh_disable_schedule_combo.currentData())
         self._save_gh_workflow_options()
         content = self._set_workflow_schedule(content, not disable_schedule)
@@ -1090,14 +1190,7 @@ class SettingsPage(QWidget):
         success_email = bool(self._gh_success_email_combo.currentData())
         self._save_gh_workflow_options()
         content = self._set_workflow_success_email(content, success_email)
-        message = ("正在同步完整 workflow（已关闭云端定时）…"
-                   if disable_schedule
-                   else "正在同步完整 workflow 到仓库…")
-        self._run_gh_async(
-            message,
-            lambda: ActionsTrigger(token, repo).sync_full_workflow(
-                workflow, branch, content),
-        )
+        return content
 
     @staticmethod
     def _set_workflow_schedule(content: str, enabled: bool) -> str:
@@ -1207,22 +1300,28 @@ class SettingsPage(QWidget):
         email_password = str(form.get("email_password") or "").strip()
         smtp_server = str(form.get("smtp_server") or "").strip()
         smtp_port = str(form.get("smtp_port") or "").strip()
+        full_extra_tasks = bool(form.get("full_extra_tasks", True))
 
         def _do_sync():
             trigger = ActionsTrigger(token, repo)
             ok, msg = trigger.sync_cookies(music_u, csrf)
             if not ok:
                 return ok, msg
+            parts = [msg]
             if notify_email and email_password:
                 ok2, msg2 = trigger.sync_email(
                     notify_email, email_password, smtp_server, smtp_port)
                 if not ok2:
                     return ok2, msg2
-                return True, f"{msg}；{msg2}"
-            return True, msg
+                parts.append(msg2)
+            ok3, msg3 = trigger.sync_full_extra_tasks(full_extra_tasks)
+            if not ok3:
+                return ok3, msg3
+            parts.append(msg3)
+            return True, "；".join(parts)
 
         self._run_gh_async(
-            "正在加密并同步 Cookie 和邮件到 GitHub Secrets…",
+            "正在加密并同步 Cookie、邮件和任务参数到 GitHub Secrets…",
             _do_sync,
         )
 

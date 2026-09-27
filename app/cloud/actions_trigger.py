@@ -14,6 +14,7 @@ workflow cron 与 Actions Secrets：
     - set_secret(name, value) -> (ok, msg)：PyNaCl SealedBox 加密后 PUT
     - sync_cookies(music_u, csrf) -> (ok, msg)：写 Cookie_MUSIC_U + Cookie___csrf
     - sync_email(notify_email, email_password, smtp_server, smtp_port) -> (ok, msg)：写邮件通知 Secrets
+    - sync_full_extra_tasks(enabled) -> (ok, msg)：写 FULL_EXTRA_TASKS Secret
 
 错误处理统一返回 (False, msg)，不抛异常，便于上层直接 emit。
 状态码映射：
@@ -462,6 +463,11 @@ class ActionsTrigger:
                 return False, f"同步 {name} 失败：{msg}"
             written.append(name)
         return True, f"邮件配置已同步到 GitHub Secrets（{', '.join(written)}）"
+
+    def sync_full_extra_tasks(self, enabled: bool) -> Tuple[bool, str]:
+        """把「完成所有额外任务」开关同步为 Secret FULL_EXTRA_TASKS。"""
+        value = "true" if enabled else "false"
+        return self.set_secret("FULL_EXTRA_TASKS", value)
 
     # ------------------------------------------------------------------
     # 内部
