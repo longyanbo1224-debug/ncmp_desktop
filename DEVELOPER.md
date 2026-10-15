@@ -14,12 +14,18 @@
 
 - 可视化获取 Cookie（扫码 + 手机号密码双通道，密码登录风控时自动提示改扫码）
 - Cookie 本地 keyring 加密存储（替代明文 `setting.json` 与 GitHub Secrets 回写）
-- 到期提醒重新获取（后台定时验证 + 系统托盘原生通知 + 自动跳转登录页）
-- 实时任务执行可视化（流式日志 + 结构化步骤视图，对标 GitHub Actions live log 体验）
-- 参数表单化配置（13+ 项做成控件，5+1 分组）
+- 到期提醒重新获取（后台定时验证 + 应用内通知 + 自动跳转登录页）
+- 实时任务执行可视化（流式日志 + 结构化步骤视图 + 分段电平表，对标 GitHub Actions live log 体验）
+- 参数表单化配置（20+ 项做成控件，6 分组）
 - 本地定时（QTimer 到点自动触发）+ 云端 Actions 触发双执行模式（电脑关机也能跑）
+- 本地定时支持**随机延迟**与**错过补跑**（开机晚了自动补一次）
+- 每日签到（可选，与评分任务互不阻塞）
+- 失败原因分类（网络 / 风控 / Cookie / 接口 / 未知）+ 只对网络类自动重试一次
+- 连续打卡图（53 周格子图，按天聚合）
 - Cookie 一键同步到 GitHub Secrets（PyNaCl 加密）+ 云端 cron 远程修改 + 一键关闭 GitHub 原生定时 + 随机延迟启动（可 Secret 覆盖）
+- 持久化日志（按天滚动保留 7 天）+ 启动时自动更新检查（只提示不替换）
 - 品牌图标统一（窗口 / 任务栏 / 托盘 / exe，AppUserModelID）
+- 自带设计系统：`app/ui/theme.py` 单点定义全部设计变量，QSS 运行时生成（详见 [DESIGN.md](DESIGN.md)）
 
 > 与原 ncmp 的关系：`core/` 层基于 ncmp 源码改造（4 个文件加回调/取消点/keyring，其余直接复用），`app/` 层为全新桌面应用层。原 `core/utils/github.py`（GitHub Secrets 回写）已废弃，改由 `app/cloud/actions_trigger.py` 触发 Actions 代替回写。
 
@@ -33,23 +39,45 @@
 - **任务可视化**：
   - 实时日志流——`GuiLogHandler` 挂 `logging` root，把 ncmp 全部日志通过 Qt 信号推到 UI 文本框（对标 Actions live log）；`emit` 内对 `pyncm.*` 的 DEBUG/INFO 噪音做过滤（双保险，避免扫码轮询刷屏）。
   - 结构化步骤视图——`StepList` 按 `running` / `success` / `failed` / `cancelled` / `pending` 五态推进，每步带语义色图标与耗时。
-- **三态状态驱动首页**：Dashboard 根据 Cookie 状态切 `unconfigured`（未配置，灰色 key 图标空状态）/ `valid`（有效，绿色）/ `expired`（失效，红色）三态卡片，主按钮随状态变（立即获取 Cookie / 立即执行任务 / 重新登录），闭环引导配置→登录→执行。
+- **首页：一句话 + 一年格子图 + 最近几次**：Cookie 状态与当天执行结果合成**四种陈述**——「还没有登录」/「Cookie 失效了」/「今天还没跑」/「今天已跑（或今天跑失败了 / 今天手动取消了）」，用 34px 宋体一句话直说，颜色随状态变。下面是一张 53 周连续打卡图（绿=成功 / 红=失败 / 灰=没跑，悬停看具体日期），再下面是最近 5 次明细（只有失败和取消才展开原因）。主按钮随状态变（立即登录 / 重新登录 / 立即执行）。
+- **每日签到**：`core/tasks/sign_in.py`，`WeapiCryptoRequest` 装饰器 + 自建 pyncm 会话调 `/weapi/point/dailyTask`。接在「验证用户信息」之后、评分之前。**签到失败只把这一步标红，`run()` 照常返回 True**——签到是附赠项，接口挂了不该拖垮评分主任务。开关 `sign_in_enabled`（默认开）。
 - **本地执行**：`TaskWorker`（QThread）调 `core.bot.MusicPartnerBot.run()`，bot 带 `on_step(name, status, elapsed)` / `on_progress(done, total, song_name, score)` / `cancel_event` 三个回调，通过 Qt 信号转发到主线程 UI；`Signer._sleep` 分段循环 `cancel_event.wait(1)`，点取消即时响应。
 - **云端执行**：`ActionsTrigger`（GitHub REST API 封装）触发 `workflow_dispatch` + `CloudWorker`（QThread）每 5 秒轮询 run 状态，电脑关机也跑（Actions 在 GitHub 云端执行，桌面程序只看状态）。复用 `StepList` 展示「触发 / 等待 / 完成」三阶段。
-- **本地定时**：`QTimer`（`setSingleShot(True)`）到点触发 + 60 秒心跳校准（防系统休眠 / 时钟漂移后失准）；模式 `local`（启动 TaskWorker）/ `cloud`（触发 Actions）/ `both`（两者都启动）；到点弹托盘通知「定时任务已启动」。
+- **本地定时**：`QTimer`（`setSingleShot(True)`）到点触发 + 60 秒心跳校准（防系统休眠 / 时钟漂移后失准）；模式 `local`（启动 TaskWorker）/ `cloud`（触发 Actions）/ `both`（两者都启动）；到点弹通知「定时任务已启动」。
+  - **随机延迟**：`local_delay_minutes`（0-30，默认 0）非零时，到点后再随机等 0~N 分钟才真正启动。固定整点发起请求本身就是个风控特征。延迟期间 `_pending_run=True`，补跑不会在这段窗口里重复触发。
+  - **错过补跑**：见下一条。
+- **错过补跑**：`MainWindow._maybe_catch_up()`，启动后 3 秒 + 每次心跳（60 秒）各检查一次。判定条件全部通过才补：定时已启用 / 补跑开关开 / 模式含 local / 没有任务在跑 / **没有延迟启动在排队** / 今天没成功过 / **今天没补过** / 已过今天的定时时刻 / 未过补跑截止（默认 23:00）/ 已配置 Cookie。
+  - **每天最多补一次**：触发前先写 `last_catchup_date`。补跑失败也记这一笔——否则心跳会每分钟重试直到截止时间，那是重试风暴，正是最重的风控特征。
+  - 成功一次写 `last_success_date`（`MainWindow._mark_success_today`），补跑靠它判断"今天跑过没有"。
+  - 只对本地模式生效：云端由 GitHub Actions 自己按 cron 跑，与本机开不开机无关。
 - **云端 cron 修改**：调 GitHub Contents API 读 workflow 文件 → 正则替换 `cron:` 行 → base64 编码 PUT 回仓库，远程修改 fork workflow 的 schedule；「同步完整 workflow」支持选择「云端定时=关闭」后上传注释掉 `schedule` 块的版本；选择「启用」时会把「云端 cron」北京时间转 UTC 写入 schedule，并按「随机延迟启动」设置写入 `RANDOM_DELAY_MINUTES` 默认值（仓库 Secret 可覆盖），按「成功邮件通知」选择写入 `SEND_SUCCESS_EMAIL` 默认值（仓库 Secret 可覆盖）。
 - **Cookie + 邮件 + 任务参数同步 GitHub Secrets**：`ActionsTrigger.set_secret` 用 PyNaCl `SealedBox` 加密 value 后 PUT 到 `/repos/{repo}/actions/secrets/{name}`；`sync_cookies` 一键把本地 `MUSIC_U` + `__csrf` 写入 `Cookie_MUSIC_U` + `Cookie___csrf`，`sync_email` 把 `NOTIFY_EMAIL` / `EMAIL_PASSWORD` / `SMTP_SERVER` / `SMTP_PORT` 写入对应 Secrets，`sync_full_extra_tasks` 把 `FULL_EXTRA_TASKS` 写入 `true`/`false`，供 Actions 用。PyNaCl 未装时 deferred import 兜底返回明确错误。
-- **系统托盘 + Windows 通知 + 关闭确认**：`QSystemTrayIcon` 常驻，双击恢复，右键菜单（显示主窗口 / 立即执行 / 检查刷新 Cookie / 关于 / 退出）；通知优先用托盘气泡 `showMessage`，否则降级 plyer / print；`closeEvent` 拦截，按 `AppConfig.close_action`（`None`=每次弹确认框 / `"close"`=直接关 / `"minimize"`=最小化到托盘）决定，可选「不再提示」并持久化；选择「直接关闭」与托盘「退出」统一走 `MainWindow.quit_app()`——先停后台线程（`ValidateWorker` / `TaskWorker`），再移除托盘图标，最后 `QApplication.quit()`，避免后台进程残留。
+- **系统托盘 + 应用内通知 + 关闭确认**：`QSystemTrayIcon` 常驻，双击恢复，右键菜单（显示主窗口 / 立即执行 / 检查刷新 Cookie / 关于 / 退出）；`closeEvent` 拦截，按 `AppConfig.close_action`（`None`=每次弹确认框 / `"close"`=直接关 / `"minimize"`=最小化到托盘）决定，可选「不再提示」并持久化；选择「直接关闭」与托盘「退出」统一走 `MainWindow.quit_app()`——先停后台线程（`ValidateWorker` / `TaskWorker`），再移除托盘图标，最后 `QApplication.quit()`，避免后台进程残留。
+  - **通知优先走自绘气泡**（`app/ui/widgets/toast.py`）：系统托盘气泡长什么样由操作系统决定、程序改不了，所以右下角的通知自己画——白底细边圆角、**不抢焦点**（`WindowDoesNotAcceptFocus` + `WA_ShowWithoutActivating`）、5 秒淡出、点击关闭、多条向上堆叠、关掉一条后其余重排。系统关掉窗口动画（注册表 `MinAnimate=0`）时不做淡入。`QSystemTrayIcon.showMessage` 降级为兜底，再往下是 plyer / print。
+  - 顶层窗口只能在 GUI 线程建，`DesktopNotify._on_gui_thread()` 先判断线程，非 GUI 线程直接跳到托盘气泡。
 - **后台 Cookie 验证**：`ValidateWorker`（QThread）每 6 小时（`validate_interval_sec` 可调）跑 `CookieValidator` 三步验证（Cookie 存在 / 用户信息有效 / 任务权限），失效即托盘通知 + 主窗口 `alert` 闪烁 + 自动跳登录页。失效时按 `notify_on_cookie_expired` 开关（默认 True）调 `NotificationService.send_notification("ncmp Cookie 失效", "Cookie 已失效，请重新登录获取")` 发邮件；邮件发送失败不吞掉 `expired` 信号，UI 仍照常弹托盘通知 + 跳登录页。
 - **邮件通知（3 个开关）**：设置页「邮件通知」组除 SMTP 字段外还提供 3 个 `QCheckBox` 开关，均默认勾选；勾选/取消时立即写入 `setting.json`（`_save_notify_options`），同时兼容写入 `AppConfig` 双份（`AppConfig` 持久化、`Config` 读取）：
   - `notify_on_task_done`（默认 True）：**手动执行**任务完成 / 失败 / 取消时发邮件，由 `TaskWorker._send_email` 按 `notify_context == "task"` 分支读取。
   - `notify_on_cookie_expired`（默认 True）：后台 `ValidateWorker` 发现 Cookie 失效时发邮件（见上一条）。
   - `notify_on_schedule`（默认 True）：**定时执行**（`schedule_mode=local/both`）任务结果发邮件，由 `TaskWorker._send_email` 按 `notify_context == "schedule"` 分支读取，独立于 `notify_on_task_done`——定时执行只看这个开关。
-  - `TaskWorker._send_email(status)` 按 `self._notify_context`（`"task"` / `"schedule"`）选 `notify_on_task_done` / `notify_on_schedule`：开关关闭直接 return；按 `status` 决定文案（`success` → 「ncmp 任务完成」/「评分任务已成功完成」；`cancelled` → 「ncmp 任务已取消」/「用户手动取消任务」；`failed` → 「ncmp 任务失败」/「评分任务失败，请查看日志」）；`NotificationService` 抛异常静默吞掉不影响主流程。
-  - `CloudWorker._send_email(status, url)` 同样按 `notify_on_schedule` 开关发邮件（云端执行统一走这个开关）：`success` → 「ncmp 云端执行完成」/「GitHub Actions 云端任务已成功完成\nRun 详情：{url}」；`failed` → 「ncmp 云端执行失败」/「GitHub Actions 云端任务失败，请查看日志\nRun 详情：{url}」；本地取消轮询不发（远端 run 未完成无结论）。触发失败（ProxyError 等）也发 failed 邮件。
-- **取消任务提示（区分 cancelled / failed）**：用户点「取消」设 `cancel_event`，core 层 `Signer._sleep` / `MusicPartnerBot._check_cancel` 在下一个取消点 `raise CancelledError("用户取消任务")`（原 `bot.run` 改为 `raise` 透传而非 `return False`，便于上层区分取消与失败）；`bot.run` 标当前步骤 `cancelled` 后**重新抛出** `CancelledError`，`TaskWorker.run` 用 `except CancelledError` 捕获置 `status = "cancelled"`，通用 `Exception` 置 `status = "failed"`；`finished_sig = Signal(bool, str)` 现在传 `(ok, status)`（`ok` 对 cancelled/failed 均为 `False`）；`TaskPage._on_finished` 按 `status` 显示三种文案与样式（`success` → `✅ 任务执行完成` + `successText` 绿色；`cancelled` → `⚠️ 用户手动取消任务` + `warningText` 橙黄色，**不再显示「任务完成」**；`failed` → `❌ 任务执行失败` + `dangerText` 红色）；`MainWindow._on_task_finished_from_tray` 同样按 `status` 决定托盘通知文案（`cancelled` → 「用户手动取消任务」）。
-- **参数表单化配置**：13+ 项做成控件，6 个 `QGroupBox` 分组（常规 / 网易云账号 / 任务参数 / 邮件通知 / 定时执行 / GitHub Actions），废弃原 GH_TOKEN 回写改本地 keyring + 云端触发；附「测试通知」「验证 Cookie」「明文→MD5」「导入/导出 setting.json」工具按钮。
-- **品牌图标统一**：`create_app_icon`（圆角蓝底 `#2E7DDE` + 白色 `fa5s.music`）+ `setWindowIcon` + `AppUserModelID`（`ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ncmp.desktop.app")`，在 QApplication 构造前调用），让窗口 / 任务栏 / 托盘 / exe 图标统一，不再显示 python.exe 默认图标。
+  - `TaskWorker._send_email(status, kind)` 按 `self._notify_context`（`"task"` / `"schedule"`）选 `notify_on_task_done` / `notify_on_schedule`：开关关闭直接 return；按 `status` 决定主题与色条（`success` → 「ncmp 任务完成」；`cancelled` → 「ncmp 任务已取消」；`failed` → 「ncmp 任务失败（<失败分类>）」）；`kind` 非空时把分类和对应的「下一步」写进邮件。`NotificationService` 抛异常静默吞掉不影响主流程。
+  - `CloudWorker._send_email(status, url)` 同样按 `notify_on_schedule` 开关发邮件（云端执行统一走这个开关）：成功 → 「ncmp 云端执行完成」，失败 → 「ncmp 云端执行失败」并在 facts 里附 Run 链接、在「下一步」里提示去设置页重新同步 Cookie。本地取消轮询不发（远端 run 未完成无结论）。触发失败（ProxyError 等）也发 failed 邮件。
+- **邮件内容是 HTML**：`core/utils/notification.py` 的 `send_notification(subject, content, level, facts, action)` 发 `multipart/alternative`（纯文本 + HTML 两份，客户端按能力取）。HTML 用 table + 内联样式（邮件客户端对外部 CSS 支持很差），含状态色条、关键信息表（时间 / 方式 / 原因 / Run 链接）、以及出问题时的「下一步」提示框。用户内容一律 `html.escape`。原来的纯文本一句话（"评分任务失败，请查看日志"）收件人看不出是哪次、什么时候、失败在哪、该怎么办。
+- **取消任务提示（区分 cancelled / failed）**：用户点「取消」设 `cancel_event`，core 层 `Signer._sleep` / `MusicPartnerBot._check_cancel` 在下一个取消点 `raise CancelledError("用户取消任务")`（原 `bot.run` 改为 `raise` 透传而非 `return False`，便于上层区分取消与失败）；`bot.run` 标当前步骤 `cancelled` 后**重新抛出** `CancelledError`，`TaskWorker.run` 用 `except CancelledError` 捕获置 `status = "cancelled"`，通用 `Exception` 置 `status = "failed"`。
+  - `finished_sig = Signal(bool, str, str)`，传 `(ok, status, kind)`：`ok` 对 cancelled/failed 均为 `False`；`kind` 是失败原因分类（见下条），成功时为空串。
+  - `TaskPage._on_finished(ok, status, kind)` 按 `status` 显示三种文案与样式（`success` → 「任务执行完成」+ `successText` 绿色；`cancelled` → 「用户手动取消任务」+ `warningText` 琥珀，**不再显示「任务完成」**；`failed` → 「任务执行失败：<分类>」+ `dangerText` 红色，并在下方 `_hint_label` 显示对应的「下一步」）。**状态行只用颜色，不用 emoji**——早期版本在这里塞 `✅ ⚠️ ❌`，和步骤树的图标是两套语言，属于噪音，已去掉。
+  - `MainWindow._on_task_finished_from_tray(ok, status, kind)` 同样按 `status` 决定通知文案，并在成功时调 `_mark_success_today()`。
+- **失败原因分类**：`core/utils/errors.py` 的 `classify(exc)` 把异常归到五类——**Cookie 失效 / 风控拦截 / 网络异常 / 接口返回错误 / 未知**，每类带一句「下一步做什么」（`HINTS`），界面上显示在 `TaskPage._hint_label`，邮件里进 facts 和 action。
+  - **判定顺序很关键：网络类优先判。** `验证用户信息失败: <内层异常>` 这种包装过的消息里既有"验证用户信息"（像 Cookie 问题）又有网络错误原文，先判网络才不会误报成 Cookie 失效。
+  - `bot.run()` 会吞掉异常只返回 `False`，所以 `MusicPartnerBot` 新增 `last_error` 属性把原始异常带出来，`TaskWorker._attempt` 从它取分类。
+  - **只对网络类自动重试一次**（等 60 秒，`_wait_cancelable` 可被取消打断）。风控和 Cookie 类绝不重试：风控被拦后立刻重试只会加重风控，Cookie 失效重试一万次也没用。`errors.RETRYABLE` 定义哪些可重试。
+- **参数表单化配置**：20+ 项做成控件，6 个分组（常规 / 网易云账号 / 任务参数 / 邮件通知 / 定时执行 / GitHub Actions）。分组**不套卡片**——`_new_section()` 生成「小标题 + 一条细线 + 字段」，字段直接坐在页面底色上，输入框是页面上唯一白的东西（早期版本是 6 张一模一样的白色 `QGroupBox`，属于典型的"卡片套装"）。附「测试通知」「验证 Cookie」「转成 MD5」「导入/导出 setting.json」工具按钮。
+- **品牌图标统一**：`create_app_icon`（圆角品牌红 `#C20C0C` 方底 + 白色 `ph.music-notes`）+ `setWindowIcon` + `AppUserModelID`（`ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ncmp.desktop.app")`，在 QApplication 构造前调用），让窗口 / 任务栏 / 托盘 / exe 图标统一，不再显示 python.exe 默认图标。刻意用**圆角方形**而不是圆形：圆形红底＋白色音符就是网易云音乐自己的商标，这是第三方非官方程序，不该做得像官方图标。
+- **连续打卡图**：`app/ui/widgets/streak_grid.py`，53 周 × 7 天自绘格子。**配色复用程序的状态色**（绿=成功 / 红=失败 / 灰=没跑），不用 GitHub 那种单色深浅——这样能一眼看出哪几天翻车了，单色做不到。悬停显示日期和状态，底部图例带「连续 N 天 / 累计 N 天」。数据源是 `TaskHistory.daily_summary()` 的按天结论，不是明细。
+- **持久化日志**：`app/logging_setup.py` 装 `TimedRotatingFileHandler`（`when="midnight"`，`backupCount=7`），落在 `%LOCALAPPDATA%\ncmp desktop\logs\ncmp.log`。在此之前日志只存在内存里，关掉程序就没了，用户遇到问题没法提供任何可排查的信息。设置页「常规」组有「打开日志文件夹」入口。必须在 `QApplication` 之后安装——日志目录解析走 `QStandardPaths`。
+- **自动更新检查**：`app/update_check.py` 的 `UpdateChecker`（QThread）查 GitHub Releases API，**最多 24 小时一次**（时间戳记在 `AppConfig.last_update_check`，不每次启动都打接口）。有新版本 → 应用内通知 + 「关于」页留一条常驻下载链接。
+  - **只检查、只提示、只打开下载页。不自动下载，更不自动替换。** 理由和功能好不好用无关：这个 exe 没有代码签名，自动替换等于给用户开了一条"可执行文件可被中间人替换"的通道，更新包从哪来、有没有被篡改，程序自己没法验证。签名之前，自动更新不能做。
+  - 版本号与仓库地址的唯一来源是 `app/version.py`（以前硬编码在 `about_page.py` 里）。
 - **单实例锁**：`app/main.py` 入口用 `QLockFile`（`%TEMP%\ncmp desktop.lock`，`setStaleLockTime(0)` 防崩溃后锁死）拦截重复启动，第二个实例弹窗提示「ncmp desktop 已在运行」后退出，避免多开相互覆盖 keyring / 定时器。
 
 ---
@@ -61,7 +89,8 @@
 | 语言 | Python 3.10+ | 运行时 |
 | GUI 框架 | PySide6>=6.5 | Qt6 Python 原生绑定（LGPL），主窗口 / 页面 / 控件 / 信号槽 / QThread / QTimer / QSystemTrayIcon |
 | 网易云 API | [pyncm](https://github.com/sakarie9/pyncm) 1.8.1（sakarie9 fork） | 扫码登录 `LoginQrcodeUnikey` / `LoginQrcodeCheck` / `GetLoginQRCodeUrl`、密码登录 `LoginViaCellphone`、`Session` / `DumpSessionAsString` |
-| 图标 | qtawesome>=1.3 | FontAwesome 5/6 图标集，导航 / 步骤 / 按钮 / 托盘 / 品牌图标 |
+| 图标 | qtawesome>=1.3 | **Phosphor** 图标集（`ph.*`），导航 / 步骤 / 按钮 / 托盘 / 品牌图标。早期用 FontAwesome（`fa5s.*`），是能选到的最模板化的一档，已换 |
+| 字体 | 随包子集化 Noto | `app/ui/fonts/` 下三个改名子集字体（`NCMP Sans SC` 400/600 + `NCMP Serif SC` 700），共约 5.9MB，OFL 许可。生成脚本 `scripts/make_fonts.py`。不打包的话多数用户的 34px 状态句会落到宋体上被 Windows 伪粗体化 |
 | 凭据存储 | keyring>=24 | Windows = Credential Manager / DPAPI 加密，存 Cookie / 密码 / 邮箱授权码 / gh_token / notify_email / gh_repo |
 | 加密 | pycryptodome>=3.16 | weapi 评分接口的 AES-CBC 加密（`Signer._aes_encrypt`） |
 | 加密 | PyNaCl>=1.5 | `SealedBox` 加密 GitHub Actions Secrets（deferred import，未装时降级返回错误） |
@@ -100,109 +129,129 @@
 ### 完整目录树
 
 ```
-e:\Users\yw\Desktop\ncmp\
+ncmp-desktop/
 ├─ core/                              # 核心层（基于 ncmp 改造）
 │   ├─ __init__.py                    # CancelledError（用户取消任务异常）
-│   ├─ bot.py                         # [改造] MusicPartnerBot + on_step/on_progress/cancel_event 回调
+│   ├─ bot.py                         # [改造] MusicPartnerBot + on_step/on_progress/cancel_event
+│   │                                 #   + last_error（供失败分类）+ 每日签到阶段
 │   ├─ signer.py                      # [改造] Signer + per-song on_progress + 取消检查点 + 分段 sleep
 │   ├─ validators/
-│   │   ├─ __init__.py
 │   │   └─ cookie.py                  # [复用] CookieValidator 三步验证
 │   ├─ tasks/
-│   │   ├─ __init__.py
 │   │   ├─ base.py                    # [复用] 任务基类
 │   │   ├─ daily.py                   # [复用] 每日基础评分任务
 │   │   ├─ extra.py                   # [复用] 额外评分任务
-│   │   └─ cookie_refresh.py         # [改造] 去远端 GitHubService 回写，改调 on_cookie_refreshed 回调
+│   │   ├─ sign_in.py                 # [新增] 每日签到（WeapiCryptoRequest 装饰器用法）
+│   │   └─ cookie_refresh.py          # [改造] 已废弃：全项目无人 import，属死代码
 │   └─ utils/
-│       ├─ __init__.py
 │       ├─ auth.py                    # [复用] AuthService 密码登录（已适配 pyncm 1.8.1）
 │       ├─ config.py                  # [改造] Config 优先级 keyring > env > json
+│       ├─ errors.py                  # [新增] 失败原因分类（五类 + 下一步建议 + 可重试判定）
 │       ├─ logger.py                  # [复用] Logger（标准 logging 封装）
-│       └─ notification.py            # [复用] NotificationService SMTP 邮件
+│       └─ notification.py            # [改造] HTML 邮件（色条 + 信息表 + 下一步 + 纯文本备选）
 ├─ app/                               # 桌面应用层
-│   ├─ __init__.py
-│   ├─ main.py                        # 入口：AppUserModelID + QApplication + light.qss + GuiLogHandler + MainWindow
-│   ├─ app_config.py                  # AppConfig（桌面自身配置：验证间隔/最小化/主题/关闭行为/定时执行）
-│   ├─ cookie_store.py                # CookieStore（keyring 本地存储，替代 github.py）
-│   ├─ task_history.py                # 最近任务摘要记录（最多 20 条）
+│   ├─ main.py                        # 入口：AppUserModelID + QApplication + theme + 文件日志
+│   │                                 #   + GuiLogHandler + MainWindow
+│   ├─ app_config.py                  # AppConfig（验证间隔/主题/关闭行为/定时/随机延迟/补跑）
+│   ├─ cookie_store.py                # CookieStore（keyring 本地存储）
+│   ├─ task_history.py                # [改造] TaskHistory：最近 50 条明细 + 400 天按天聚合
+│   ├─ version.py                     # [新增] 版本号与仓库地址的唯一来源
+│   ├─ update_check.py                # [新增] 启动时查 GitHub Releases（24h 一次，只提示不替换）
+│   ├─ logging_setup.py               # [新增] 按天滚动文件日志（保留 7 天）+ 打开日志目录
 │   ├─ login/
-│   │   ├─ __init__.py
-│   │   ├─ qr_login.py                # 扫码登录（pyncm LoginQrcodeUnikey/Check + qrcode/Pillow 渲染）
+│   │   ├─ qr_login.py                # 扫码登录（pyncm unikey + qrcode/Pillow 渲染）
 │   │   └─ pwd_login.py               # 密码登录（直接走 pyncm 拿 code/msg 便于区分风控）
 │   ├─ workers/                       # QThread 工作线程（避免阻塞 UI）
-│   │   ├─ __init__.py
 │   │   ├─ login_worker.py            # 登录线程（扫码轮询 + 密码 + 风控判定）
-│   │   ├─ task_worker.py             # 任务执行线程（调 bot.run，转发 step/progress 信号）
+│   │   ├─ task_worker.py             # [改造] 任务执行线程 + 失败分类 + 网络类自动重试一次
 │   │   ├─ cloud_worker.py            # 云端执行线程（触发 dispatch + 轮询 run 状态）
-│   │   └─ validate_worker.py         # Cookie 后台验证线程（6h 周期）
+│   │   ├─ validate_worker.py         # Cookie 后台验证线程（6h 周期）
+│   │   └─ cookie_check_worker.py     # [新增] 设置页「验证 Cookie」的一次性后台验证
 │   ├─ cloud/
-│   │   ├─ __init__.py
 │   │   └─ actions_trigger.py         # GitHub Actions API 封装（trigger/轮询/cron/Secrets/Cookie同步）
 │   ├─ ui/
-│   │   ├─ __init__.py
-│   │   ├─ main_window.py             # 主窗口：5 页 QStackedWidget + 左侧导航 + 托盘 + 关闭确认 + QTimer 定时
-│   │   ├─ icons.py                    # 图标工厂（qtawesome 封装 + create_app_icon 品牌图标）
+│   │   ├─ main_window.py             # [改造] 5 页 + 导航 + 托盘 + 关闭确认 + 定时 + 随机延迟 + 补跑
+│   │   ├─ icons.py                   # [改造] 图标工厂（Phosphor + 品牌图标）
+│   │   ├─ theme.py                   # [新增] 设计变量唯一来源 + QSS 运行时生成（详见 DESIGN.md）
+│   │   ├─ dialogs.py                 # [新增] 统一消息框（Phosphor 语义图标 + 统一样式）
 │   │   ├─ pages/
-│   │   │   ├─ __init__.py
-│   │   │   ├─ dashboard_page.py      # 首页：Cookie 三态卡片 + 快捷操作 + toast
-│   │   │   ├─ login_page.py          # 账号页：扫码 / 密码 Tab 切换
-│   │   │   ├─ task_page.py           # 任务页：日志流 + 步骤视图 + 本地/云端双执行按钮
-│   │   │   ├─ settings_page.py      # 设置页：6 分组表单 + GitHub 测试连接/cron同步/Cookie同步
-│   │   │   └─ about_page.py          # 关于页：版本 + 作者 + 致谢 + 核心依赖 + GitHub 链接
+│   │   │   ├─ dashboard_page.py      # [改造] 首页：一句话状态 + 连续打卡图 + 最近几次
+│   │   │   ├─ login_page.py          # [改造] 账号页：扫码 / 密码 Tab（限宽 520px）
+│   │   │   ├─ task_page.py           # [改造] 任务页：电平表 + 步骤视图 + 日志 + 失败提示
+│   │   │   ├─ settings_page.py       # [改造] 设置页：6 组文档式分组（无卡片）
+│   │   │   └─ about_page.py          # [改造] 关于页 + 更新提示入口
 │   │   ├─ widgets/
-│   │   │   ├─ __init__.py
 │   │   │   ├─ log_view.py            # GuiLogHandler（实时日志）+ LogView（等宽只读）
-│   │   │   ├─ step_list.py           # 结构化步骤视图（五态图标）
-│   │   │   └─ tray_icon.py           # 系统托盘（4 菜单 + 双击恢复）
+│   │   │   ├─ step_list.py           # [改造] 结构化步骤视图（空状态也套面板，去斑马纹）
+│   │   │   ├─ tray_icon.py           # 系统托盘（菜单 + 双击恢复）
+│   │   │   ├─ meter.py               # [新增] 分段电平表（自绘，进度条）
+│   │   │   ├─ streak_grid.py         # [新增] 连续打卡图（53 周格子）
+│   │   │   ├─ toast.py               # [新增] 应用内通知气泡（右下角）
+│   │   │   └─ wheel_guard.py         # [新增] 滚轮保护（数字框/下拉框不被滚轮误改）
+│   │   ├─ fonts/                     # [新增] 随包子集化字体（3 个 ttf + OFL.txt）
 │   │   └─ styles/
-│   │       └─ light.qss               # 扁平浅色主题（语义色 + objectName 字体分级）
+│   │       └─ check.png              # [新增] QSS 用的勾选图标（覆盖 ::indicator 后需自备）
 │   └─ notify/
-│       ├─ __init__.py
-│       └─ desktop_notify.py          # 系统原生通知（托盘气泡优先，plyer/print 降级）
+│       └─ desktop_notify.py          # [改造] 通知：自绘气泡优先，托盘气泡/plyer/print 降级
 ├─ resources/
 │   ├─ app.ico                        # 应用图标（exe 打包用）
 │   └─ workflow_example.yml           # GitHub Actions workflow 示例模板
 ├─ scripts/
-│   └─ gen_icon.py                    # 生成 app.ico 的脚本
+│   ├─ gen_icon.py                    # 生成 app.ico
+│   ├─ make_fonts.py                  # [新增] 从系统 Noto 可变字体生成随包子集字体
+│   └─ make_assets.py                 # [新增] 生成 check.png
 ├─ requirements.txt
 ├─ build.bat                          # 一键打包脚本
-├─ ncmp desktop.spec                 # PyInstaller spec（build.bat 生成）
+├─ ncmp desktop.spec                  # PyInstaller spec
+├─ DESIGN.md                          # 视觉设计（配色/字体/字号/组件/踩过的坑）
 └─ README.md
 ```
 
-### `core/` 改造的 4 个文件说明
+> **注意：`app/ui/styles/light.qss` 已删除。** 样式表改由 `app/ui/theme.py` 的 `build_qss()` 在运行时用 `string.Template` 生成，设计变量只有一处定义。改样式请改 `theme.py`，不要找 `.qss` 文件。
+
+### `core/` 改造与新增的文件
 
 | 文件 | 改造点 | 原因 |
 |---|---|---|
-| `core/bot.py` | `MusicPartnerBot.__init__` 加 `on_step` / `on_progress` / `cancel_event` 三个回调参数；`run()` 在每个阶段（验证用户/拉取任务/评分基础/额外评分）前后调 `_step(name, status)` 推进步骤视图；`_check_cancel` 在每阶段开始处响应取消；异常分支区分 `CancelledError`（标 cancelled）与通用 Exception（标 failed） | ncmp 原 `run()` 是无回调阻塞流程，UI 无法实时显示进度 / 取消 |
+| `core/bot.py` | `MusicPartnerBot.__init__` 加 `on_step` / `on_progress` / `cancel_event` 三个回调参数；`run()` 在每个阶段前后调 `_step(name, status)` 推进步骤视图；`_check_cancel` 在每阶段开始处响应取消；异常分支区分 `CancelledError`（标 cancelled）与通用 Exception（标 failed）。**新增** `last_error` 属性（`run()` 会吞掉异常只返回 `False`，调用方要靠它做失败分类）与 `每日签到` 阶段 | ncmp 原 `run()` 是无回调阻塞流程，UI 无法实时显示进度 / 取消 |
 | `core/signer.py` | `Signer.__init__` 加 `on_progress` / `cancel_event` / `total` / `done_offset`；`sign()` 评分成功后调 `on_progress(done, total, work["name"], score)`；`_sleep` 改成分段循环 `cancel_event.wait(min(1.0, remaining))` 响应取消；新增 `_check_cancel` 在评分入口检查；`CancelledError` 单独 except 透传，不被通用 Exception 吞掉 | ncmp 原无取消点，`time.sleep(delay)` 是主要阻塞点；UI 需 per-song 进度 |
-| `core/tasks/cookie_refresh.py` | `CookieRefreshTask.__init__` 加 `on_cookie_refreshed` 回调；`execute()` 刷新成功后通过回调把新 Cookie 交给上层持久化，删除原 `GitHubService` 远端回写 | 桌面版不碰 GitHub Secrets，改由 `app/cookie_store.CookieStore` 写本地 keyring |
+| `core/tasks/cookie_refresh.py` | `CookieRefreshTask.__init__` 加 `on_cookie_refreshed` 回调；`execute()` 刷新成功后通过回调把新 Cookie 交给上层持久化，删除原 `GitHubService` 远端回写 | 桌面版不碰 GitHub Secrets，改由 `app/cookie_store.CookieStore` 写本地 keyring。**当前全项目无人 import，属死代码**，保留是因为它是上游功能的改造痕迹 |
 | `core/utils/config.py` | `Config._load_config` 优先级改为 `keyring > env > json`；新增 `_load_keyring` / `_save_keyring` / `_delete_keyring` / `_has_keyring_data` / `_load_json_config` / `write_file_config`；keyring 映射包含 Cookie、密码、`gh_token`、`notify_email`、`gh_repo`；普通字段写入 `~/.ncmp_desktop/setting.json`，并兼容旧 `config/setting.json` 迁移 | 让 ncmp 主流程能直接从 keyring 拿凭据；普通参数与凭据在重新打包后都保留 |
+| `core/utils/notification.py` | **新增** `send_notification(subject, content, level, facts, action)` 三个可选参数；改发 `multipart/alternative`（纯文本 + HTML）；新增 `_render_html` / `_render_text`。原来只有 `MIMEText(content, 'plain')` 一句话 | 纯文本邮件收件人看不出是哪次任务、什么时候、失败在哪、该怎么办 |
+| `core/utils/errors.py` | **新增**。`classify(exc)` → `(分类, 标签, 下一步建议)`；`LABELS` / `HINTS` / `RETRYABLE` 三张表 | 失败一律显示「任务执行失败」对非技术用户没有可操作性 |
+| `core/tasks/sign_in.py` | **新增**。用 `WeapiCryptoRequest` 装饰器写端点函数，配 `session=` 关键字传自建 pyncm 会话 | 每日签到是独立于评分的新功能，见「核心功能」 |
 
 ### `app/` 各子模块职责
 
 | 子模块 | 职责 |
 |---|---|
-| `app/main.py` | 入口：设 `AppUserModelID`（任务栏品牌图标）→ 构造 `QApplication`（`setQuitOnLastWindowClosed(False)`）→ 加载 `light.qss` → 安装 `GuiLogHandler` 到 logging root（`pyncm` logger 调 WARNING 防刷屏）→ 构造 `MainWindow` + 启动后台 `ValidateWorker` → `app.exec()` |
-| `app/app_config.py` | `AppConfig`：桌面自身配置（`validate_interval_sec` / `minimize_to_tray` / `theme` / `close_action` / `schedule_enabled` / `schedule_time` / `schedule_mode`），持久化到 Qt `AppConfigLocation` 下的 `config.json` |
+| `app/main.py` | 入口：设 `AppUserModelID`（任务栏品牌图标）→ 构造 `QApplication`（`setQuitOnLastWindowClosed(False)`）→ `theme.apply_theme(app)`（Fusion 风格 + 随包字体 + 生成的 QSS）→ 装文件日志 + `GuiLogHandler` 到 logging root（`pyncm` logger 调 WARNING 防刷屏）→ 构造 `MainWindow` → `start_background_workers()`（托盘 / Cookie 验证 / 更新检查 / 补跑）→ `app.exec()` |
+| `app/app_config.py` | `AppConfig`：桌面自身配置（`validate_interval_sec` / `minimize_to_tray` / `theme` / `close_action` / `schedule_enabled` / `schedule_time` / `schedule_mode` / `local_delay_minutes` / `catchup_enabled` / `catchup_deadline` / `last_success_date` / `last_catchup_date` / `last_update_check`），持久化到 Qt `AppConfigLocation` 下的 `config.json` |
 | `app/cookie_store.py` | `CookieStore`：Cookie 本地 keyring 存储（`service="ncmp desktop"`，key 为 `MUSIC_U` / `__csrf` / `updated_at`），keyring 不可用时降级内存字典 |
-| `app/task_history.py` | `TaskHistory`：最近任务摘要记录（最多 20 条），存 `task_history.json`（与 `AppConfig` 同目录），供首页 / 任务页摘要展示 |
+| `app/task_history.py` | `TaskHistory`：存两份数据——`records`（最近 50 条明细，给首页记录表）+ `daily`（按天聚合结论，保留 400 天，给连续打卡图）。同一天多次执行**成功优先**。旧版"纯列表"格式自动迁移 |
+| `app/version.py` | 版本号 / 仓库地址 / Releases URL 的唯一来源；`is_newer()` 版本比较（解析失败一律返回 False，宁可不提示） |
+| `app/update_check.py` | `UpdateChecker`（QThread）查 GitHub Releases，24 小时一次；`open_releases_page()` 用系统浏览器打开下载页 |
+| `app/logging_setup.py` | `install_file_logging()`（按天滚动保留 7 天）、`log_dir()`、`open_log_dir()` |
 | `app/login/` | `QrLogin`（扫码：pyncm unikey + qrcode/Pillow 渲染 PNG）、`PwdLogin`（密码：直接走 pyncm 拿 code/msg 便于区分风控） |
-| `app/workers/` | `LoginWorker`（扫码轮询 2s + 密码 + 风控判定 502/503/关键词）、`TaskWorker`（调 bot.run 转发 step/progress 信号）、`CloudWorker`（触发 dispatch + 5s 轮询 run 状态）、`ValidateWorker`（6h 周期验证 Cookie） |
+| `app/workers/` | `LoginWorker`（扫码轮询 2s + 密码 + 风控判定）、`TaskWorker`（调 bot.run、失败分类、网络类自动重试一次）、`CloudWorker`（触发 dispatch + 5s 轮询）、`ValidateWorker`（6h 周期验证）、`CookieCheckWorker`（设置页手动验证，一次性） |
 | `app/cloud/` | `ActionsTrigger`：GitHub REST API 封装（`trigger` / `get_latest_run` / `get_run` / `test_auth` / `get_workflow_file` / `update_workflow_cron` / `sync_full_workflow` / `get_repo_public_key` / `set_secret` / `sync_cookies` / `sync_email` / `sync_full_extra_tasks`），错误统一返回 `(False, msg)` 不抛异常 |
-| `app/ui/` | `MainWindow`（5 页 QStackedWidget + 左侧 QListWidget 导航 + 托盘 + 关闭确认 + QTimer 定时）、`icons`（qtawesome 封装 + `create_app_icon` 品牌图标）、`pages/`（dashboard 三态 / login 双 Tab / task 双执行 / settings 6 分组 / about）、`widgets/`（log_view / step_list / tray_icon）、`styles/light.qss` |
-| `app/notify/` | `DesktopNotify`：托盘气泡 `showMessage` 优先，plyer 降级，print 兜底 |
+| `app/ui/` | `MainWindow`（5 页 + 导航 + 托盘 + 关闭确认 + 定时 / 随机延迟 / 补跑 / 更新检查 / 滚轮保护）、`theme`（设计变量唯一来源 + QSS 生成）、`dialogs`（统一消息框）、`icons`（Phosphor 封装）、`pages/`、`widgets/`（log_view / step_list / tray_icon / meter / streak_grid / toast / wheel_guard）、`fonts/`、`styles/check.png` |
+| `app/notify/` | `DesktopNotify`：自绘气泡优先（样式可控），托盘气泡 / plyer / print 逐级降级 |
 
 ### 关键设计模式
 
 1. **QThread + Signal 线程安全**：所有跨线程数据传递走 `Signal/Slot`（Qt 自动切主线程槽），`GuiLogHandler.emit` 用信号推送日志，无需手动加锁。`logging.Handler` 不是 `QObject`，故 `GuiLogHandler` 内部持有一个 `_LogSignaler`（QObject）承载 `log_signal`，外部照常 `handler.log_signal.connect(...)`。
 2. **GuiLogHandler 日志流**：挂到 `logging` root，把 ncmp 全部日志实时推到 UI 文本框；`emit` 内对 `pyncm.*` 的 DEBUG/INFO 噪音做过滤（双保险），`main.py` 又把 `pyncm` logger 调到 WARNING，避免扫码轮询 `LoginQrcodeCheck` 刷屏。
-3. **三态状态驱动首页**：Dashboard 根据 Cookie 状态切 `unconfigured` / `valid` / `expired` 三态卡片，主按钮随状态变，闭环引导配置→登录→执行。
+3. **首页四态驱动**：Dashboard 把 Cookie 状态与当天执行结果合成四种陈述（还没有登录 / Cookie 失效了 / 今天还没跑 / 今天已跑），主按钮随状态变，闭环引导配置→登录→执行。
 4. **keyring 优先级**：`core/utils/config.py` 加载顺序 `keyring > env > json`，凭据/身份字段走 keyring；普通业务字段写入用户目录 `~/.ncmp_desktop/setting.json`，旧 `config/setting.json` 仍兼容读取。
 5. **双执行模式**：本地 `MusicPartnerBot.run()` 直接执行（带 per-song 进度）；云端 `ActionsTrigger.trigger()` 走 GitHub API（无 per-song 进度，复用 StepList 展示触发/等待/完成三阶段）；两者均通过 QThread 信号反馈到 UI。
-6. **deferred import（延迟导入）**：`PyNaCl`（`actions_trigger.set_secret` 内 `from nacl.public import PublicKey, SealedBox`）、`plyer`（`desktop_notify`）、`keyring`（`cookie_store` / `config`）均为可选依赖，未安装时降级返回明确错误而非崩溃。`PyNaCl` 未装时「同步 Cookie、邮件和任务参数到 GitHub Secrets」返回 `"PyNaCl 未安装，无法加密 Secret（pip install PyNaCl）"`。
+6. **deferred import（延迟导入）**：`PyNaCl`（`actions_trigger.set_secret` 内 `from nacl.public import PublicKey, SealedBox`）、`plyer`（`desktop_notify`）、`keyring`（`cookie_store` / `config`）、`pyncm.apis`（`sign_in`）均为可选依赖，未安装时降级返回明确错误而非崩溃。`sign_in` 尤其如此——pyncm 缺失不能让 `core` 整个 import 失败，那样连评分主任务都跑不起来。
 7. **core 层不依赖 app 层**：core 通过回调（`on_step` / `on_progress` / `cancel_event` / `on_cookie_refreshed`）把结果交给上层，由 `app/` 决定怎么持久化（keyring 还是别的），保持核心层可独立测试与复用。
+8. **设计变量单一来源**：`app/ui/theme.py` 是全程序唯一的颜色／字体／尺寸来源，QSS 由 `build_qss()` 在运行时用 `string.Template` 生成。**没有 `.qss` 文件**——避免"改了 theme 忘了重新生成"。页面代码不得硬编码色值，一律 `from app.ui import theme`。
+9. **失败分类 + 有限重试**：`core/utils/errors.classify()` 把异常归到五类并给出「下一步」；`errors.RETRYABLE` 只包含网络类。重试决策集中在 `TaskWorker.run()` 一处，不在各处零散判断。
+10. **补跑的状态机**：三个字段决定补跑行为——`last_success_date`（今天成功过没有）、`last_catchup_date`（今天补过没有，**失败也算**）、`_pending_run`（有没有延迟启动在排队）。三者缺一都会出问题：少了第二个就是重试风暴，少了第三个延迟窗口会和补跑撞成两次执行。
+11. **逐级降级的兜底链**：通知（自绘气泡 → 托盘气泡 → plyer → print）、字体（随包 NCMP 字体 → 系统 Noto/思源 → 宋体/雅黑）、图标（Phosphor → fa5s → 空 QIcon）、日志（文件 → UI → 标准输出）。任何一环不可用都不影响主流程。
+12. **顶层窗口的线程约束**：`QWidget` 顶层窗口只能在 GUI 线程创建。`DesktopNotify._on_gui_thread()` 先判断线程再决定是否弹自绘气泡——`notify()` 可能从后台线程被调用，不判断会直接崩。
 
 ---
 
@@ -222,45 +271,57 @@ python app/main.py
 
 | 内容 | 位置 | 说明 |
 |---|---|---|
-| 桌面应用自身配置 | Qt `AppConfigLocation` 下 `config.json`（Windows 通常为 `%APPDATA%\ncmp desktop\config.json`，无 PySide6 时降级到 `~/.ncmp_desktop/config.json`） | `AppConfig`：验证间隔 / 最小化 / 主题 / 关闭行为 / 定时执行 |
-| 任务历史 | 同上目录下 `task_history.json` | `TaskHistory`：最近 20 条任务结果 |
-| 业务非敏感字段 | 用户目录 `~/.ncmp_desktop/setting.json` | 等待时间 / 评分策略 / SMTP 服务器 / workflow_name / workflow_branch 等；旧 `config/setting.json` 可兼容迁移 |
+| 桌面应用自身配置 | Qt `AppConfigLocation` 下 `config.json`。**Windows 上是 `%LOCALAPPDATA%\ncmp desktop\config.json`**（不是 `%APPDATA%`——Qt 的 `AppConfigLocation` 在 Windows 解析到 Local），无 PySide6 时降级到 `~/.ncmp_desktop/config.json` | `AppConfig`：验证间隔 / 主题 / 关闭行为 / 定时执行 / 本地随机延迟 / 错过补跑 |
+| 任务历史 | 同上目录下 `task_history.json` | `TaskHistory`：`records`（最近 50 条明细）+ `daily`（按天聚合，保留 400 天） |
+| 运行日志 | 同上目录下 `logs\ncmp.log` | `logging_setup`：按天滚动，保留 7 天（`ncmp.log.2026-10-14` 这种历史文件） |
+| 业务非敏感字段 | 用户目录 `~/.ncmp_desktop/setting.json` | 等待时间 / 评分策略 / SMTP 服务器 / workflow_name / workflow_branch / `sign_in_enabled` 等；旧 `config/setting.json` 可兼容迁移 |
 | Cookie / 密码 / 邮箱授权码 / gh_token / notify_email / gh_repo | 系统 keyring，`service="ncmp desktop"` | key 分别为 `MUSIC_U` / `__csrf` / `netease_password` / `netease_md5_password` / `email_password` / `gh_token` / `notify_email` / `gh_repo` |
 
-> 升级迁移：从旧版（applicationName 为 `ncmp-desktop`，配置在 `%APPDATA%\ncmp-desktop`）升级时，`app/app_config.py` 的 `_migrate_legacy_config()` 会把旧目录的 `config.json` / `task_history.json` 自动复制到新目录（仅在目标不存在时复制，绝不覆盖）；keyring 服务名已改为 `ncmp desktop`，旧凭据不迁移，需重新登录。
+> **注意 `AppConfig` 和 `Config` 是两套配置**：`AppConfig`（`config.json`）管桌面程序自身行为，`Config`（keyring + `setting.json`）管业务参数。加新字段前先想清楚属于哪一边——比如「每日签到」是业务开关，进 `Config`；「本地随机延迟」是程序行为，进 `AppConfig`。
+
+> 升级迁移：从旧版（applicationName 为 `ncmp-desktop`，配置在旧目录）升级时，`app/app_config.py` 的 `_migrate_legacy_config()` 会把旧目录的 `config.json` / `task_history.json` 自动复制到新目录（仅在目标不存在时复制，绝不覆盖）；keyring 服务名已改为 `ncmp desktop`，旧凭据不迁移，需重新登录。`task_history.json` 若还是旧的"纯列表"格式，`TaskHistory._read_all()` 会自动迁移成新结构。
 
 ### 设置页 6 分组字段清单
 
-设置页按语义分 6 个 `QGroupBox`（第 1 组为行为设置，第 2-5 组为业务字段，第 6 组为云端执行）：
+设置页按语义分 6 组（第 1 组为行为设置，第 2-5 组为业务字段，第 6 组为云端执行）。**分组不套卡片**——`_new_section(title, intro)` 生成「小标题 + 一条细线 + 字段」，字段直接坐在页面底色上，输入框是页面上唯一白的东西：
 
 | 分组 | 字段 | 控件 | 说明 |
 |---|---|---|---|
 | 常规 | `close_action` | QComboBox | 关闭按钮行为：每次询问 / 最小化到托盘 / 直接退出（写入 AppConfig，不入 setting.json） |
+| | （无配置键） | QPushButton | 「打开日志文件夹」，调 `logging_setup.open_log_dir()`；打不开就把路径显示出来，别只说一句失败 |
 | 网易云账号 | `Cookie_MUSIC_U` / `Cookie___csrf` | QLineEdit 只读 + Password echo + eye 切换 | 由登录流程自动写入，无需手动填；默认掩码显示，点眼睛查看 |
 | | `netease_phone` | QLineEdit | 11 位手机号，仅密码登录需要 |
-| | `netease_password` | QLineEdit Password + eye 切换 + 「→ MD5」按钮 | 明文密码，二选一，登录后建议转 MD5 |
+| | `netease_password` | QLineEdit Password + eye 切换 + 「转成 MD5」按钮 | 明文密码，二选一，登录后建议转 MD5 |
 | | `netease_md5_password` | QLineEdit Password + eye 切换 | MD5 密码（推荐，更安全） |
 | 任务参数 | `wait_time_min` / `wait_time_max` | QSpinBox（0-3600 秒） | 每次评分等待秒数，默认 15 / 20，实际随机 |
 | | `score` | QComboBox | 1=1-2分 / 2=2-3分 / 3=3-4分（默认）/ 4=固定4分 |
 | | `full_extra_tasks` | QCheckBox | 勾选完成所有额外任务（忽略每日 7 个上限，默认勾选） |
+| | `sign_in_enabled` | QCheckBox（默认勾选） | 每日签到。签到与评分互不阻塞，签到失败只标红那一步 |
 | 邮件通知 | `notify_email` / `email_password` | QLineEdit / Password | 接收通知邮箱 / SMTP 授权码（非登录密码） |
 | | `smtp_server` | QComboBox 可编辑 | 预设 QQ / Gmail / 163 / Outlook / 126，默认 `smtp.qq.com`，可手输 |
 | | `smtp_port` | QSpinBox（1-65535） | SSL 默认 465，TLS 为 587 |
 | | `notify_on_task_done` | QCheckBox（默认勾选） | 手动执行任务完成 / 失败 / 取消时发邮件（`TaskWorker._send_email` 按 `notify_context == "task"` 读取） |
-| | `notify_on_cookie_expired` | QCheckBox（默认勾选） | 后台 `ValidateWorker` 发现 Cookie 失效时发邮件（独立于 `expired` 信号，邮件失败不影响 UI 弹托盘通知） |
+| | `notify_on_cookie_expired` | QCheckBox（默认勾选） | 后台 `ValidateWorker` 发现 Cookie 失效时发邮件（独立于 `expired` 信号，邮件失败不影响 UI 弹通知） |
 | | `notify_on_schedule` | QCheckBox（默认勾选） | 定时执行（`schedule_mode=local/both`）任务结果发邮件，独立于 `notify_on_task_done`——定时执行只看这个开关 |
 | 定时执行 | `schedule_enabled` | QCheckBox | 启用定时执行（写入 AppConfig，不入 setting.json） |
 | | `schedule_time` | QTimeEdit HH:mm | 触发时间，24 小时制，默认 09:00 |
 | | `schedule_mode` | QComboBox | local / cloud / both |
+| | `local_delay_minutes` | QSpinBox（0-30，特殊值显示「不启用」） | 本地随机延迟。0=不启用；N=到点后随机等 0~N 分钟再启动 |
+| | `catchup_enabled` | QCheckBox（默认勾选） | 错过补跑开关 |
+| | `catchup_deadline` | QTimeEdit HH:mm（默认 23:00） | 补跑截止时间，过了就不再补 |
 | GitHub Actions | `gh_token` | QLineEdit Password + eye 切换 | GitHub PAT（需 repo + workflow 权限），仅存 keyring 不上传 |
 | | `gh_repo` | QLineEdit | `owner/repo` 形式，存 keyring，重新打包不丢 |
 | | `workflow_name` | QLineEdit | 如 `refresh_cookie.yml` |
 | | `workflow_branch` | QLineEdit | 如 `main` |
 | | `gh_disable_schedule` | QComboBox（启用/关闭） | 选择「关闭」后「同步完整 workflow」会注释 GitHub 原生 `schedule`，仅保留手动触发 |
-| | `gh_random_delay_minutes` | QSpinBox（0-30） | 「随机延迟启动」最大分钟数；0=不启用，同步完整 workflow 时写入 `RANDOM_DELAY_MINUTES` 默认值（仓库 Secret 可覆盖） |
+| | `gh_random_delay_minutes` | QSpinBox（0-30） | **云端**的随机延迟启动最大分钟数；0=不启用，同步完整 workflow 时写入 `RANDOM_DELAY_MINUTES` 默认值（仓库 Secret 可覆盖）。注意与「本地随机延迟」是两套独立设置 |
 | | `gh_success_email` | QComboBox（关闭/开启） | 「成功邮件通知」；选择「开启」后同步完整 workflow 时把 `SEND_SUCCESS_EMAIL` 默认值写成 true，任务成功也发邮件 |
 
-附工具按钮：`保存` / `测试通知` / `验证 Cookie` / `明文→MD5` / `导入 setting.json` / `导出 setting.json`，以及 GitHub 区的 `测试连接` / `同步 cron` / `同步完整 workflow` / `同步 Cookie、邮件和任务参数到 GitHub Secrets` / `一键同步全部`。这些 GitHub 网络操作均走 `_GitHubActionWorker` 后台线程，并显示 indeterminate 进度条。
+附工具按钮：`保存` / `测试通知` / `验证 Cookie` / `导入 setting.json` / `导出 setting.json`，以及 GitHub 区的 `测试连接` / `同步 cron` / `同步完整 workflow` / `同步 Cookie、邮件和任务参数到 GitHub Secrets` / `一键同步全部`。这些 GitHub 网络操作均走 `_GitHubActionWorker` 后台线程，并显示 indeterminate 进度条。
+
+> 早期版本顶部还有一个「明文 → MD5」按钮，和密码字段行内的那个功能完全重复（都调 `hashlib.md5` 写 `netease_md5_password`），已删除。
+
+> **所有网络操作都要走后台线程。** 「验证 Cookie」原来直接写在按钮槽里，请求期间整个界面卡住，用户点完没反应还以为是程序死了——现在走 `CookieCheckWorker`，按钮显示「验证中…」并禁用。新增任何发网络请求的按钮都请照这个模式做。
 
 > 「同步完整 workflow」按钮（`_sync_full_workflow`）：读取打包内 / 源码目录的 `resources/workflow_example.yml` 模板，调 GitHub Contents API PUT 覆盖到 fork 仓库的 `.github/workflows/{workflow_name}`，一键同步最新 workflow 文件（含 `concurrency` / `continue-on-error` / `upload-artifact` 等配置），无需手动复制粘贴。若选择「云端定时=关闭」，`_set_workflow_schedule()` 会先把 `schedule:` 与 `- cron:` 注释掉，再上传；选择「启用」时还会用 `_cloud_cron_from_editor()` 把「云端 cron」北京时间转 UTC 后经 `_set_workflow_cron()` 写入 `schedule`，随后 `_set_workflow_random_delay()` 把「随机延迟启动」分钟数写入 `RANDOM_DELAY_MINUTES` 默认值，`_set_workflow_success_email()` 按「成功邮件通知」选择写入 `SEND_SUCCESS_EMAIL` 默认值（都只替换 `|| '...'` 里的默认值，保留 Secret 覆盖能力）。邮件和任务参数 Secrets 则由「同步 Cookie、邮件和任务参数到 GitHub Secrets」按钮写入。「一键同步全部」按钮（`_sync_all_to_github`）会复用这些逻辑，按顺序同步 workflow、Cookie、邮件和任务参数。
 
@@ -301,7 +362,7 @@ python app/main.py
 | `CSRF` | 是 | 云音乐 Cookie 的 `__csrf` |
 | `NETEASE_PHONE` | 密码登录用 | 手机号（与密码二选一） |
 | `NETEASE_PASSWORD` | - | 明文密码（与 MD5 二选一） |
-| `NETEASE_MD5_PASSWORD` | 推荐 | MD5 密码（可用桌面程序「明文→MD5」按钮生成） |
+| `NETEASE_MD5_PASSWORD` | 推荐 | MD5 密码（可用桌面程序「转成 MD5」按钮生成） |
 | `NOTIFY_EMAIL` | 可选 | 接收通知邮箱 |
 | `EMAIL_PASSWORD` | 可选 | SMTP 授权码 |
 | `SMTP_SERVER` | 可选 | 默认 `smtp.qq.com` |
@@ -340,10 +401,22 @@ workflow 还含 `concurrency`（`ncmp-refresh` 组，`cancel-in-progress: false`
 
 任务页顶部两个执行按钮：
 
-- **「立即执行(本地)」**：启动 `TaskWorker` 调 `bot.run()`，带 per-song 进度（`QProgressBar` + `StepList.addProgress`）。
+- **「立即执行」**：启动 `TaskWorker` 调 `bot.run()`，带 per-song 进度（分段电平表 + `StepList.addProgress`）。
 - **「云端执行」**：启动 `CloudWorker` 触发 `workflow_dispatch` + 5s 轮询 run 状态，无 per-song 进度（GitHub 不暴露），复用 StepList 展示「触发 / 等待 / 完成」三阶段。
 
 两个按钮互斥（运行中禁用），共用「取消」按钮。本地取消即停 bot；云端取消会定位本次 run 并调用 GitHub cancel API，尽量真正停止远端 run。
+
+### 进度条怎么算
+
+进度条是**分段式电平表**（`app/ui/widgets/meter.py`，40 格 × 12px 自绘），不是 `QProgressBar`——QSS 做不出分段（`qlineargradient` 的色标是相对 chunk 的，格子会随填充宽度被拉伸）。
+
+算法分两层，都在 `TaskPage`：
+
+1. **阶段区间**：每个阶段占 `(起始%, 结束%)`，阶段内的歌曲进度在**本阶段区间内插值**。
+   早期版本把"本阶段第 N 首 / 本阶段共 M 首"直接当成全局 0-100%，于是基础评分阶段刚跑完一半进度条就顶到 100%，真正耗时的额外评分阶段反而没得涨。
+2. **按条目数分配**（`_plan_scoring`）：两个评分阶段在 8~100 之间**按实际条目数**分。基础任务的条目数在它开始时就知道（`on_progress(0, total, ...)`），额外任务的要等它自己开始才知道，所以用 `full_extra_tasks` 开关估一个（关＝固定 7 条，能算准；开＝按 3 倍估）。估计刻意偏保守：宁可在基础阶段少报，也不要在额外任务开始时进度条已经跑到高位。
+
+实测：基础 5 条 / 额外 15 条时，额外任务开始时进度是 **31%**（早期版本是 65%）。
 
 > 桌面程序的 `gh_token` 仅本地保存到 keyring，绝不上传到任何远端。
 
@@ -365,7 +438,43 @@ workflow 还含 `concurrency`（`ncmp-refresh` 组，`cancel-in-progress: false`
 `MainWindow` 用两个 `QTimer` 实现本地定时执行：
 
 - **触发定时器** `_schedule_timer`：`setSingleShot(True)`，计算到下一次 `(HH:MM)` 壁钟时刻的秒数启动（今天已过则取明天），到点调 `_on_schedule_tick` 按 `schedule_mode` 启动 local/cloud/both 任务。
-- **心跳定时器** `_schedule_heartbeat_timer`：`setSingleShot(False)`，每 60 秒调一次 `_setup_schedule` 重新计算并重排触发定时器，防系统休眠 / 时钟漂移后失准。
+- **心跳定时器** `_schedule_heartbeat_timer`：`setSingleShot(False)`，每 60 秒调一次 `_setup_schedule` 重新计算并重排触发定时器，防系统休眠 / 时钟漂移后失准。**同一个心跳也兼作错过补跑的检查点**（第二个 `timeout.connect`）。
+
+### 本地随机延迟
+
+`local_delay_minutes`（0-30，默认 0）非零时，`_start_local_after_delay()` 会先 `random.randint(0, span)` 抽一个分钟数，`QTimer.singleShot` 推后启动，并弹通知「本地任务将在约 N 分钟后启动」。
+
+- 固定整点发起请求本身就是个风控特征，云端早有 `RANDOM_DELAY_MINUTES`，本地一直缺。
+- 延迟期间置 `_pending_run = True`，补跑不会在这段窗口里重复触发（否则延迟到点时会和补跑撞成两次执行）。
+- 延迟到点后 `_run_local_scheduled()` 会再查一次 `_task_running()`——如果补跑或手动执行已经占了，就静默跳过，不叠加。
+
+### 错过补跑
+
+`_maybe_catch_up()`，在启动后 3 秒和每次心跳（60 秒）各跑一次。
+
+**要解决的问题**：定时设了 09:00，但电脑 09:30 才开机（或者程序没启动）。原来 `_seconds_until_next` 会直接算到**明天** 09:00，今天就这么无声无息地没了，用户收不到任何提示。
+
+**判定条件**（全部通过才补）：
+
+| 条件 | 为什么 |
+|---|---|
+| `schedule_enabled` | 没开定时就无所谓"错过" |
+| `catchup_enabled` | 用户可关 |
+| `schedule_mode` 含 `local` | 云端由 GitHub Actions 自己按 cron 跑，与本机开不开机无关 |
+| 没有任务在跑 | 别叠加 |
+| **没有延迟启动在排队**（`_pending_run`） | 随机延迟会把启动推后 0~30 分钟，那段窗口里"今天还没跑"是正常的 |
+| `last_success_date != today` | 今天已经成功过 |
+| **`last_catchup_date != today`** | 今天已经补过一次了，**不管成没成** |
+| 已过今天的 `schedule_time` | 还没到点，等定时器 |
+| 未过 `catchup_deadline`（默认 23:00） | 23:50 才开机就别跑了，离明天 09:00 只剩 10 分钟，跑完紧接着又跑一次 |
+| 已配置 Cookie | 没配就是白失败一次 |
+
+**两个状态字段是关键**：
+
+- `last_success_date`：成功一次就写（`_mark_success_today()`，由 `_on_task_finished_from_tray` 在 `status == "success"` 时调）。
+- `last_catchup_date`：**触发前**先写。补跑失败也记这一笔——否则心跳会每分钟重试一次直到截止时间，那是重试风暴，正是最重的风控特征。
+
+**只补当天，不追溯更早**：音乐合伙人是当天有效的任务，补三天前那次网易也不认；连续补跑几次还是明显的风控特征。
 
 ### 模式区别（仅本地定时）
 
@@ -377,7 +486,7 @@ workflow 还含 `concurrency`（`ncmp-refresh` 组，`cancel-in-progress: false`
 
 ### 到点通知
 
-到点先弹托盘通知「定时任务已启动」，本地完成由 `_on_task_finished_from_tray` 通知「任务执行完成」/「任务未完成」，云端完成由 `TaskPage.cloud_finished_sig` → `_on_schedule_cloud_finished` 通知「云端任务完成：成功」/「云端任务完成：失败（...）」。
+到点先弹通知「定时任务已启动」（走自绘气泡，见「核心功能 → 系统托盘」），本地完成由 `_on_task_finished_from_tray(ok, status, kind)` 通知，失败时带分类（「任务执行失败：网络异常」）；云端完成由 `TaskPage.cloud_finished_sig` → `_on_schedule_cloud_finished` 通知「云端任务完成：成功」/「云端任务完成：失败（...）」。
 
 设置页保存后 emit `schedule_config_changed` 与 `close_action_changed` 信号，主窗口分别重读 `AppConfig`：前者重排定时器（幂等），后者刷新关闭行为；进入设置页时还会调 `refresh_app_config()` 从磁盘重读（关闭弹窗可能改过 close_action）。
 
@@ -393,52 +502,76 @@ workflow 还含 `concurrency`（`ncmp-refresh` 组，`cancel-in-progress: false`
 
 ## 八、打包
 
-双击项目根目录 `build.bat` 即可一键打包。脚本为单行 pyinstaller 命令（无 `^` 续行符），所有 echo 输出用英文（避免中文乱码），开头 `taskkill /f /im "ncmp desktop.exe"` 先杀运行中实例释放 exe 占用，结束后 `explorer /select,"...\ncmp desktop.exe"` 自动定位生成的可执行文件：
+**双击项目根目录的 `build.bat` 即可一键打包**（也可以 `cmd /c build.bat`，自动化场景设 `NOPAUSE=1` 跳过结尾暂停）。
+
+脚本共 6 步，每步失败都会给出具体原因并停下来：
+
+| 步骤 | 做什么 | 为什么要有 |
+|---|---|---|
+| [0/6] | `taskkill /f /im "ncmp desktop.exe"` | exe 正在运行时文件被占用，打包会失败 |
+| [1/6] | 检查 `python` 命令可用 | 否则后面报一堆看不懂的错 |
+| [2/6] | 检查 6 个必需资源文件 | 字体是二进制，克隆时若被过滤规则漏掉，打包会"成功"但程序里没中文字体 |
+| [3/6] | `pip install -r requirements.txt` + pyinstaller | **必须走 requirements.txt**：pyncm 不在 PyPI，直接 `pip install pyncm` 会装错包 |
+| [4/6] | 清 `build/` `dist/` `.spec` | 避免增量缓存导致的诡异问题 |
+| [5/6] | `pyinstaller ...`（约 1-2 分钟） | 见下 |
+| [6/6] | **校验产物**：exe 存在 + 字体/图标/模板都进了 `_internal\` | 打包"成功"不等于能用，资源漏了要到运行时才发现 |
+
+实测产物 **197MB**（`dist\ncmp desktop\`，exe 本体 8MB，其余在 `_internal\`）。
+
+> **分发时必须压缩整个 `dist\ncmp desktop` 文件夹**，不能只发 exe——它依赖同目录的 `_internal\`。
+
+### 改这个脚本前必须知道的两件事
+
+这两条都是实际踩出来的，不是理论：
+
+1. **整个脚本只能写 ASCII（英文）。** cmd.exe 是**按字节**读 `.bat` 的，用的是它开始读取时那个代码页；`chcp 65001` 只改控制台**输出**编码，不改文件读取方式。文件里出现中文会让解析器错位，把半行当命令执行（实测报错 `'e9' is not recognized as an internal or external command`）。
+2. **文件必须是 CRLF 行尾。** LF-only 会让多行 `IF (...)` 块和 `^` 续行符解析错乱。
+
+还有一条通用陷阱：**`IF (...)` 块内的 `echo` 不能含裸括号**。写 `echo (requires ...)` 时那个 `)` 会提前闭合 IF 块，块内后续语句全部失效——症状是脚本在某一步静默退出、什么都不打印。要写括号就转义成 `^(` `^)`，或者干脆别用。
+
+### pyinstaller 参数
 
 ```bat
-@echo off
-chcp 65001 >nul
-cd /d "%~dp0"
-
-echo [0/4] Closing running ncmp desktop.exe ...
-taskkill /f /im "ncmp desktop.exe" >nul 2>&1
-
-echo [1/4] Checking dependencies ...
-pip install pyinstaller qtawesome pyncm PySide6 keyring qrcode Pillow pycryptodome PyNaCl requests >nul 2>&1
-
-echo [2/4] Cleaning old build artifacts ...
-if exist build rmdir /s /q build
-if exist dist rmdir /s /q dist
-if exist "ncmp desktop.spec" del /q "ncmp desktop.spec"
-
-echo [3/4] Building (1-2 minutes, please wait) ...
-pyinstaller --noconsole --windowed -y --name "ncmp desktop" --icon resources\app.ico --collect-all qtawesome --collect-all pyncm --add-data "app\ui\styles\light.qss;ui\styles" --add-data "resources\workflow_example.yml;resources" --hidden-import keyring.backends --hidden-import keyring.backends.Windows --exclude-module PySide6.QtWebEngineWidgets --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.QtWebEngineQuick --exclude-module PySide6.QtQml --exclude-module PySide6.QtQuick --exclude-module PySide6.QtQuick3D --exclude-module PySide6.QtQuickWidgets --exclude-module PySide6.Qt3DCore --exclude-module PySide6.Qt3DRender --exclude-module PySide6.QtCharts --exclude-module PySide6.QtDataVisualization --exclude-module PySide6.QtMultimedia --exclude-module PySide6.QtMultimediaWidgets --exclude-module PySide6.QtPdf --exclude-module PySide6.QtPdfWidgets --exclude-module PySide6.QtSql --exclude-module PySide6.QtTest --exclude-module torch --exclude-module tensorflow --exclude-module pandas --exclude-module scipy --exclude-module matplotlib --exclude-module IPython --exclude-module jupyter --exclude-module notebook app\main.py
-
-echo [4/4] Done.
-echo Executable:  %~dp0dist\ncmp desktop\ncmp desktop.exe
-explorer /select,"%~dp0dist\ncmp desktop\ncmp desktop.exe"
-if not defined NOPAUSE pause
+pyinstaller --noconsole --windowed --clean -y ^
+  --name "ncmp desktop" --icon resources\app.ico ^
+  --collect-all qtawesome --collect-all pyncm ^
+  --add-data "app\ui\fonts;ui\fonts" ^
+  --add-data "app\ui\styles\check.png;ui\styles" ^
+  --add-data "resources\workflow_example.yml;resources" ^
+  --hidden-import keyring.backends ^
+  --hidden-import keyring.backends.Windows ^
+  --exclude-module PySide6.QtWebEngineWidgets ... （共 17 个 Qt 模块 + 8 个大库）
+  app\main.py
 ```
 
-打包成功后可执行文件位于 `dist\ncmp desktop\ncmp desktop.exe`，体积 100-200MB，耗时 1-2 分钟。
+关键参数：
 
-**关键参数说明**：
-
-- `taskkill /f /im "ncmp desktop.exe"`：先杀运行中的 ncmp desktop.exe 进程，释放文件占用避免 build/dist 目录删不掉。
-- `--collect-all qtawesome` / `--collect-all pyncm`：收集这两个包的全部资源（图标字体 ttf/json、非 `.py` 文件），缺任何一个都会运行时 ImportError 或样式丢失。
-- **不再用** `--collect-all PySide6`：PyInstaller 自带 PySide6 hook，自动只收集代码实际 import 的 `QtCore` / `QtGui` / `QtWidgets` / `QtNetwork`，不打包没用的 QML / Qt 插件 / 翻译，体积从 GB 级降到 100-200MB。
-- 17 个 PySide6 子模块 `--exclude-module`：`QtWebEngineWidgets` / `QtWebEngineCore` / `QtWebEngineQuick` / `QtQml` / `QtQuick` / `QtQuick3D` / `QtQuickWidgets` / `Qt3DCore` / `Qt3DRender` / `QtCharts` / `QtDataVisualization` / `QtMultimedia` / `QtMultimediaWidgets` / `QtPdf` / `QtPdfWidgets` / `QtSql` / `QtTest`，明确排除桌面版用不到的 Qt 大模块。
-- 8 个大库 `--exclude-module`：`torch` / `tensorflow` / `pandas` / `scipy` / `matplotlib` / `IPython` / `jupyter` / `notebook`，防止 PyInstaller 误把本机环境里装的这些大库拉进 exe。
-- `--add-data "app\ui\styles\light.qss;ui\styles"`：把 qss 样式文件打进 exe（目标路径 `ui\styles\light.qss`），配合 `app/main.py` 的 `_resource_path()` 用 `sys._MEIPASS` 定位，确保打包后样式仍能正确加载。
-- `--add-data "resources\workflow_example.yml;resources"`：把 workflow 模板打进 `_internal\resources\workflow_example.yml`，配合 `settings_page._sync_full_workflow` 用 `sys._MEIPASS` 定位，确保打包后「同步完整 workflow」能读模板。
-- `--hidden-import keyring.backends` / `--hidden-import keyring.backends.Windows`：keyring 用 `importlib` 动态加载后端，PyInstaller 静态分析发现不了，必须显式声明，否则打包后启动报 `No keyring backend found`。
-- `--icon resources\app.ico`：exe 图标。
+- `--collect-all qtawesome` / `--collect-all pyncm`：收集这两个包的全部资源（图标字体 ttf/json、非 `.py` 文件），缺任何一个都会运行时 ImportError 或图标丢失。
+- **不再用** `--collect-all PySide6`：PyInstaller 自带 PySide6 hook，自动只收集代码实际 import 的 `QtCore` / `QtGui` / `QtWidgets` / `QtNetwork`，不打包没用的 QML / Qt 插件 / 翻译，体积从 GB 级降到 200MB 上下。
+- `--hidden-import keyring.backends` / `keyring.backends.Windows`：keyring 在 Windows 用 `importlib` 动态加载后端（Credential Manager），PyInstaller 静态分析发现不了。缺了会在用到 Cookie 时报 `No recommended backend was available`。
+- `--exclude-module`（17 个 Qt 模块 + `torch` / `tensorflow` / `pandas` / `scipy` / `matplotlib` / `IPython` / `jupyter` / `notebook`）：避免 PyInstaller 顺着某个间接依赖把这些大库收进来。
+- `--clean`：清 PyInstaller 缓存，避免改过 spec 后拿到旧产物。
 - `--noconsole --windowed`：无控制台窗口的 GUI 程序。
-- 英文 echo：脚本所有输出用英文（`[0/4] Closing running ncmp desktop.exe ...` 等），避免 Windows 控制台默认 GBK 编码导致中文乱码。
-- `explorer /select,"path"`：打包结束自动在新窗口选中生成的 `ncmp desktop.exe`，方便右键发送桌面快捷方式。
-- `if not defined NOPAUSE pause`：仅交互式双击运行时 pause 等待回车；CI 设了 `NOPAUSE` 环境变量时自动退出，方便自动化调用。
+- `--icon resources\app.ico`：exe 图标。
 
-**打包后 qss 加载**：`app/main.py` 加了 `_resource_path(*parts)` 函数，打包后从 `sys._MEIPASS`（PyInstaller 解压临时目录）读资源，开发模式从源码目录读。`load_stylesheet` 用 `_resource_path("ui", "styles", "light.qss")` 拿到 qss 路径 → 读文本 → `app.setStyleSheet`，确保打包后扁平浅色主题仍生效。
+脚本其他行为：结尾 `explorer /select,"...\ncmp desktop.exe"` 自动在新窗口选中产物，方便右键发桌面快捷方式；`if not defined NOPAUSE pause` 只在双击运行时等待回车，自动化场景设了 `NOPAUSE` 就直接退出。
+
+### 打包后资源加载
+
+`app/ui/theme.py` 的 `resource_path(*parts)` 打包后从 `sys._MEIPASS`（PyInstaller 解压临时目录）读，开发模式从项目根读。`fonts_dir()` / `assets_dir()` 基于它解析，`theme.apply_theme(app)` 一次完成：设 Fusion 风格 → 加载随包字体 → `app.setStyleSheet(build_qss())`。
+
+样式表是**运行时生成**的，没有 `.qss` 文件需要打进包——这也是为什么 `--add-data` 里没有 qss 了。
+
+### 打包后自检
+
+跑一遍 `dist\ncmp desktop\ncmp desktop.exe`，然后看 `%LOCALAPPDATA%\ncmp desktop\logs\ncmp.log` 末尾有没有这两行：
+
+```
+INFO - root - ncmp desktop 已启动（版本 1.1.0）
+INFO - root - 日志目录：C:\Users\yw\AppData\Local\ncmp desktop\logs
+```
+
+有就说明 frozen 环境下的路径解析、字体加载、日志落盘都正常。没有则说明启动就崩了，多半是 `--collect-all` 漏了包或 `--hidden-import` 少了一项。
 
 ---
 
@@ -515,10 +648,12 @@ A：已修复。原 `_sync_full_workflow` 用 `os.path.dirname(os.path.dirname(o
 
 1. 设 `AppUserModelID`（Windows 任务栏品牌图标，必须在 QApplication 构造前调用）
 2. 构造 `QApplication`，设 `setQuitOnLastWindowClosed(False)`（关主窗口托盘仍在）
-3. 加载 `light.qss` 浅色扁平主题
-4. 安装 `GuiLogHandler` 到 `logging` root，`pyncm` logger 调 WARNING 防刷屏
-5. 构造 `MainWindow` + `TrayIcon`，`install_log_handler` + `start_background_workers`（托盘 + 后台 `ValidateWorker`）
+3. `theme.apply_theme(app)`：设 Fusion 风格 → 加载随包字体 → `app.setStyleSheet(build_qss())`
+4. 装日志：**先文件日志**（`install_file_logging()`，按天滚动保留 7 天），再 `GuiLogHandler` 到 `logging` root；`pyncm` logger 调 WARNING 防刷屏
+5. 构造 `MainWindow`，`install_log_handler` + `start_background_workers()`（托盘 + 后台 `ValidateWorker` + `UpdateChecker` + 3 秒后查一次错过补跑）
 6. `app.exec()` 进入事件循环
+
+> **顺序有讲究**：文件日志必须在 `QApplication` 之后装——日志目录解析走 `QStandardPaths`，没有 QApplication 时会落到 `%LOCALAPPDATA%` 根目录（会把 `logs` 和一堆别的软件的目录混在一起）。先文件后 UI，是为了即使 UI 那边出问题，日志也已经落到磁盘上了。
 
 ### 调试
 
@@ -533,21 +668,36 @@ python app/main.py
 
 `core/` 层不依赖 `app/` 层：core 通过回调把结果交给上层。改造原则：
 
-- 直接复用不改：`core/validators/cookie.py`（CookieValidator）、`core/utils/logger.py`（Logger）、`core/utils/notification.py`（NotificationService）、`core/utils/auth.py`（AuthService，已适配 pyncm 1.8.1）、`core/tasks/daily.py` / `extra.py` / `base.py`。
-- 已改造 4 文件：`core/bot.py` / `core/signer.py` / `core/tasks/cookie_refresh.py` / `core/utils/config.py`（详见「项目架构 → core/ 改造的 4 个文件说明」）。
+- 直接复用不改：`core/validators/cookie.py`（CookieValidator）、`core/utils/logger.py`（Logger）、`core/utils/auth.py`（AuthService，已适配 pyncm 1.8.1）、`core/tasks/daily.py` / `extra.py` / `base.py`。
+- 已改造：`core/bot.py` / `core/signer.py` / `core/tasks/cookie_refresh.py`（已废弃，无人 import）/ `core/utils/config.py` / `core/utils/notification.py`（详见「项目架构 → core/ 改造与新增的文件」）。
+- 新增：`core/utils/errors.py`（失败分类）、`core/tasks/sign_in.py`（每日签到）。
 - 废弃：`core/utils/github.py`（GitHub Secrets 回写），桌面版用 `app/cloud/actions_trigger.py` 触发 Actions 代替回写。
+
+### 设计系统
+
+**改界面样式只需要动一个文件：`app/ui/theme.py`。**
+
+- 颜色 / 字号 / 圆角 / 间距 / 窗口尺寸全部是模块级常量，改一处全程序生效。
+- QSS 由 `build_qss()` 在运行时用 `string.Template` 生成，**没有 `.qss` 文件**。模板里的占位符写 `$NAME` 或 `${NAME}px`（注意 `$SP_2px` 会被当成变量名 `SP_2px`，必须写 `${SP_2}px`）。
+- 页面代码**不得硬编码色值**，一律 `from app.ui import theme` 后取常量。语义色靠 `objectName` 上色（`successText` / `dangerText` / `warningText` / `captionText` / `dataText` / `sectionHeading` …），改 `objectName` 之后要 `style().polish(widget)` 才会套上新样式。
+- 新对话框走 `app/ui/dialogs.py` 的 `info` / `warn` / `success` / `error` / `confirm`，不要直接 `QMessageBox.xxx`。
+- 新图标走 `app/ui/icons.py` 的 `op_icon("ph.xxx", color)`，不要直接调 `qta.icon`。
+
+完整的设计依据、配色对比度验算、以及踩过的 Qt 坑见 [DESIGN.md](DESIGN.md)。
+
+### 日志
+
+- ncmp 自身日志（`core.` / `app.`）走 DEBUG，同时推到 UI 和文件。
+- pyncm 日志调到 WARNING + `emit` 过滤双保险，避免扫码轮询刷屏。
+- 调试 pyncm 时可临时注释 `app/main.py` 的 `logging.getLogger("pyncm").setLevel(logging.WARNING)` 行。
+- 文件日志在 `%LOCALAPPDATA%\ncmp desktop\logs\ncmp.log`，按天滚动保留 7 天。用户反馈问题时让 TA 走「设置 → 常规 → 打开日志文件夹」。
+- 用 `logging.disable(logging.CRITICAL)` 跑自动化测试时注意：**这会把文件日志也一起禁掉**，测日志落盘时不能用它。
 
 ### 添加新任务类型
 
 1. 在 `core/tasks/` 新建任务类，构造函数接 `session` / `logger` / `config` / `on_progress` / `cancel_event`（参考 `daily.py` / `extra.py`）。
 2. 在 `core/bot.py` 的 `MusicPartnerBot.run()` 中插入新阶段：调 `self._check_cancel()` + `self._step(name, "running")` → 执行 → `self._step(name, "success")`，异常分支自动标 `failed` / `cancelled`。
 3. UI 自动跟进：`TaskWorker.step` 信号已连 `StepList.updateStep`，新步骤会自动出现在步骤视图。
-
-### 日志
-
-- ncmp 自身日志（`core.` / `app.`）走 DEBUG，全部推到 UI。
-- pyncm 日志调到 WARNING + `emit` 过滤双保险，避免扫码轮询刷屏。
-- 调试 pyncm 时可临时注释 `app/main.py` 的 `logging.getLogger("pyncm").setLevel(logging.WARNING)` 行。
 
 ---
 
@@ -578,7 +728,7 @@ python app/main.py
 - `Config` 加 `account` 维度：参数可「全局」或「按账号」存（`score` / `wait_time` / `notify_email` 等按账号覆盖全局默认）
 
 #### UI 改造
-- **首页 dashboard**：账号下拉切换器（QComboBox）+ 当前账号 Cookie 状态卡；三态卡按选中账号渲染
+- **首页 dashboard**：账号下拉切换器（QComboBox）+ 当前账号状态；「今天跑了吗」那句话、连续打卡图、最近几次明细都按选中账号渲染
 - **账号页 login**：登录表单加「账号备注名」字段（如「主号」「小号」），扫码/密码成功后绑定该名字存入 accounts.json
 - **账号列表 widget**：账号管理弹窗（增/删/改备注名/查看最后登录/Cookie 状态/设为默认）
 - **设置页 settings**：参数分组加「全局 / 按账号」切换开关；按账号模式下字段绑定选中账号
@@ -601,7 +751,11 @@ python app/main.py
 - 多账号批量执行若间隔过短可能触发网易云风控（评分行为集中）—— 每账号间留 30-60s 随机间隔
 - keyring 多 key 管理需注意账号名规范（只允许字母数字下划线中文，避免 keyring key 转义问题）
 
+### 已完成（原待办）
+- ~~S8 任务历史可视化图表~~ → 已做成**连续打卡图**（`app/ui/widgets/streak_grid.py`，53 周格子，按天聚合）。注意：当时规划的是"成功率趋势折线图"，实际做成了格子图——格子图回答"我坚持得怎么样、哪几天翻车了"，比折线更贴这个场景。
+- ~~S10 自动更新检查~~ → 已做成 `app/update_check.py`。**只检查、只提示、只打开下载页**，不自动下载替换——这个 exe 没有代码签名，自动替换等于开了一条可执行文件可被替换的通道。
+
 ### 其他待办（优先级低）
-- S8 任务历史可视化图表（成功率趋势）
-- S9 开机自启动（Windows 启动项注册）
-- S10 自动更新检查（GitHub Releases 比对版本）
+- S9 开机自启动（Windows 启动项注册）。**注意：这项和「错过补跑」是配套的。** 现在补跑只在程序启动时触发，如果用户根本不启动程序，补跑也救不了——开机自启才能让"电脑开机晚了自动补"这条链路真正闭环。
+- 云端多账号（见上）
+- 任务重试策略可配置（现在网络类固定重试一次、等 60 秒）

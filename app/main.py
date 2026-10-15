@@ -2,11 +2,14 @@
 
 启动顺序：
     1. 构造 ``QApplication``
-    2. 加载 ``light.qss`` 浅色扁平主题
+    2. 套主题（Fusion 风格 + 随包字体 + 由 ``theme.py`` 生成的样式表）
     3. 安装 ``GuiLogHandler`` 到 ``logging`` root，把 ncmp 全部日志实时推到 UI
     4. 构造 ``MainWindow`` + ``TrayIcon``
     5. 启动后台 ``ValidateWorker``
     6. ``app.exec()`` 进入事件循环
+
+样式表不再是 ``light.qss`` 文件，而是由 :mod:`app.ui.theme` 在运行时生成，
+保证设计变量只有一个来源，不会出现"改了 theme 忘了重新生成 qss"的漂移。
 """
 import logging
 import os
@@ -27,36 +30,14 @@ _ROOT = os.path.dirname(_HERE)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import QFile, QIODevice, Qt
 from PySide6.QtWidgets import QApplication
 
 from app.app_config import AppConfig
+from app.logging_setup import install_file_logging
+from app.ui import theme
 from app.ui.main_window import MainWindow
 from app.ui.widgets.log_view import GuiLogHandler
-
-
-def _resource_path(*parts: str) -> str:
-    """资源路径解析：PyInstaller 打包后从 sys._MEIPASS 读，开发模式从源码目录读。"""
-    base = getattr(sys, "_MEIPASS", _HERE)
-    return os.path.join(base, *parts)
-
-
-def load_stylesheet(app: QApplication) -> str:
-    """读取 light.qss 文本；读取失败时返回空串。"""
-    qss_path = _resource_path("ui", "styles", "light.qss")
-    try:
-        with open(qss_path, "r", encoding="utf-8") as f:
-            return f.read()
-    except Exception:
-        pass
-    # 备用：用 QFile 读 Qt 资源路径（本仓库未启用 Qt 资源，仅作占位）
-    file = QFile(qss_path)
-    if file.open(QIODevice.ReadOnly | QIODevice.Text):
-        try:
-            return bytes(file.readAll()).decode("utf-8")
-        finally:
-            file.close()
-    return ""
+from app.version import __version__
 
 
 def main() -> int:
@@ -81,12 +62,14 @@ def main() -> int:
     app.setApplicationName("ncmp desktop")
     app.setQuitOnLastWindowClosed(False)  # 关闭主窗口时托盘仍在
 
-    # 加载样式
-    qss = load_stylesheet(app)
-    if qss:
-        app.setStyleSheet(qss)
+    # 套主题：Fusion 风格 + 随包字体 + 由 theme.py 生成的样式表
+    theme.apply_theme(app)
 
     # 安装日志 Handler 到 root logger
+    # 先装文件日志（按天滚动保留 7 天），再装 UI Handler——
+    # 这样即使 UI 那边出问题，日志也已经落到磁盘上了。
+    # 必须在 QApplication 之后：日志目录解析走 QStandardPaths。
+    log_dir_path = install_file_logging(level=logging.DEBUG)
     handler = GuiLogHandler.install(
         level=logging.DEBUG,
         fmt="%(asctime)s - %(levelname)s - %(message)s",
@@ -107,7 +90,9 @@ def main() -> int:
     window.show()
     window.start_background_workers()
 
-    logging.getLogger().info("ncmp desktop 已启动")
+    logging.getLogger().info("ncmp desktop 已启动（版本 %s）", __version__)
+    if log_dir_path:
+        logging.getLogger().info("日志目录：%s", log_dir_path)
     return app.exec()
 
 

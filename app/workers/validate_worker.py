@@ -73,10 +73,17 @@ class ValidateWorker(QThread):
     def _notify_expired(self, reason: str) -> None:
         """发邮件（如启用）后 emit expired 信号；邮件失败不影响主流程。"""
         try:
+            from datetime import datetime
+
             config = Config()
             if bool(config.get("notify_on_cookie_expired", True)):
                 NotificationService(config, self._logger).send_notification(
-                    "ncmp Cookie 失效", "Cookie 已失效，请重新登录获取")
+                    "ncmp Cookie 已失效",
+                    "登录凭证已过期，定时任务将无法继续执行。",
+                    level="failed",
+                    facts=[("时间", datetime.now().strftime("%Y-%m-%d %H:%M")),
+                           ("原因", reason or "未提供")],
+                    action="打开 ncmp desktop，到「账号」页重新扫码登录即可恢复。")
         except Exception:
             pass
         self.expired.emit(reason)

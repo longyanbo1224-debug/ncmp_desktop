@@ -1,12 +1,13 @@
-"""关于页：应用名 / 版本号 / 作者 / 致谢 / 核心依赖 / 说明 / GitHub 链接 / 版权。
+"""关于页 —— 版权页。
 
-版本号硬编码在模块常量 ``__version__``（AppConfig 无版本字段）。
-核心依赖版本在运行时按需 import 获取，缺失则标记「未安装」。
+安静的定义列表：版本 / 作者 / 致谢 / 核心依赖 / 许可。
+宋体标题，次要色正文，没有别的。
 """
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGridLayout, QLabel, QVBoxLayout, QWidget
 
-__version__ = "1.0.0"
+from app.ui import theme
+from app.version import GITHUB_REPO, RELEASES_URL, __version__
 
 APP_NAME = "ncmp desktop"
 APP_DESCRIPTION = (
@@ -14,11 +15,21 @@ APP_DESCRIPTION = (
     "支持扫码/密码登录、任务可视化、GitHub Actions 云端触发。"
 )
 AUTHOR = "Galvin"
-GITHUB_URL = "https://github.com/longyanbo1224-debug/ncmp_desktop"
-GITHUB_LABEL = "longyanbo1224-debug/ncmp_desktop"
+GITHUB_URL = f"https://github.com/{GITHUB_REPO}"
+GITHUB_LABEL = GITHUB_REPO
 UPSTREAM_URL = "https://github.com/ACAne0320/ncmp"
 UPSTREAM_LABEL = "ACAne0320/ncmp"
 LICENSE = "MIT License"
+
+
+def _link(url: str, label: str) -> str:
+    """内联样式的富文本链接。
+
+    QSS 管不到 QLabel 里的 <a>，只能写内联样式；颜色取主题的墨色，
+    保持"全界面只有状态色"这条规矩。
+    """
+    return (f'<a href="{url}" style="color:{theme.INK}; '
+            f'text-decoration:underline;">{label}</a>')
 
 
 class AboutPage(QWidget):
@@ -33,73 +44,93 @@ class AboutPage(QWidget):
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(12)
+        layout.setContentsMargins(theme.PAGE_MARGIN, theme.PAGE_MARGIN,
+                                  theme.PAGE_MARGIN, theme.PAGE_MARGIN)
+        layout.setSpacing(0)
 
         title = QLabel(APP_NAME)
         title.setObjectName("pageTitle")
         layout.addWidget(title)
 
-        version_label = QLabel(f"版本 {__version__}")
-        version_label.setObjectName("subtitle")
-        layout.addWidget(version_label)
+        layout.addSpacing(theme.SP_2)
 
-        author_label = QLabel(f"作者：{AUTHOR}")
-        author_label.setObjectName("captionText")
-        layout.addWidget(author_label)
+        version = QLabel(f"版本 {__version__}")
+        version.setObjectName("captionText")
+        layout.addWidget(version)
 
-        upstream_label = QLabel(
-            f'致谢：<a href="{UPSTREAM_URL}">{UPSTREAM_LABEL}</a>')
-        upstream_label.setObjectName("captionText")
-        upstream_label.setOpenExternalLinks(True)
-        upstream_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
-        layout.addWidget(upstream_label)
+        # 更新入口：默认隐藏，后台查到新版本才出现（见 set_update_available）
+        self._update_label = QLabel("")
+        self._update_label.setObjectName("captionText")
+        self._update_label.setWordWrap(True)
+        self._update_label.setVisible(False)
+        layout.addWidget(self._update_label)
 
-        deps_label = QLabel(f"核心依赖：{self._deps_text()}")
-        deps_label.setObjectName("captionText")
-        deps_label.setWordWrap(True)
-        layout.addWidget(deps_label)
+        layout.addSpacing(theme.SP_6)
 
-        desc_label = QLabel(APP_DESCRIPTION)
-        desc_label.setObjectName("captionText")
-        desc_label.setWordWrap(True)
-        layout.addWidget(desc_label)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(theme.SP_5)
+        grid.setVerticalSpacing(theme.SP_3)
+        grid.setColumnStretch(1, 1)
 
-        github_label = QLabel(
-            f'GitHub：<a href="{GITHUB_URL}">{GITHUB_LABEL}</a>')
-        github_label.setObjectName("captionText")
-        github_label.setOpenExternalLinks(True)
-        github_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
-        layout.addWidget(github_label)
+        rows = [
+            ("作者", AUTHOR, False),
+            ("致谢", _link(UPSTREAM_URL, UPSTREAM_LABEL), True),
+            ("核心依赖", self._deps_text(), False),
+            ("许可", LICENSE, False),
+            ("GitHub", _link(GITHUB_URL, GITHUB_LABEL), True),
+        ]
+        for i, (key, value, is_html) in enumerate(rows):
+            key_label = QLabel(key)
+            key_label.setObjectName("captionText")
+            key_label.setFixedWidth(64)
+            key_label.setAlignment(Qt.AlignRight | Qt.AlignTop)
+            grid.addWidget(key_label, i, 0)
 
-        license_label = QLabel(f"版权：{LICENSE}")
-        license_label.setObjectName("captionText")
-        layout.addWidget(license_label)
+            value_label = QLabel(value)
+            value_label.setObjectName("captionText")
+            value_label.setWordWrap(True)
+            if is_html:
+                value_label.setOpenExternalLinks(True)
+                value_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
+            grid.addWidget(value_label, i, 1)
+
+        layout.addLayout(grid)
+
+        layout.addSpacing(theme.SP_6)
+
+        desc = QLabel(APP_DESCRIPTION)
+        desc.setObjectName("captionText")
+        desc.setWordWrap(True)
+        desc.setMaximumWidth(560)
+        layout.addWidget(desc)
 
         layout.addStretch(1)
+
+    # ------------------------------------------------------------------
+    # 更新提示
+    # ------------------------------------------------------------------
+    def set_update_available(self, version: str, url: str) -> None:
+        """后台查到新版本时调用，在版本号下方留一条常驻入口。
+
+        只给链接，不下载、不替换——这个 exe 没有代码签名，
+        程序自己没法验证更新包有没有被篡改。
+        """
+        target = url or RELEASES_URL
+        self._update_label.setText(
+            f"有新版本 {version} 可用　{_link(target, '打开下载页')}")
+        self._update_label.setOpenExternalLinks(True)
+        self._update_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        self._update_label.setVisible(True)
 
     @staticmethod
     def _deps_text() -> str:
         """运行时获取 pyncm / PySide6 / qtawesome / keyring 版本，缺失标「未安装」。"""
         parts = []
-        try:
-            import pyncm
-            parts.append(f"pyncm {getattr(pyncm, '__version__', 'unknown')}")
-        except Exception:
-            parts.append("pyncm 未安装")
-        try:
-            import PySide6
-            parts.append(f"PySide6 {PySide6.__version__}")
-        except Exception:
-            parts.append("PySide6 未安装")
-        try:
-            import qtawesome
-            parts.append(f"qtawesome {qtawesome.__version__}")
-        except Exception:
-            parts.append("qtawesome 未安装")
-        try:
-            import keyring
-            parts.append(f"keyring {keyring.__version__}")
-        except Exception:
-            parts.append("keyring 未安装")
-        return " / ".join(parts)
+        for module, label in (("pyncm", "pyncm"), ("PySide6", "PySide6"),
+                              ("qtawesome", "qtawesome"), ("keyring", "keyring")):
+            try:
+                mod = __import__(module)
+                parts.append(f"{label} {getattr(mod, '__version__', 'unknown')}")
+            except Exception:
+                parts.append(f"{label} 未安装")
+        return "　".join(parts)

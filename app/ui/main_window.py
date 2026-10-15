@@ -10,6 +10,7 @@ closeEvent 拦截：按 ``AppConfig.close_action`` 决定直接关或最小化�
   云端完成由 TaskPage.cloud_finished_sig → _on_schedule_cloud_finished 通知。
 """
 import math
+import random
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
@@ -24,7 +25,9 @@ from PySide6.QtWidgets import (
 from app.app_config import AppConfig
 from app.cookie_store import CookieStore
 from app.notify.desktop_notify import DesktopNotify
+from app.ui import theme
 from app.ui.icons import create_app_icon, nav_icon
+from app.update_check import UpdateChecker
 from app.ui.pages.about_page import AboutPage
 from app.ui.pages.dashboard_page import DashboardPage
 from app.ui.pages.login_page import LoginPage
@@ -32,6 +35,7 @@ from app.ui.pages.settings_page import SettingsPage
 from app.ui.pages.task_page import TaskPage
 from app.ui.widgets.log_view import GuiLogHandler
 from app.ui.widgets.tray_icon import TrayIcon
+from app.ui.widgets.wheel_guard import WheelGuard
 from app.workers.task_worker import TaskWorker
 from app.workers.validate_worker import ValidateWorker
 
@@ -45,10 +49,13 @@ class MainWindow(QMainWindow):
         self.app_config = app_config or AppConfig()
         self.setWindowTitle("ncmp desktop")
         self.setWindowIcon(create_app_icon())
-        self.resize(960, 640)
-        self.setMinimumSize(820, 540)
+        self.resize(*theme.WINDOW_DEFAULT)
+        self.setMinimumSize(*theme.WINDOW_MINIMUM)
 
         self._log_handler: Optional[GuiLogHandler] = None
+        # 是否已排定一次延迟启动的定时任务。补跑要靠它判断
+        # "延迟窗口里已经有任务在排队了，别再触发一次"。
+        self._pending_run = False
         self._build_ui()
         self._init_workers()
         self._connect_signals()
@@ -59,6 +66,8 @@ class MainWindow(QMainWindow):
         self._schedule_heartbeat_timer = QTimer(self)
         self._schedule_heartbeat_timer.setSingleShot(False)
         self._schedule_heartbeat_timer.timeout.connect(self._setup_schedule)
+        # 心跳同时兼作错过补跑的检查点：每分钟看一次"今天该跑还没跑"
+        self._schedule_heartbeat_timer.timeout.connect(self._maybe_catch_up)
         self._setup_schedule()
 
     # ------------------------------------------------------------------
@@ -73,8 +82,10 @@ class MainWindow(QMainWindow):
         # 左侧导航
         self._nav = QListWidget()
         self._nav.setObjectName("navList")
-        self._nav.setFixedWidth(140)
-        self._nav.setIconSize(QSize(18, 18))
+        self._nav.setFixedWidth(theme.NAV_WIDTH)
+        self._nav.setIconSize(QSize(theme.NAV_ICON, theme.NAV_ICON))
+        self._nav.setSpacing(2)
+        self._nav.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         for text, key in (("首页", "home"), ("账号", "account"),
                           ("任务", "task"), ("设置", "settings"),
                           ("关于", "about")):
@@ -105,6 +116,11 @@ class MainWindow(QMainWindow):
     # 子组件
     # ------------------------------------------------------------------
     def _init_workers(self) -> None:
+        # 滚轮保护：设置页的下拉框／数字框不该被滚轮误改数值
+        app = QApplication.instance()
+        self._wheel_guard = WheelGuard(app if app is not None else self)
+        if app is not None:
+            app.installEventFilter(self._wheel_guard)
         # 托盘
         self._tray = TrayIcon(self)
         self._notify = DesktopNotify(self._tray)
@@ -159,7 +175,7 @@ class MainWindow(QMainWindow):
         self._task.install_log_handler(handler)
 
     def start_background_workers(self) -> None:
-        """启动后台线程：Cookie 定期验证 + 托盘显示。"""
+        """启动后台线程：Cookie 定期验证 + 托盘显示 + 更新检查。"""
         try:
             self._tray.show()
         except Exception:
@@ -169,6 +185,16 @@ class MainWindow(QMainWindow):
                 self._validate_worker.start()
         except Exception:
             pass
+        # 更新检查：后台跑，最多 24 小时查一次（见 app/update_check.py），
+        # 查不到就安静退出，不打扰用户
+        try:
+            self._update_checker = UpdateChecker(self)
+            self._update_checker.checked.connect(self._on_update_checked)
+            self._update_checker.start()
+        except Exception:
+            pass
+        # 错过补跑：等界面立起来再查，免得启动瞬间弹通知吓人
+        QTimer.singleShot(3000, self._maybe_catch_up)
 
     # ------------------------------------------------------------------
     # 槽
@@ -235,20 +261,27 @@ class MainWindow(QMainWindow):
         # 不弹通知，仅把后台验证结果推给 Dashboard
         self._dashboard.set_cookie_status(ok, msg)
 
-    def _on_task_finished_from_tray(self, ok: bool, status: str) -> None:
+    def _on_task_finished_from_tray(self, ok: bool, status: str,
+                                    kind: str = "") -> None:
         """共享 TaskWorker 完成时的托盘通知 + 首页摘要。
 
         :param ok: 成功与否（cancelled/failed 均为 False）。
         :param status: "success" / "cancelled" / "failed"。
+        :param kind: 失败原因分类，决定通知里说什么。
         """
         if status == "cancelled":
             msg = "用户手动取消任务"
         elif status == "success":
             msg = "任务执行完成"
         else:
-            msg = "任务执行失败"
+            from core.utils import errors
+            label = errors.LABELS.get(kind, "")
+            msg = f"任务执行失败：{label}" if label else "任务执行失败"
         self._notify.notify("ncmp 任务", msg)
         self._dashboard.set_last_task_summary(msg)
+        # 成功一次就记下日期，错过补跑靠它判断"今天跑过没有"
+        if status == "success":
+            self._mark_success_today()
 
     # ------------------------------------------------------------------
     # 本地定时执行
@@ -324,11 +357,7 @@ class MainWindow(QMainWindow):
             mode = "local"
         self._notify.notify("ncmp 定时任务", "定时任务已启动")
         if mode in ("local", "both"):
-            try:
-                # 定时执行走 notify_on_schedule 开关（而非 notify_on_task_done）
-                self._task.execute(notify_context="schedule")
-            except Exception as e:
-                self._notify.notify("ncmp 定时任务", f"本地任务启动失败：{e}")
+            self._start_local_after_delay()
         if mode in ("cloud", "both"):
             try:
                 self._task.execute_cloud()
@@ -336,6 +365,163 @@ class MainWindow(QMainWindow):
                 self._notify.notify("ncmp 定时任务", f"云端任务启动失败：{e}")
         # 重排下一天的定时（心跳也会兜底）
         self._setup_schedule()
+
+    def _start_local_after_delay(self) -> None:
+        """本地定时任务：按配置的随机延迟启动。
+
+        固定整点发起请求本身就是个风控特征，所以给一个 0~N 分钟的随机窗口。
+        延迟窗口内如果用户手动跑了任务，到点那次会被 TaskPage 的
+        「已有任务在执行」挡掉，不会重复执行。
+        """
+        try:
+            span = int(self.app_config.get("local_delay_minutes", 0) or 0)
+        except Exception:
+            span = 0
+        if span <= 0:
+            self._run_local_scheduled()
+            return
+        delay_min = random.randint(0, span)
+        if delay_min <= 0:
+            self._run_local_scheduled()
+            return
+        # 标记"已有一次延迟启动在排队"：这段窗口里补跑不能再触发，
+        # 否则延迟到点时会和补跑撞成两次执行
+        self._pending_run = True
+        self._notify.notify(
+            "ncmp 定时任务", f"本地任务将在约 {delay_min} 分钟后启动")
+        QTimer.singleShot(delay_min * 60 * 1000, self._run_local_scheduled)
+
+    def _run_local_scheduled(self) -> None:
+        """真正启动本地定时任务。"""
+        self._pending_run = False
+        if self._task_running():
+            # 已经有一次在跑（比如补跑刚触发），别叠加
+            return
+        try:
+            # 定时执行走 notify_on_schedule 开关（而非 notify_on_task_done）
+            self._task.execute(notify_context="schedule")
+        except Exception as e:
+            self._notify.notify("ncmp 定时任务", f"本地任务启动失败：{e}")
+
+    # ------------------------------------------------------------------
+    # 错过补跑
+    # ------------------------------------------------------------------
+    def _mark_success_today(self) -> None:
+        """记下"今天已经成功跑过"，补跑靠它判断。"""
+        try:
+            self.app_config.set("last_success_date", datetime.now().date().isoformat())
+            self.app_config.save()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _parse_hhmm(text: str, default: tuple) -> tuple:
+        """把 "HH:MM" 解析成 (时, 分)；解析失败用默认值。"""
+        try:
+            hh, mm = str(text or "").split(":")
+            h, m = int(hh), int(mm)
+            if 0 <= h <= 23 and 0 <= m <= 59:
+                return h, m
+        except Exception:
+            pass
+        return default
+
+    def _schedule_target_today(self) -> datetime:
+        """今天该跑的时刻（已经过了也是今天这个时刻）。"""
+        h, m = self._parse_hhmm(self.app_config.schedule_time, (9, 0))
+        return datetime.now().replace(hour=h, minute=m, second=0, microsecond=0)
+
+    def _catchup_deadline(self) -> datetime:
+        """补跑截止时刻。"""
+        h, m = self._parse_hhmm(
+            self.app_config.get("catchup_deadline", "23:00"), (23, 0))
+        return datetime.now().replace(hour=h, minute=m, second=0, microsecond=0)
+
+    def _task_running(self) -> bool:
+        try:
+            return bool(self._task_worker is not None
+                        and self._task_worker.isRunning())
+        except Exception:
+            return False
+
+    @staticmethod
+    def _has_cookie() -> bool:
+        try:
+            music_u, csrf, _ = CookieStore().load()
+            return bool(music_u and csrf)
+        except Exception:
+            return False
+
+    def _maybe_catch_up(self) -> None:
+        """错过补跑：定时时间已过、今天还没跑、且没到截止时间 → 补一次。
+
+        场景：定时设了 09:00，但电脑 09:30 才开机（或者程序没启动）。
+        原来 ``_seconds_until_next`` 会直接算到**明天** 09:00，
+        今天就这么无声无息地没了，用户不会收到任何提示。
+
+        几个刻意的限制：
+        - **只补当天**，不追溯更早。音乐合伙人是当天有效的任务，
+          补三天前那次网易也不认；连续补跑几次还是明显的风控特征。
+        - **每天最多补一次**。补跑失败也记一笔，否则 60 秒心跳会每分钟
+          重试一次直到截止时间——那就是重试风暴，正是最重的风控特征。
+        - **有截止时间**（默认 23:00）。如果 23:50 才开机就别跑了——
+          离第二天 09:00 只剩 10 分钟，跑完紧接着又跑一次，同样触发风控。
+        - **云端模式不补**。GitHub Actions 自己按 cron 跑，与本机开不开机无关。
+        - **延迟窗口里不判定**。本地随机延迟会把启动推后 0~30 分钟，
+          那段窗口里"今天还没跑"是正常的，不该触发补跑，
+          否则延迟到点时会和补跑撞成两次执行。
+        """
+        try:
+            if not self.app_config.schedule_enabled:
+                return
+            if not bool(self.app_config.get("catchup_enabled", True)):
+                return
+            if self.app_config.schedule_mode not in ("local", "both"):
+                return
+            if self._task_running():
+                return
+            if self._pending_run:
+                return                      # 已有延迟启动在排队，别撞成两次
+            now = datetime.now()
+            today = now.date().isoformat()
+            if str(self.app_config.get("last_success_date", "") or "") == today:
+                return                      # 今天已经成功跑过
+            if str(self.app_config.get("last_catchup_date", "") or "") == today:
+                return                      # 今天已经补过一次了，不管成没成
+            if now < self._schedule_target_today():
+                return                      # 还没到今天的定时时间，等定时器
+            if now > self._catchup_deadline():
+                return                      # 过了截止时间，不补
+            if not self._has_cookie():
+                return                      # 没配 Cookie，补了也是白失败一次
+
+            # 先记账再触发：即使这次补跑立刻失败，今天也不会再试第二次
+            self.app_config.set("last_catchup_date", today)
+            self.app_config.save()
+            self._notify.notify(
+                "ncmp 定时任务",
+                f"检测到今天的任务还没跑（定时 {self.app_config.schedule_time}），正在补跑")
+            self._run_local_scheduled()
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # 更新检查
+    # ------------------------------------------------------------------
+    def _on_update_checked(self, has_update: bool, version: str, url: str) -> None:
+        """后台查到新版本：托盘提示 + 关于页留一条常驻入口。
+
+        只提示、不下载、不替换——这个 exe 没有代码签名，
+        自动替换等于开了一条"可执行文件可被中间人替换"的通道。
+        """
+        if not has_update:
+            return
+        self._notify.notify(
+            "ncmp desktop", f"发现新版本 {version}，在「关于」页可打开下载页")
+        try:
+            self._about.set_update_available(version, url)
+        except Exception:
+            pass
 
     def _on_schedule_cloud_finished(self, ok: bool, msg: str) -> None:
         """云端 worker 完成 → 托盘通知（定时 + 手动都走这条）。"""
@@ -373,7 +559,8 @@ class MainWindow(QMainWindow):
             event.ignore()
             self.hide()
             self._notify.notify(
-                "ncmp desktop", "已最小化到托盘，双击图标恢复")
+                "ncmp desktop",
+                "已最小化到托盘，定时任务仍会在后台按时执行。双击托盘图标恢复窗口。")
 
     def _ask_close_action(self) -> Tuple[Optional[str], bool]:
         """弹出关闭确认对话框，返回 (所选动作, 是否勾选不再提示)。
@@ -388,8 +575,8 @@ class MainWindow(QMainWindow):
         dlg.setModal(True)
 
         root = QVBoxLayout(dlg)
-        root.setSpacing(12)
-        root.setContentsMargins(20, 20, 20, 16)
+        root.setSpacing(theme.SP_3)
+        root.setContentsMargins(theme.SP_5, theme.SP_5, theme.SP_5, theme.SP_4)
 
         caption = QLabel(
             "要直接关闭程序，还是最小化到系统托盘后台运行？", dlg)
@@ -401,6 +588,7 @@ class MainWindow(QMainWindow):
         root.addWidget(remember_box)
 
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(theme.SP_2)
         btn_row.addStretch(1)
         btn_minimize = QPushButton("最小化到托盘", dlg)
         btn_minimize.setObjectName("secondaryButton")

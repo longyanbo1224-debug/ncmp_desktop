@@ -2,57 +2,58 @@
 
 所有 UI 模块应优先通过本模块取图标，避免散落 emoji 字符与 QStyle 标准图标。
 
-颜色用 QSS 已定语义色：
-    success  #2E7DDE（运行中蓝）
-    primary  #2E7DDE
-    danger   #C62828
-    success-fg #2E9E55
-    muted    #9aa4b2
-    default  #1f2933
+配色一律取自 :mod:`app.ui.theme`——本模块不再自带色值。
+
+图标包用 **Phosphor**（``ph.*``）而不是 Font Awesome（``fa5s.*``）：
+Phosphor 的线条粗细更配这套仪器感的界面，而 fa5s 是能选到的最模板化的一档。
+qtawesome 1.4.2 内置的是 Phosphor 1.3.0，缺 ``circle-notch`` / ``window`` /
+``radio-button`` / ``list-checks`` 四个名字，已用等价图标替代。
 """
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 
 import qtawesome as qta
 
-# 默认前景色（与 QSS 文字主色一致）
-DEFAULT_COLOR = "#1f2933"
+from app.ui import theme
 
-# 语义色（与 app/ui/styles.qss 对齐）
-COLOR_PRIMARY = "#2E7DDE"
-COLOR_SUCCESS = "#2E9E55"
-COLOR_DANGER = "#C62828"
-COLOR_RUNNING = "#2E7DDE"
-COLOR_PENDING = "#9aa4b2"
+# 默认前景色（与 QSS 文字主色一致）
+DEFAULT_COLOR = theme.INK
+
+# 语义色（转发 theme，保留旧名字以免调用方大改）
+COLOR_PRIMARY = theme.BRAND
+COLOR_SUCCESS = theme.SUCCESS
+COLOR_DANGER = theme.FAILED
+COLOR_RUNNING = theme.RUNNING_FILL
+COLOR_PENDING = theme.PENDING_FILL
 
 # ----------------------------------------------------------------------
 # 图标名称常量
 # ----------------------------------------------------------------------
-# 导航图标（fa5s = Font Awesome 5 Solid）
+# 导航图标
 NAV_ICONS = {
-    "home": "fa5s.home",
-    "account": "fa5s.key",
-    "task": "fa5s.play-circle",
-    "settings": "fa5s.cog",
-    "about": "fa5s.info-circle",
+    "home": "ph.house",
+    "account": "ph.key",
+    "task": "ph.play-circle",
+    "settings": "ph.gear-six",
+    "about": "ph.info",
 }
 
 # 步骤状态图标
 STEP_ICONS = {
-    "success": "fa5s.check-circle",
-    "running": "fa5s.spinner",
-    "failed": "fa5s.times-circle",
-    "pending": "fa5s.circle",
-    "cancelled": "fa5s.ban",
+    "success": "ph.check-circle",
+    "running": "ph.spinner-gap",
+    "failed": "ph.x-circle",
+    "pending": "ph.circle",
+    "cancelled": "ph.prohibit",
 }
 
 # 步骤状态对应的语义色
 STEP_COLORS = {
-    "success": COLOR_SUCCESS,
-    "running": COLOR_RUNNING,
-    "failed": COLOR_DANGER,
-    "pending": COLOR_PENDING,
-    "cancelled": COLOR_DANGER,
+    "success": theme.SUCCESS,
+    "running": theme.RUNNING_FILL,
+    "failed": theme.FAILED,
+    "pending": theme.PENDING_FILL,
+    "cancelled": theme.PENDING_FILL,
 }
 
 # 步骤状态对应的简短文字（用于无障碍/复制场景）
@@ -65,62 +66,96 @@ STEP_TEXTS = {
 }
 
 # 操作图标
-ICON_RUN = "fa5s.play"
-ICON_REFRESH = "fa5s.sync-alt"
-ICON_LOGIN = "fa5s.sign-in-alt"
-ICON_EYE = "fa5s.eye"
-ICON_EYE_OFF = "fa5s.eye-slash"
+ICON_RUN = "ph.play"
+ICON_REFRESH = "ph.arrows-clockwise"
+ICON_LOGIN = "ph.sign-in"
+ICON_EYE = "ph.eye"
+ICON_EYE_OFF = "ph.eye-slash"
 
-# 托盘品牌图标（网易云音乐相关，用 music 图标）
-ICON_APP = "fa5s.music"
+# 托盘品牌图标（网易云音乐相关，用音符）
+ICON_APP = "ph.music-notes"
 
 # 托盘菜单图标
-ICON_SHOW_MAIN = "fa5s.window-restore"
-ICON_QUIT = "fa5s.power-off"
-ICON_ABOUT = "fa5s.info-circle"
+ICON_SHOW_MAIN = "ph.browsers"
+ICON_QUIT = "ph.power"
+ICON_ABOUT = "ph.info"
 
 # 空状态图标（未配置 / 无历史 / 无步骤）
-ICON_EMPTY_DASHBOARD = "fa5s.key"            # 首页未配置 Cookie
-ICON_EMPTY_HISTORY = "fa5s.clock"            # 无任务历史
-ICON_EMPTY_STEPS = "fa5s.hourglass-half"     # 无步骤 / 等待启动
+ICON_EMPTY_DASHBOARD = "ph.key"              # 首页未配置 Cookie
+ICON_EMPTY_HISTORY = "ph.clock"              # 无任务历史
+ICON_EMPTY_STEPS = "ph.hourglass-medium"     # 无步骤 / 等待启动
+
+# 结果图标（任务完成后的状态行 / 历史摘要）
+ICON_RESULT_OK = "ph.check-circle"
+ICON_RESULT_FAIL = "ph.x-circle"
 
 
 # ----------------------------------------------------------------------
 # 构造函数
 # ----------------------------------------------------------------------
 def _icon(name: str, color: str = DEFAULT_COLOR) -> QIcon:
-    """按 fa5s 图标名 + 颜色构造 QIcon。"""
-    return qta.icon(name, color=color)
+    """按图标名 + 颜色构造 QIcon；名字不存在时降级到一个安全图标。"""
+    try:
+        return qta.icon(name, color=color)
+    except Exception:
+        try:
+            return qta.icon("ph.circle", color=color)
+        except Exception:
+            return QIcon()
 
 
 def nav_icon(key: str) -> QIcon:
-    """取导航图标（默认主色）。"""
-    return _icon(NAV_ICONS[key], COLOR_PRIMARY)
+    """取导航图标。
+
+    返回的 QIcon 带两个模式：**未选中是墨色，选中是品牌红**——
+    选中项是浅红底＋品牌红字，图标跟着变红才对得上。
+    Qt 的列表委托在选中时会用 ``QIcon.Selected`` 模式取图，所以这样能自动切换。
+    """
+    name = NAV_ICONS[key]
+    icon = _icon(name, theme.INK)
+    try:
+        selected = _icon(name, theme.BRAND)
+        for size in (16, 18, 20, 24, 32):
+            pm = selected.pixmap(size, size)
+            if not pm.isNull():
+                icon.addPixmap(pm, QIcon.Selected)
+    except Exception:
+        pass
+    return icon
 
 
 def step_icon(status: str) -> QIcon:
     """取步骤状态图标（带语义色）。未知状态回退到 pending。"""
     name = STEP_ICONS.get(status, STEP_ICONS["pending"])
-    color = STEP_COLORS.get(status, COLOR_PENDING)
-    return qta.icon(name, color=color)
+    color = STEP_COLORS.get(status, theme.PENDING_FILL)
+    return _icon(name, color)
 
 
 def op_icon(name: str, color: str = DEFAULT_COLOR) -> QIcon:
-    """通用操作图标：传入 fa5s.* 名 + 颜色。"""
+    """通用操作图标：传入 ``ph.*`` 名 + 颜色。"""
     return _icon(name, color)
 
 
 def eye_icon(visible: bool) -> QIcon:
     """密码显隐切换：visible=True 时显示 eye，False 时显示 eye-slash。"""
-    return _icon(ICON_EYE if visible else ICON_EYE_OFF)
+    return _icon(ICON_EYE if visible else ICON_EYE_OFF, theme.MUTED)
+
+
+def result_icon(ok: bool) -> QIcon:
+    """任务结果图标：成功绿勾 / 失败红叉。"""
+    return _icon(ICON_RESULT_OK if ok else ICON_RESULT_FAIL,
+                 theme.SUCCESS if ok else theme.FAILED)
 
 
 def create_app_icon(size: int = 256) -> QIcon:
-    """绘制品牌图标：圆角方形主色蓝底 + 白色音乐元素居中。
+    """绘制品牌图标：品牌红圆角方底 + 白色音符居中。
+
+    刻意用**圆角方形**而不是圆形：圆形红底＋白色音符就是网易云音乐自己的商标，
+    这是第三方非官方程序，不该做得像官方图标。圆角方形同色系但不混淆。
 
     用 QPainter 在透明 QPixmap 上画：
-      1. 圆角矩形（半径 = size // 6）填主色 #2E7DDE
-      2. 叠加白色 fa5s.music 图标，尺寸 = size * 0.6，居中
+      1. 圆角矩形（半径 = size // 5）填品牌红
+      2. 叠加白色音符图标，尺寸 = size * 0.56，居中
     返回 QIcon(pixmap)，Qt 自动多分辨率缩放。
     """
     pixmap = QPixmap(size, size)
@@ -128,14 +163,12 @@ def create_app_icon(size: int = 256) -> QIcon:
     painter = QPainter(pixmap)
     try:
         painter.setRenderHint(QPainter.Antialiasing, True)
-        # 圆角方形底
-        radius = max(2, size // 6)
+        radius = max(2, size // 5)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(COLOR_PRIMARY))
+        painter.setBrush(QColor(theme.BRAND))
         painter.drawRoundedRect(QRectF(0, 0, size, size), radius, radius)
-        # 叠加白色 music 图标居中
-        icon = qta.icon(ICON_APP, color="#ffffff")
-        icon_size = int(size * 0.6)
+        icon = _icon(ICON_APP, theme.PANEL)
+        icon_size = int(size * 0.56)
         margin = (size - icon_size) // 2
         icon.paint(painter, margin, margin, icon_size, icon_size)
     finally:

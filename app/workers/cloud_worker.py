@@ -195,17 +195,28 @@ class CloudWorker(QThread):
         本地取消轮询不发（远端 run 未完成，无结论）。
         """
         try:
+            from datetime import datetime
+
             config = Config()
             if not bool(config.get("notify_on_schedule", True)):
                 return
+            facts = [("时间", datetime.now().strftime("%Y-%m-%d %H:%M")),
+                     ("方式", "GitHub Actions 云端")]
+            if url:
+                facts.append(("Run 详情", url))
             if status == "success":
+                level = "success"
                 subject = "ncmp 云端执行完成"
-                content = (f"GitHub Actions 云端任务已成功完成\nRun 详情：{url}"
-                           if url else "GitHub Actions 云端任务已成功完成")
+                content = "GitHub Actions 云端任务已成功完成。"
+                action = ""
             else:
+                level = "failed"
                 subject = "ncmp 云端执行失败"
-                content = (f"GitHub Actions 云端任务失败，请查看日志\nRun 详情：{url}"
-                           if url else "GitHub Actions 云端任务失败，请查看日志")
-            NotificationService(config, Logger()).send_notification(subject, content)
+                content = "GitHub Actions 云端任务未能完成。"
+                action = ("点上方的 Run 详情看 GitHub 上的完整日志。"
+                          "常见原因是仓库 Secrets 里的 Cookie 过期，"
+                          "到「设置」页点「同步 Cookie…」重新写入即可。")
+            NotificationService(config, Logger()).send_notification(
+                subject, content, level=level, facts=facts, action=action)
         except Exception:
             pass

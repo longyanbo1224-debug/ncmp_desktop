@@ -72,6 +72,7 @@ class LogView(QPlainTextEdit):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.setObjectName("logView")
         self.setReadOnly(True)
         font = QFont("Consolas")
         if not font.exactMatch():

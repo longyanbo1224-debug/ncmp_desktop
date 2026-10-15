@@ -65,6 +65,19 @@ class AppConfig:
         "schedule_enabled": False,
         "schedule_time": "09:00",
         "schedule_mode": "local",
+        # 本地执行随机延迟（分钟，0=不启用）。
+        # 固定整点执行本身就是个风控特征，云端早有 RANDOM_DELAY_MINUTES，本地一直缺。
+        "local_delay_minutes": 0,
+        # 错过补跑：定时时间已过、今天还没跑、且没到截止时间，就补一次。
+        # 场景：定时设了 09:00，但电脑 09:30 才开机——原来今天就这么没了。
+        "catchup_enabled": True,
+        "catchup_deadline": "23:00",
+        # 最近一次成功执行的日期（YYYY-MM-DD），补跑靠它判断"今天跑过没有"
+        "last_success_date": "",
+        # 最近一次**尝试**补跑的日期。补跑每天最多触发一次：
+        # 补跑失败时如果不记这一笔，60 秒心跳会每分钟重试一次直到截止时间，
+        # 那就是个重试风暴——正好是最重的风控特征。
+        "last_catchup_date": "",
         # 邮件通知开关（默认勾选；与 core.utils.config._apply_defaults 对齐）
         "notify_on_task_done": True,
         "notify_on_cookie_expired": True,

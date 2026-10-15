@@ -1,0 +1,30 @@
+# ===================================================================
+#  行尾规范
+# ===================================================================
+#
+# *.bat 必须是 CRLF：LF 会让 cmd.exe 解析多行 IF 块和 ^ 续行符时错乱。
+# 显式写 eol=crlf，不依赖克隆方的 core.autocrlf 设置——否则
+# autocrlf=false 的人克隆下来拿到 LF，build.bat 直接不能用。
+# 详见 DEVELOPER.md「八、打包 → 改这个脚本前必须知道的两件事」。
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# 其余文本统一 LF，跨平台一致
+*.py    text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.json  text eol=lf
+*.txt   text eol=lf
+*.spec  text eol=lf
+*.qss   text eol=lf
+
+# ===================================================================
+#  二进制：别做任何行尾/编码转换
+# ===================================================================
+*.ttf   binary
+*.otf   binary
+*.ico   binary
+*.png   binary
+*.jpg   binary
+*.zip   binary

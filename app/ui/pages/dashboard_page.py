@@ -1,30 +1,72 @@
-"""首页：Cookie 状态驱动三态卡片 + 最近任务摘要 + 闭环 toast。"""
+"""首页 —— 一份记录表。
+
+主角是**一句话**，不是一张卡片：40px 宋体直说今天的状况
+（还没有登录 / Cookie 失效了 / 今天还没跑 / 今天已跑）。
+下面是一张真实的打卡记录，读 ``TaskHistory``。
+
+设计意图：用户每天打开程序只想知道一件事——今天跑了吗。
+所以这句话是页面上唯一的展示级元素，其余全部安静。
+"""
+from datetime import datetime
+from typing import List, Optional
+
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
 )
 
+from app.app_config import AppConfig
 from app.cookie_store import CookieStore
 from app.task_history import TaskHistory
-from app.ui.icons import (
-    COLOR_DANGER, COLOR_PENDING, COLOR_SUCCESS, ICON_EMPTY_DASHBOARD,
-    ICON_LOGIN, ICON_RUN, op_icon,
-)
-
+from app.ui import theme
+from app.ui.icons import ICON_LOGIN, ICON_RUN, op_icon, result_icon, step_icon
+from app.ui.widgets.streak_grid import StreakGrid
 
 # 三态常量（UNCONFIGURED 无 Cookie / VALID 有效 / EXPIRED 失效）
 _UNCONFIGURED = "unconfigured"
 _VALID = "valid"
 _EXPIRED = "expired"
 
+# 记录表显示多少行（一年格子图负责"坚持得怎么样"，表只负责"上次怎么回事"，
+# 所以行数从 7 缩到 5，把纵向空间让给图）
+_LEDGER_ROWS = 5
+
+# 格子图要多少天：53 周
+_GRID_DAYS = 371
+
+_WEEKDAYS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+
+
+def _parse_ts(ts: str) -> Optional[datetime]:
+    """解析历史记录里的 ISO 时间戳；失败返回 None。"""
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts)
+    except Exception:
+        try:
+            return datetime.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S")
+        except Exception:
+            return None
+
+
+def _fmt_day(dt: datetime) -> str:
+    """10月15日"""
+    return f"{dt.month}月{dt.day}日"
+
+
+def _fmt_clock(dt: datetime) -> str:
+    """09:02"""
+    return dt.strftime("%H:%M")
+
 
 class DashboardPage(QWidget):
-    """首页 Dashboard：根据 Cookie 状态切换三态卡片。"""
+    """首页：一句话状态 + 打卡记录。"""
 
     run_task = Signal()
     goto_login = Signal()
-    goto_settings = Signal()
-    refresh_cookie = Signal()  # 预留：供外部触发刷新
+    goto_settings = Signal()  # 保留：主窗口仍连着，供将来复用
+    refresh_cookie = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -38,111 +80,298 @@ class DashboardPage(QWidget):
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(24, 24, 24, 24)
-        outer.setSpacing(16)
+        outer.setContentsMargins(theme.PAGE_MARGIN, theme.PAGE_MARGIN,
+                                 theme.PAGE_MARGIN, theme.PAGE_MARGIN)
+        outer.setSpacing(0)
 
-        title = QLabel("ncmp desktop")
-        title.setObjectName("pageTitle")
-        outer.addWidget(title)
+        # 今天是几号——这句话定义了下面"今天"的含义，所以它值得占一行
+        self._today_label = QLabel("")
+        self._today_label.setObjectName("captionText")
+        outer.addWidget(self._today_label)
 
-        # 顶部 toast（默认隐藏）
+        outer.addSpacing(theme.SP_5)
+
+        # 顶部提示条（默认隐藏）
         self._toast = QLabel("")
         self._toast.setObjectName("toast")
         self._toast.setVisible(False)
         outer.addWidget(self._toast)
 
-        # 中部状态卡
-        self._card = QFrame()
-        self._card.setObjectName("card")
-        card_layout = QVBoxLayout(self._card)
-        card_layout.setContentsMargins(20, 20, 20, 20)
-        card_layout.setSpacing(12)
+        # ---- 主角：一句话 ----
+        self._statement = QLabel("")
+        self._statement.setObjectName("displayStatement")
+        self._statement.setWordWrap(True)
+        outer.addWidget(self._statement)
 
-        self._card_icon_label = QLabel()
-        self._card_icon_label.setAlignment(Qt.AlignCenter)
-        self._card_icon_label.setVisible(False)
-        card_layout.addWidget(self._card_icon_label)
+        outer.addSpacing(theme.SP_2)
 
-        self._card_status_label = QLabel("")
-        self._card_status_label.setWordWrap(True)
-        self._card_status_label.setStyleSheet("font-size: 14px; font-weight: 600;")
-        card_layout.addWidget(self._card_status_label)
+        self._detail = QLabel("")
+        self._detail.setObjectName("captionText")
+        self._detail.setWordWrap(True)
+        outer.addWidget(self._detail)
 
-        self._card_button = QPushButton("")
-        self._card_button.setObjectName("primaryButton")
-        self._card_button.setIconSize(QSize(16, 16))
-        self._card_button.clicked.connect(self._on_card_button_clicked)
-        card_layout.addWidget(self._card_button)
+        outer.addSpacing(theme.SP_5)
 
-        self._summary_label = QLabel("暂无任务记录")
-        self._summary_label.setWordWrap(True)
-        self._summary_label.setStyleSheet("padding: 4px 0;")
-        self._summary_label.setObjectName("captionText")
-        card_layout.addWidget(self._summary_label)
+        # ---- 动作行：主按钮在左，定时信息在右 ----
+        action_row = QHBoxLayout()
+        action_row.setSpacing(theme.SP_4)
 
-        outer.addWidget(self._card)
+        self._action_btn = QPushButton("")
+        self._action_btn.setObjectName("primaryButton")
+        self._action_btn.setIconSize(QSize(15, 15))
+        self._action_btn.setMinimumWidth(132)
+        self._action_btn.clicked.connect(self._on_action_clicked)
+        action_row.addWidget(self._action_btn)
+
+        action_row.addStretch(1)
+
+        self._schedule_label = QLabel("")
+        self._schedule_label.setObjectName("captionText")
+        action_row.addWidget(self._schedule_label)
+
+        outer.addLayout(action_row)
+
+        outer.addSpacing(theme.SP_6)
+
+        # ---- 分隔线 ----
+        rule = QFrame()
+        rule.setObjectName("rule")
+        outer.addWidget(rule)
+
+        outer.addSpacing(theme.SP_5)
+
+        # ---- 打卡记录：一年格子图 ----
+        # 图回答"我坚持得怎么样"，表回答"上次到底怎么回事"，两者职责不同
+        grid_heading = QLabel("打卡记录")
+        grid_heading.setObjectName("sectionHeading")
+        outer.addWidget(grid_heading)
+
+        outer.addSpacing(theme.SP_3)
+
+        self._grid = StreakGrid()
+        outer.addWidget(self._grid, 0, Qt.AlignLeft)
+
+        outer.addSpacing(theme.SP_5)
+
+        # ---- 最近几次：明细表 ----
+        ledger_heading = QLabel("最近几次")
+        ledger_heading.setObjectName("sectionHeading")
+        outer.addWidget(ledger_heading)
+
+        outer.addSpacing(theme.SP_3)
+
+        self._ledger = QVBoxLayout()
+        self._ledger.setSpacing(0)
+        outer.addLayout(self._ledger)
 
         outer.addStretch(1)
 
-        # 底部设置入口
-        bottom = QHBoxLayout()
-        bottom.addStretch(1)
-        settings_btn = QPushButton("设置 →")
-        settings_btn.setObjectName("secondaryButton")
-        settings_btn.clicked.connect(self.goto_settings.emit)
-        bottom.addWidget(settings_btn)
-        outer.addLayout(bottom)
+    # ------------------------------------------------------------------
+    # 记录表
+    # ------------------------------------------------------------------
+    def _clear_ledger(self) -> None:
+        while self._ledger.count():
+            item = self._ledger.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
 
-    def _on_card_button_clicked(self) -> None:
-        if self._state == _UNCONFIGURED:
-            self.goto_login.emit()
-        elif self._state == _VALID:
-            self.run_task.emit()
-        else:  # _EXPIRED
-            self.goto_login.emit()
+    def _refresh_ledger(self) -> None:
+        """读历史，重建一年格子图和最近几次的明细表。"""
+        self._refresh_grid()
+        self._clear_ledger()
+        try:
+            recent = TaskHistory().load_recent(_LEDGER_ROWS)
+        except Exception:
+            recent = []
 
-    def _render(self) -> None:
-        if self._state == _UNCONFIGURED:
-            # 大图标空状态引导（48px 灰色 key 图标，居中显示在文字上方）
-            pix = op_icon(ICON_EMPTY_DASHBOARD, COLOR_PENDING).pixmap(QSize(48, 48))
-            self._card_icon_label.setPixmap(pix)
-            self._card_icon_label.setVisible(True)
-            self._card_status_label.setText("未配置 Cookie，无法执行任务")
-            self._card_status_label.setObjectName("captionText")
-            self._card_button.setText("立即获取 Cookie")
-            self._card_button.setIcon(op_icon(ICON_LOGIN))
-            self._summary_label.setVisible(False)
-        elif self._state == _VALID:
-            self._card_icon_label.setVisible(False)
-            self._card_status_label.setText("Cookie 有效")
-            self._card_status_label.setObjectName("successText")
-            self._card_button.setText("立即执行任务")
-            self._card_button.setIcon(op_icon(ICON_RUN))
-            self._summary_label.setVisible(True)
-            self._refresh_summary_from_history()
-        else:  # _EXPIRED
-            self._card_icon_label.setVisible(False)
-            msg = self._expired_msg or "未知原因"
-            self._card_status_label.setText(f"Cookie 失效：{msg}")
-            self._card_status_label.setObjectName("dangerText")
-            self._card_button.setText("重新登录")
-            self._card_button.setIcon(op_icon(ICON_LOGIN))
-            self._summary_label.setVisible(False)
+        if not recent:
+            empty = QLabel("还没有执行记录，点上面的按钮跑第一次")
+            empty.setObjectName("emptyState")
+            self._ledger.addWidget(empty)
+            return
 
-    def _refresh_summary_from_history(self) -> None:
+        for entry in recent:
+            self._ledger.addWidget(self._make_ledger_row(entry))
+
+    def _refresh_grid(self) -> None:
+        """重建一年格子图。数据源是按天聚合的结论，不是明细。"""
+        try:
+            days = TaskHistory().daily_summary(_GRID_DAYS)
+        except Exception:
+            days = []
+        self._grid.set_days(days)
+
+    def _make_ledger_row(self, entry: dict) -> QWidget:
+        """一行记录：日期 / 星期 / 状态（失败时带原因）/ 时间。"""
+        ok = bool(entry.get("success", False))
+        summary = str(entry.get("summary", "") or "")
+        dt = _parse_ts(str(entry.get("ts", "") or ""))
+
+        row = QWidget()
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(0, 7, 0, 7)
+        lay.setSpacing(theme.SP_3)
+
+        # 日期（等宽，保证列对齐）
+        date_label = QLabel(dt.strftime("%m-%d") if dt else "--")
+        date_label.setObjectName("dataTextMuted")
+        date_label.setFixedWidth(46)
+        lay.addWidget(date_label)
+
+        # 星期
+        week_label = QLabel(_WEEKDAYS[dt.weekday()] if dt else "")
+        week_label.setObjectName("captionText")
+        week_label.setFixedWidth(34)
+        lay.addWidget(week_label)
+
+        # 状态：图标 + 词。取消不算失败也不算成功，单独一色。
+        # 图标必须和状态词同色——取消用琥珀的"禁止"，不能用红色叉（那是失败）
+        if "取消" in summary:
+            status_word, status_obj, icon_pm = "取消", "warningText", step_icon("cancelled")
+        elif ok:
+            status_word, status_obj, icon_pm = "成功", "successText", result_icon(True)
+        else:
+            status_word, status_obj, icon_pm = "失败", "dangerText", result_icon(False)
+
+        icon = QLabel()
+        icon.setFixedSize(16, 16)
+        icon.setPixmap(icon_pm.pixmap(QSize(16, 16)))
+        lay.addWidget(icon)
+
+        status_label = QLabel(status_word)
+        status_label.setObjectName(status_obj)
+        status_label.setFixedWidth(34)
+        lay.addWidget(status_label)
+
+        # 只有失败／取消才展开原因——成功的记录都长一个样，展开只是噪音
+        if not ok:
+            reason = QLabel(summary)
+            reason.setObjectName("captionText")
+            reason.setToolTip(summary)
+            lay.addWidget(reason, 1)
+        else:
+            lay.addStretch(1)
+
+        # 时间
+        clock_label = QLabel(_fmt_clock(dt) if dt else "")
+        clock_label.setObjectName("dataTextMuted")
+        lay.addWidget(clock_label)
+
+        row.setToolTip(f"{summary}\n{entry.get('ts', '')}".strip())
+        return row
+
+    # ------------------------------------------------------------------
+    # 状态渲染
+    # ------------------------------------------------------------------
+    def _today_record(self) -> Optional[dict]:
+        """今天的最近一条记录；今天没跑过返回 None。"""
+        try:
+            recent = TaskHistory().load_recent(_LEDGER_ROWS)
+        except Exception:
+            return None
+        today = datetime.now().date()
+        for entry in recent:
+            dt = _parse_ts(str(entry.get("ts", "") or ""))
+            if dt and dt.date() == today:
+                return entry
+            if dt and dt.date() < today:
+                break
+        return None
+
+    def _last_record(self) -> Optional[dict]:
         try:
             recent = TaskHistory().load_recent(1)
         except Exception:
-            recent = []
-        if not recent:
-            self._summary_label.setText("暂无任务记录")
+            return None
+        return recent[0] if recent else None
+
+    def _render(self) -> None:
+        now = datetime.now()
+        self._today_label.setText(
+            f"{now.year}年{now.month}月{now.day}日 {_WEEKDAYS[now.weekday()]}")
+
+        if self._state == _UNCONFIGURED:
+            self._statement.setText("还没有登录")
+            self._set_statement_color(theme.INK)
+            self._detail.setText("登录后即可执行音乐合伙人每日任务")
+            self._action_btn.setText("立即登录")
+            self._action_btn.setIcon(op_icon(ICON_LOGIN, theme.PANEL))
+
+        elif self._state == _EXPIRED:
+            self._statement.setText("Cookie 失效了")
+            self._set_statement_color(theme.FAILED)
+            self._detail.setText(self._expired_msg or "需要重新登录才能继续执行任务")
+            self._action_btn.setText("重新登录")
+            self._action_btn.setIcon(op_icon(ICON_LOGIN, theme.PANEL))
+
+        else:  # _VALID
+            today = self._today_record()
+            if today is None:
+                last = self._last_record()
+                self._statement.setText("今天还没跑")
+                self._set_statement_color(theme.INK)
+                if last is not None:
+                    dt = _parse_ts(str(last.get("ts", "") or ""))
+                    word = "成功" if last.get("success") else "失败"
+                    if dt:
+                        self._detail.setText(
+                            f"上次{word} {_fmt_day(dt)} {_fmt_clock(dt)}")
+                    else:
+                        self._detail.setText(f"上次{word}")
+                else:
+                    self._detail.setText("还没有执行记录")
+            else:
+                summary = str(today.get("summary", "") or "")
+                dt = _parse_ts(str(today.get("ts", "") or ""))
+                clock = f" {_fmt_clock(dt)}" if dt else ""
+                if "取消" in summary:
+                    self._statement.setText("今天手动取消了")
+                    self._set_statement_color(theme.RUNNING_TEXT)
+                elif today.get("success"):
+                    self._statement.setText("今天已跑")
+                    self._set_statement_color(theme.SUCCESS)
+                else:
+                    self._statement.setText("今天跑失败了")
+                    self._set_statement_color(theme.FAILED)
+                self._detail.setText(f"{summary}{clock}".strip())
+
+            self._action_btn.setText("立即执行")
+            self._action_btn.setIcon(op_icon(ICON_RUN, theme.PANEL))
+
+        self._render_schedule()
+        self._refresh_ledger()
+
+    def _set_statement_color(self, color: str) -> None:
+        """改那句话的颜色。
+
+        用内联样式而不是 objectName：这句话的颜色由**状态**决定，
+        而状态是运行时算出来的，套 objectName 再 repolish 反而更绕。
+        """
+        self._statement.setStyleSheet(f"color: {color};")
+
+    def _render_schedule(self) -> None:
+        """右下角的定时信息。没开就直说没开，别留空让人猜。"""
+        try:
+            cfg = AppConfig()
+            enabled = bool(cfg.schedule_enabled)
+            hhmm = str(cfg.schedule_time or "09:00")
+            mode = str(cfg.schedule_mode or "local")
+        except Exception:
+            enabled, hhmm, mode = False, "09:00", "local"
+
+        if not enabled:
+            self._schedule_label.setText("未开启定时")
             return
-        item = recent[0]
-        ts = item.get("ts", "")
-        summary = item.get("summary", "")
-        success = item.get("success", False)
-        marker = "成功" if success else "失败"
-        self._summary_label.setText(f"最近：{marker} {summary}（{ts}）")
+        mode_text = {"local": "本地", "cloud": "云端", "both": "本地＋云端"}.get(
+            mode, "本地")
+        self._schedule_label.setText(f"下次自动 {hhmm}（{mode_text}）")
+
+    def _on_action_clicked(self) -> None:
+        if self._state == _VALID:
+            self.run_task.emit()
+        else:
+            self.goto_login.emit()
 
     # ------------------------------------------------------------------
     # 对外
@@ -153,10 +382,7 @@ class DashboardPage(QWidget):
             music_u, csrf, _ = CookieStore().load()
         except Exception:
             music_u, csrf = "", ""
-        if not (music_u and csrf):
-            self._state = _UNCONFIGURED
-        else:
-            self._state = _VALID
+        self._state = _VALID if (music_u and csrf) else _UNCONFIGURED
         self._expired_msg = ""
         self._render()
 
@@ -171,8 +397,8 @@ class DashboardPage(QWidget):
         self._render()
 
     def set_last_task_summary(self, msg: str = "") -> None:
-        """刷新最近任务摘要（从 TaskHistory 读最近一条；msg 兼容旧调用）。"""
-        self._refresh_summary_from_history()
+        """刷新最近任务摘要（重新读 TaskHistory 并重绘记录表）。"""
+        self._render()
 
     def show_toast(self, msg: str) -> None:
         """顶部短暂提示，2.5 秒后自动隐藏。"""

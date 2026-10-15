@@ -1,4 +1,8 @@
-"""参数配置页：按语义分 5 组（QGroupBox）+ GitHub Actions 云端执行预留字段。
+"""参数配置页 —— 一份文档。
+
+按语义分 6 组。分组**不套卡片**：每组是「小标题 + 一条细线 + 字段」，
+字段直接坐在页面底色上。输入框是页面上唯一白的东西，
+视线自然落到能改的地方，而不是先扫过六张一模一样的白卡片。
 
 字段对应 ncmp setting.json，gh_token 走 keyring：
     Cookie_MUSIC_U、Cookie___csrf、netease_phone、netease_password、
@@ -21,22 +25,22 @@ import hashlib
 import json
 from typing import Any, Dict, Optional, Tuple
 
-from PySide6.QtCore import Qt, QThread, QTime, Signal
+from PySide6.QtCore import QSize, Qt, QThread, QTime, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
-    QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QScrollArea,
-    QSpinBox, QTimeEdit, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame, QHBoxLayout,
+    QLabel, QLineEdit, QProgressBar, QPushButton, QScrollArea,
+    QSpinBox, QTimeEdit, QToolButton, QVBoxLayout, QWidget,
 )
 
 from app.app_config import AppConfig
 from app.cloud.actions_trigger import ActionsTrigger
 from app.cookie_store import CookieStore
+from app.ui import dialogs, theme
 from app.ui.icons import eye_icon
+from app.workers.cookie_check_worker import CookieCheckWorker
 from core.utils.config import Config
 from core.utils.logger import Logger
 from core.utils.notification import NotificationService
-from core.validators.cookie import CookieValidator
-import requests
 
 
 # 表单字段名清单
@@ -77,6 +81,7 @@ DEFAULTS: Dict[str, Any] = {
     "wait_time_max": 20,
     "score": 3,
     "full_extra_tasks": True,
+    "sign_in_enabled": True,
     "notify_email": "",
     "email_password": "",
     "smtp_server": "smtp.qq.com",
@@ -256,21 +261,27 @@ class SettingsPage(QWidget):
         scroll.setFrameShape(QScrollArea.NoFrame)
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(24, 24, 24, 24)
-        content_layout.setSpacing(14)
+        content_layout.setContentsMargins(
+            theme.PAGE_MARGIN, theme.PAGE_MARGIN,
+            theme.PAGE_MARGIN, theme.PAGE_MARGIN)
+        content_layout.setSpacing(0)
 
         title = QLabel("参数配置")
         title.setObjectName("pageTitle")
         content_layout.addWidget(title)
+
+        content_layout.addSpacing(theme.SP_2)
 
         subtitle = QLabel("默认值已预填，按需修改后点「保存」。鼠标悬停字段可见说明。")
         subtitle.setObjectName("subtitle")
         subtitle.setWordWrap(True)
         content_layout.addWidget(subtitle)
 
+        content_layout.addSpacing(theme.SP_6)
+
         # 各分组区
         self._sections = QVBoxLayout()
-        self._sections.setSpacing(14)
+        self._sections.setSpacing(theme.GROUP_GAP)
         content_layout.addLayout(self._sections)
 
         self._build_general_section()
@@ -282,9 +293,10 @@ class SettingsPage(QWidget):
 
         content_layout.addStretch(1)
 
-        # 操作按钮
+        # 操作按钮。原顶部还有一个「明文 → MD5」，和密码字段行内的那个
+        # 功能完全重复（都调 hashlib.md5 写 netease_md5_password），已删。
         buttons = QHBoxLayout()
-        buttons.setSpacing(8)
+        buttons.setSpacing(theme.SP_2)
         save_btn = QPushButton("保存")
         save_btn.setObjectName("primaryButton")
         save_btn.clicked.connect(self.save)
@@ -294,17 +306,13 @@ class SettingsPage(QWidget):
         validate_btn = QPushButton("验证 Cookie")
         validate_btn.setObjectName("secondaryButton")
         validate_btn.clicked.connect(self.validate_cookie)
-        to_md5_btn = QPushButton("明文 → MD5")
-        to_md5_btn.setObjectName("secondaryButton")
-        to_md5_btn.clicked.connect(self._convert_to_md5)
         import_btn = QPushButton("导入 setting.json")
         import_btn.setObjectName("secondaryButton")
         import_btn.clicked.connect(self.import_setting_json)
         export_btn = QPushButton("导出 setting.json")
         export_btn.setObjectName("secondaryButton")
         export_btn.clicked.connect(self.export_setting_json)
-        for b in (save_btn, test_btn, validate_btn, to_md5_btn,
-                  import_btn, export_btn):
+        for b in (save_btn, test_btn, validate_btn, import_btn, export_btn):
             buttons.addWidget(b)
         buttons.addStretch(1)
         content_layout.addLayout(buttons)
@@ -312,14 +320,57 @@ class SettingsPage(QWidget):
         scroll.setWidget(content)
         outer.addWidget(scroll)
 
-    def _new_section(self, title: str) -> QFormLayout:
-        """创建带标题的 QGroupBox，内部直接用 QFormLayout 作布局。"""
-        group = QGroupBox(title)
-        self._sections.addWidget(group)
-        form = QFormLayout(group)
-        form.setLabelAlignment(Qt.AlignRight)
-        form.setHorizontalSpacing(12)
-        form.setVerticalSpacing(8)
+    def _new_section(self, title: str, intro: str = "") -> QFormLayout:
+        """建一个分组：小标题 + 一条细线 + 字段。
+
+        **不套卡片。** 字段直接坐在页面底色上，只有输入框是白的。
+        :param intro: 可选的说明段落，放在细线下方、字段上方。
+        :returns: 该分组的 QFormLayout，调用方往里 addRow。
+        """
+        container = QWidget()
+        box = QVBoxLayout(container)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(0)
+
+        heading = QLabel(title)
+        heading.setObjectName("sectionHeading")
+        box.addWidget(heading)
+
+        box.addSpacing(theme.SP_2)
+
+        rule = QFrame()
+        rule.setObjectName("rule")
+        box.addWidget(rule)
+
+        box.addSpacing(theme.SP_4)
+
+        if intro:
+            caption = QLabel(intro)
+            caption.setObjectName("captionText")
+            caption.setWordWrap(True)
+            caption.setMaximumWidth(theme.CAPTION_MAX_WIDTH)
+            box.addWidget(caption)
+            box.addSpacing(theme.SP_4)
+
+        form_host = QWidget()
+        # 限宽：输入框横跨整个窗口时一行能放 60 多个汉字，眼睛要来回扫。
+        #
+        # 注意必须给 form_host 一个**最小宽度**：外层容器加了 Qt.AlignLeft 之后
+        # 只会取 sizeHint，而 QFormLayout 的 sizeHint 就是输入框的自然宽度，
+        # 结果字段反而缩到 277px。撑住最小宽度，字段才会跟着展开。
+        form_host.setMinimumWidth(theme.FORM_MAX_WIDTH - 60)
+        form = QFormLayout(form_host)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
+        form.setHorizontalSpacing(theme.SP_3)
+        form.setVerticalSpacing(theme.SP_2)
+        box.addWidget(form_host)
+
+        container.setMaximumWidth(theme.FORM_MAX_WIDTH)
+        self._sections.addWidget(container, 0, Qt.AlignLeft)
+        # 供 _build_github_section 这类需要在表单外追加整行控件的分组使用
+        self._current_section_box = box
         return form
 
     def _build_account_section(self) -> None:
@@ -389,6 +440,15 @@ class SettingsPage(QWidget):
         self._apply_hint(full_extra, "full_extra_tasks")
         form.addRow("full_extra_tasks", full_extra)
         self._controls["full_extra_tasks"] = full_extra
+
+        # 每日签到：附赠项，和音乐合伙人并行执行，失败不影响主任务
+        sign_in = QCheckBox("每日执行签到时顺便签到领经验")
+        sign_in.setToolTip(
+            "勾选后每次执行任务会先调一次网易云的每日签到接口（领经验值）。\n"
+            "签到和音乐合伙人是两件独立的事：签到失败只会把这一步标红，"
+            "不会影响评分任务继续跑。")
+        form.addRow("每日签到", sign_in)
+        self._controls["sign_in_enabled"] = sign_in
 
     def _build_email_section(self) -> None:
         form = self._new_section("邮件通知")
@@ -464,6 +524,32 @@ class SettingsPage(QWidget):
         form.addRow("关闭按钮行为", close_combo)
         self._close_action_combo = close_combo
 
+        # 日志文件夹入口。日志按天滚动保留 7 天，出问题时用户得能找到它。
+        log_row = QWidget()
+        log_lay = QHBoxLayout(log_row)
+        log_lay.setContentsMargins(0, 0, 0, 0)
+        log_lay.setSpacing(theme.SP_2)
+        log_btn = QPushButton("打开日志文件夹")
+        log_btn.setObjectName("secondaryButton")
+        log_btn.setToolTip(
+            "日志按天滚动，保留最近 7 天。反馈问题时把这个文件夹里的日志附上即可。")
+        log_btn.clicked.connect(self._open_log_dir)
+        log_lay.addWidget(log_btn)
+        log_lay.addStretch(1)
+        form.addRow("运行日志", log_row)
+
+    @staticmethod
+    def _open_log_dir() -> None:
+        """打开日志文件夹；打不开就把路径告诉用户，别只说一句失败。"""
+        from app.logging_setup import log_dir, open_log_dir
+        if open_log_dir():
+            return
+        try:
+            path = str(log_dir())
+        except Exception:
+            path = "（无法解析日志目录）"
+        dialogs.info(None, "运行日志", f"未能自动打开，请手动前往：\n{path}")
+
     def _build_schedule_section(self) -> None:
         """定时执行配置（写入 AppConfig，不入 setting.json）。"""
         form = self._new_section("定时执行")
@@ -494,13 +580,39 @@ class SettingsPage(QWidget):
         form.addRow("模式", mode_combo)
         self._schedule_mode_combo = mode_combo
 
-    def _build_github_section(self) -> None:
-        group = QGroupBox("GitHub Actions（云端执行）")
-        self._sections.addWidget(group)
-        group_v = QVBoxLayout(group)
-        group_v.setSpacing(8)
+        # 本地随机延迟。固定整点执行本身就是个风控特征，
+        # 云端早有 RANDOM_DELAY_MINUTES，本地一直缺。
+        delay_spin = QSpinBox()
+        delay_spin.setRange(0, 30)
+        delay_spin.setSuffix(" 分钟")
+        delay_spin.setSpecialValueText("不启用")
+        delay_spin.setToolTip(
+            "0=不启用。设为 N 分钟后，本地定时任务会在到点后的 0~N 分钟内随机时刻启动，\n"
+            "避免每天都在同一秒发起请求——固定整点本身就是个风控特征。\n"
+            "云端执行有独立的随机延迟设置，见 GitHub Actions 分组。")
+        form.addRow("本地随机延迟", delay_spin)
+        self._schedule_delay_spin = delay_spin
 
-        caption = QLabel(
+        # 错过补跑
+        catchup_box = QCheckBox("错过补跑（启动时如果今天还没跑，自动补一次）")
+        catchup_box.setToolTip(
+            "定时设了 09:00，但电脑 09:30 才开机——默认今天就这么无声无息地没了。\n"
+            "勾选后启动时会检查「今天该跑但还没跑」，自动补一次并弹通知。\n"
+            "限制：只补当天（不追溯更早），每天最多补一次，且只对本地模式生效。")
+        form.addRow("错过补跑", catchup_box)
+        self._schedule_catchup_box = catchup_box
+
+        deadline_edit = QTimeEdit()
+        deadline_edit.setDisplayFormat("HH:mm")
+        deadline_edit.setTime(QTime(23, 0))
+        deadline_edit.setToolTip(
+            "补跑的截止时间，默认 23:00。过了这个点就不再补——\n"
+            "离第二天的定时时间太近，跑完紧接着又跑一次，同样是个风控特征。")
+        form.addRow("补跑截止", deadline_edit)
+        self._schedule_catchup_deadline = deadline_edit
+
+    def _build_github_section(self) -> None:
+        intro = (
             "配置后可在任务页选云端执行，触发 GitHub Actions 跑任务（电脑关机也能跑）。\n"
             "配置步骤：\n"
             "1. fork ncmp 仓库：github.com/ACAne0320/ncmp → 右上 Fork\n"
@@ -508,16 +620,12 @@ class SettingsPage(QWidget):
             "3. 生成 GitHub PAT（头像 → Settings → Developer settings → Personal access tokens → 勾 repo+workflow）\n"
             "4. 下方填 gh_token / gh_repo / workflow_name / workflow_branch → 点「保存」\n"
             "5. 点「测试连接」验证；点「同步 Cookie、邮件和任务参数到 GitHub Secrets」把本地 Cookie、邮件和任务开关写到仓库\n"
-            "鼠标悬停各字段可见详细获取说明。")
-        caption.setObjectName("captionText")
-        caption.setWordWrap(True)
-        group_v.addWidget(caption)
-
-        form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignRight)
-        form.setHorizontalSpacing(12)
-        form.setVerticalSpacing(8)
-        group_v.addLayout(form)
+            "鼠标悬停各字段可见详细获取说明。"
+        )
+        form = self._new_section("GitHub Actions（云端执行）", intro)
+        # 表单之后的整行控件（同步按钮、云端定时开关等）都追加到这个竖排盒子里
+        group_v = self._current_section_box
+        group_v.addSpacing(theme.SP_4)
 
         # gh_token（密码模式 + 显隐）
         gh_token_row = self._build_password_row("gh_token")
@@ -740,6 +848,7 @@ class SettingsPage(QWidget):
         row = QWidget()
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(theme.SP_2)
         edit = QLineEdit()
         edit.setObjectName("pwdEdit")
         edit.setEchoMode(QLineEdit.Password)
@@ -747,19 +856,37 @@ class SettingsPage(QWidget):
             edit.setReadOnly(True)
         self._apply_hint(edit, field_key)
         layout.addWidget(edit, 1)
-        eye = QCheckBox()
-        eye.setToolTip("显示/隐藏")
+
+        # 眼睛放进输入框自己的布局里（Qt 官方"清除按钮"的做法），
+        # 由布局负责定位和缩放，不用手写 resizeEvent。
+        # 用 QToolButton 而不是 QCheckBox：QCheckBox 设了 icon 也仍会画一个勾选框。
+        eye = QToolButton(edit)
+        eye.setCheckable(True)
         eye.setIcon(eye_icon(False))
-        eye.toggled.connect(
-            lambda checked: (
-                edit.setEchoMode(
-                    QLineEdit.Normal if checked else QLineEdit.Password),
-                eye.setIcon(eye_icon(checked)),
-            ))
-        layout.addWidget(eye)
+        eye.setIconSize(QSize(15, 15))
+        eye.setCursor(Qt.PointingHandCursor)
+        eye.setToolTip("显示")
+        eye.setAutoRaise(True)
+        eye.setFixedSize(22, 22)
+
+        def _toggle(checked: bool) -> None:
+            edit.setEchoMode(QLineEdit.Normal if checked else QLineEdit.Password)
+            eye.setIcon(eye_icon(checked))
+            eye.setToolTip("隐藏" if checked else "显示")
+
+        eye.toggled.connect(_toggle)
+        eye_row = QHBoxLayout(edit)
+        eye_row.setContentsMargins(0, 0, 5, 0)
+        eye_row.setSpacing(0)
+        eye_row.addStretch(1)
+        eye_row.addWidget(eye)
+        edit.setTextMargins(0, 0, 26, 0)
+
         if with_md5_button_target:
-            convert_btn = QPushButton("→ MD5")
+            convert_btn = QPushButton("转成 MD5")
             convert_btn.setObjectName("secondaryButton")
+            convert_btn.setToolTip(
+                "把左边这串明文算成 MD5 填进 MD5 字段，并清空明文。")
 
             def _convert():
                 plain = edit.text().strip()
@@ -770,6 +897,7 @@ class SettingsPage(QWidget):
                 if isinstance(target, QLineEdit):
                     target.setText(md5)
                     edit.clear()
+
             convert_btn.clicked.connect(_convert)
             layout.addWidget(convert_btn)
         return row
@@ -817,6 +945,7 @@ class SettingsPage(QWidget):
         self._set_control("wait_time_max", int(_val("wait_time_max")))
         self._set_control("score", int(_val("score")))
         self._set_control("full_extra_tasks", bool(_val("full_extra_tasks")))
+        self._set_control("sign_in_enabled", bool(_val("sign_in_enabled")))
         self._set_control("notify_email", _val("notify_email"))
         self._set_control("email_password", _val("email_password"))
         self._set_control("smtp_server", _val("smtp_server"))
@@ -950,7 +1079,7 @@ class SettingsPage(QWidget):
             except Exception:
                 pass
         except Exception as e:
-            QMessageBox.warning(self, "保存失败", str(e))
+            dialogs.warn(self, "保存失败", str(e))
             return
         # 非敏感字段写入用户目录固定路径；keyring 字段不落 JSON
         try:
@@ -958,13 +1087,13 @@ class SettingsPage(QWidget):
                       if k not in Config._KEYRING_KEY_MAP}
             Config.write_file_config(export)
         except Exception as e:
-            QMessageBox.warning(self, "部分保存失败",
+            dialogs.warn(self, "部分保存失败",
                                 f"keyring 已写入，但 setting.json 写入失败：{e}")
             return
         # 定时执行配置进 AppConfig（独立文件，不入 setting.json）
         self._save_schedule_config()
         self._save_close_action_config()
-        QMessageBox.information(self, "保存", "配置已保存。")
+        dialogs.info(self, "保存", "配置已保存。")
 
     # ------------------------------------------------------------------
     # 定时执行（AppConfig）
@@ -980,8 +1109,26 @@ class SettingsPage(QWidget):
                 if self._schedule_mode_combo.itemData(i) == mode:
                     self._schedule_mode_combo.setCurrentIndex(i)
                     break
+            self._schedule_delay_spin.setValue(
+                int(self._app_config.get("local_delay_minutes", 0) or 0))
+            self._schedule_catchup_box.setChecked(
+                bool(self._app_config.get("catchup_enabled", True)))
+            hh, mm = self._parse_hhmm(
+                self._app_config.get("catchup_deadline", "23:00"), (23, 0))
+            self._schedule_catchup_deadline.setTime(QTime(hh, mm))
         except Exception:
             pass
+
+    @staticmethod
+    def _parse_hhmm(text, default):
+        try:
+            hh, mm = str(text or "").split(":")
+            h, m = int(hh), int(mm)
+            if 0 <= h <= 23 and 0 <= m <= 59:
+                return h, m
+        except Exception:
+            pass
+        return default
 
     def _save_schedule_config(self) -> None:
         """把表单上的 schedule_* 写回 AppConfig，并 emit signal 通知主窗口重排。"""
@@ -992,6 +1139,13 @@ class SettingsPage(QWidget):
             self._app_config.set("schedule_enabled", enabled)
             self._app_config.set("schedule_time", hhmm)
             self._app_config.set("schedule_mode", mode)
+            self._app_config.set("local_delay_minutes",
+                                 int(self._schedule_delay_spin.value()))
+            self._app_config.set("catchup_enabled",
+                                 bool(self._schedule_catchup_box.isChecked()))
+            self._app_config.set(
+                "catchup_deadline",
+                self._schedule_catchup_deadline.time().toString("HH:mm"))
             self._app_config.save()
         except Exception:
             pass
@@ -1329,32 +1483,47 @@ class SettingsPage(QWidget):
         try:
             config = Config()
         except Exception as e:
-            QMessageBox.warning(self, "通知测试", f"配置加载失败：{e}")
+            dialogs.warn(self, "通知测试", f"配置加载失败：{e}")
             return
         svc = NotificationService(config, Logger())
-        ok = svc.send_notification("ncmp 测试邮件", "这是来自 ncmp desktop 的通知测试。")
+        ok = svc.send_notification(
+            "ncmp 测试邮件",
+            "这是一封测试邮件，说明邮件通知配置可用。",
+            level="info",
+            facts=[("SMTP", str(config.get("smtp_server", ""))),
+                   ("收件人", str(config.get("notify_email", "")))],
+            action="收到这封就说明配置没问题，不用做别的。")
         if ok:
-            QMessageBox.information(self, "通知测试", "测试邮件已发送，请查收。")
+            dialogs.info(self, "通知测试", "测试邮件已发送，请查收。")
         else:
-            QMessageBox.warning(self, "通知测试", "测试邮件发送失败，请检查 SMTP 配置。")
+            dialogs.warn(self, "通知测试", "测试邮件发送失败，请检查 SMTP 配置。")
 
     def validate_cookie(self) -> None:
-        try:
-            music_u, csrf, _ = CookieStore().load()
-        except Exception as e:
-            QMessageBox.warning(self, "Cookie 验证", f"读取 Cookie 失败：{e}")
+        """验证 Cookie。
+
+        走后台线程：验证要发一次网络请求，放在按钮槽里会把界面冻住，
+        用户点完没反应还以为程序死了。
+        """
+        if getattr(self, "_cookie_check", None) is not None \
+                and self._cookie_check.isRunning():
             return
-        if not (music_u and csrf):
-            QMessageBox.warning(self, "Cookie 验证", "未配置 Cookie，请先登录。")
-            return
-        session = requests.Session()
-        session.cookies.set("MUSIC_U", music_u)
-        session.cookies.set("__csrf", csrf)
-        ok, msg = CookieValidator(session, Logger()).validate()
+        btn = self.sender()
+        if isinstance(btn, QPushButton):
+            btn.setEnabled(False)
+            btn.setText("验证中…")
+        self._cookie_check = CookieCheckWorker(self)
+        self._cookie_check.done.connect(
+            lambda ok, msg: self._on_cookie_checked(ok, msg, btn))
+        self._cookie_check.start()
+
+    def _on_cookie_checked(self, ok: bool, msg: str, btn) -> None:
+        if isinstance(btn, QPushButton):
+            btn.setEnabled(True)
+            btn.setText("验证 Cookie")
         if ok:
-            QMessageBox.information(self, "Cookie 验证", msg)
+            dialogs.success(self, "Cookie 验证", msg)
         else:
-            QMessageBox.warning(self, "Cookie 验证", msg)
+            dialogs.warn(self, "Cookie 验证", msg)
 
     def _test_github_connection(self) -> None:
         """测试 gh_token + gh_repo 能否访问 GitHub API（GET /repos/{repo}）。
@@ -1380,22 +1549,6 @@ class SettingsPage(QWidget):
             lambda: ActionsTrigger(token, repo).test_auth(),
         )
 
-    def _convert_to_md5(self) -> None:
-        """「明文 → MD5」按钮：取明文字段，hash 后填入 MD5 字段。"""
-        plain_edit = self._controls.get("netease_password")
-        md5_edit = self._controls.get("netease_md5_password")
-        if not isinstance(plain_edit, QLineEdit) or not isinstance(md5_edit, QLineEdit):
-            return
-        plain = plain_edit.text().strip()
-        if not plain:
-            QMessageBox.warning(self, "明文 → MD5", "请先在 netease_password 输入明文。")
-            return
-        md5 = hashlib.md5(plain.encode("utf-8")).hexdigest()
-        md5_edit.setText(md5)
-        plain_edit.clear()
-        QMessageBox.information(self, "明文 → MD5",
-                                "已转换为 MD5 并填入 netease_md5_password（明文已清空）。")
-
     def import_setting_json(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "选择 setting.json", "", "JSON Files (*.json);;All Files (*)")
@@ -1405,12 +1558,12 @@ class SettingsPage(QWidget):
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except Exception as e:
-            QMessageBox.warning(self, "导入失败", str(e))
+            dialogs.warn(self, "导入失败", str(e))
             return
         for k in SETTINGS_FIELDS:
             if k in data:
                 self._set_control(k, data[k])
-        QMessageBox.information(self, "导入", "已加载到表单，记得点「保存」。")
+        dialogs.info(self, "导入", "已加载到表单，记得点「保存」。")
 
     def export_setting_json(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -1423,6 +1576,6 @@ class SettingsPage(QWidget):
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            QMessageBox.warning(self, "导出失败", str(e))
+            dialogs.warn(self, "导出失败", str(e))
             return
-        QMessageBox.information(self, "导出", f"已保存到 {path}")
+        dialogs.info(self, "导出", f"已保存到 {path}")

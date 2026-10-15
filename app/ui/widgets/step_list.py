@@ -10,9 +10,11 @@ from typing import Dict, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QLabel, QHeaderView,
+    QFrame, QHeaderView, QLabel, QStackedWidget, QTreeWidget,
+    QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
+from app.ui import theme
 from app.ui.icons import STEP_TEXTS, step_icon
 
 
@@ -30,13 +32,16 @@ class StepList(QWidget):
         super().__init__(parent)
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(theme.SP_2)
         self._title = QLabel("任务步骤")
-        self._title.setObjectName("sectionTitle")
+        self._title.setObjectName("sectionHeading")
         self._tree = QTreeWidget()
         self._tree.setHeaderLabels(["项目", "状态", "用时/评分"])
         self._tree.setIndentation(12)
         self._tree.setUniformRowHeights(True)
-        self._tree.setAlternatingRowColors(True)
+        # 不用斑马纹：它和状态图标的颜色在抢注意力
+        self._tree.setAlternatingRowColors(False)
+        self._tree.setRootIsDecorated(True)
         # 自动拉伸第 0 列
         header = self._tree.header()
         header.setStretchLastSection(False)
@@ -44,12 +49,24 @@ class StepList(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self._layout.addWidget(self._title)
-        # 空状态占位（树为空时显示，有步骤时隐藏）
+
+        # 空状态和树放进一个 QStackedWidget 互换：
+        # 空状态占位套在同款白面板里，不会悬在树外面显得无所依附
         self._empty_label = QLabel("等待任务启动…")
         self._empty_label.setObjectName("emptyState")
         self._empty_label.setAlignment(Qt.AlignCenter)
-        self._layout.addWidget(self._empty_label)
-        self._layout.addWidget(self._tree, 1)
+        empty_panel = QFrame()
+        empty_panel.setObjectName("panel")
+        empty_lay = QVBoxLayout(empty_panel)
+        empty_lay.setContentsMargins(0, 0, 0, 0)
+        empty_lay.addWidget(self._empty_label)
+
+        self._pager = QStackedWidget()
+        self._pager.addWidget(empty_panel)   # index 0 = 空状态
+        self._pager.addWidget(self._tree)    # index 1 = 步骤表
+        self._pager.setCurrentIndex(0)
+        self._layout.addWidget(self._pager, 1)
+
         # name -> QTreeWidgetItem
         self._step_items: Dict[str, QTreeWidgetItem] = {}
 
@@ -69,8 +86,8 @@ class StepList(QWidget):
             self._apply_status(item, status, elapsed)
         # 确保可见
         self._tree.scrollToItem(item)
-        # 已有步骤，隐藏空状态占位
-        self._empty_label.setVisible(False)
+        # 已有步骤，切到步骤表
+        self._pager.setCurrentIndex(1)
 
     def updateStep(self, name: str, status: str, elapsed: float = 0.0) -> None:
         """更新步骤状态。不存在则创建。"""
@@ -94,7 +111,7 @@ class StepList(QWidget):
     def clear(self) -> None:
         self._tree.clear()
         self._step_items.clear()
-        self._empty_label.setVisible(True)
+        self._pager.setCurrentIndex(0)
 
     # ------------------------------------------------------------------
     # 内部
