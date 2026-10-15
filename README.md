@@ -16,8 +16,8 @@ ncmp 是什么：把网易云音乐「音乐合伙人」每日评分任务自动
 
 ### 方式一：exe 直接用（推荐）
 
-1. 到 Releases 页下载 ncmp desktop.zip
-2. 解压，双击 ncmp desktop.exe
+1. 到 Releases 页下载 `ncmp.desktop.zip`
+2. 解压，双击 `ncmp desktop.exe`
 3. 首次启动 Windows 可能提示「未识别发布者」→ 点「更多信息」→「仍要运行」（程序未签名，介意可自行编译）
 
 ### 方式二：源码运行
