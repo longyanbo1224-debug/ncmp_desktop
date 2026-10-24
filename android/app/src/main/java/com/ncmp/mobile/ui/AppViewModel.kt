@@ -54,6 +54,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var fullExtra by mutableStateOf(store.fullExtra)
 
     init {
+        api.debugLogger = { line -> viewModelScope.launch { appendLog(line) } }
         loadSession()
     }
 

@@ -67,9 +67,12 @@ object NeteaseCrypto {
     /** WeAPI 加密。返回 {params, encSecKey}。 */
     fun weapiEncrypt(plainJson: String): Map<String, String> {
         val key2 = randomString(16)
-        val first = aesEncryptCbc(plainJson.toByteArray(Charsets.UTF_8), WEAPI_AES_KEY, WEAPI_AES_IV)
-        val second = aesEncryptCbc(first, key2, WEAPI_AES_IV)
-        val params = Base64.encodeToString(second, Base64.NO_WRAP)
+        // 第一次：AES-CBC 加密 JSON，结果转成 base64 字符串
+        val firstBytes = aesEncryptCbc(plainJson.toByteArray(Charsets.UTF_8), WEAPI_AES_KEY, WEAPI_AES_IV)
+        val firstB64 = Base64.encodeToString(firstBytes, Base64.NO_WRAP)
+        // 第二次：用随机 key2 加密上面的 base64 字符串（注意是字符串，不是原始密文字节）
+        val secondBytes = aesEncryptCbc(firstB64.toByteArray(Charsets.UTF_8), key2, WEAPI_AES_IV)
+        val params = Base64.encodeToString(secondBytes, Base64.NO_WRAP)
         return mapOf("params" to params, "encSecKey" to rsaEncrypt(key2))
     }
 

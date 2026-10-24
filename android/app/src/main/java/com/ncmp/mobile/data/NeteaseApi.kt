@@ -39,6 +39,9 @@ class NeteaseApi {
             if (value == null) cookies.remove("__csrf") else cookies["__csrf"] = value
         }
 
+    /** 调试日志回调（把 WeAPI 原始响应显示到界面日志）。 */
+    var debugLogger: ((String) -> Unit)? = null
+
     // 扫码 / 密码登录所需的会话配置（一次进程内固定）
     private val sDeviceId = "unknown-${Random.nextInt(1000000)}"
     private val wnMCID = generateWNMCID()
@@ -116,7 +119,10 @@ class NeteaseApi {
             val fullUrl = "$url?csrf_token=${csrf ?: ""}"
             val request = Request.Builder().url(fullUrl).post(body).headers(headers.build()).build()
             client.newCall(request).execute().use { resp ->
-                parseJson(resp.body?.string())
+                val text = resp.body?.string()
+                android.util.Log.e("ncmp", "weapiPost $url -> http=${resp.code} body=[$text]")
+                debugLogger?.invoke("weapi $url -> [${resp.code}] $text")
+                parseJson(text)
             }
         }
 
