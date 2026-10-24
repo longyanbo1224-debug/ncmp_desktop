@@ -1,4 +1,4 @@
-# PyPI 依赖（pyncm 不在 PyPI，由 build.bat 单独安装，见 requirements.txt 注释）
+# PyPI packages only. pyncm is NOT on PyPI, it is installed separately by build.bat.
 PySide6>=6.5
 qtawesome>=1.3
 keyring>=24
