@@ -15,6 +15,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -312,19 +314,27 @@ fun MainScreen(vm: AppViewModel) {
             }
         },
     ) { padding ->
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 22.dp),
-        ) {
-            if (tab == 0) {
+        if (tab == 0) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 22.dp),
+            ) {
                 HeroSection(vm)
                 ThinRule()
                 ConfigSection(vm)
                 ThinRule()
                 LogSection(vm)
-            } else {
+            }
+        } else {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 22.dp),
+            ) {
                 HistoryContent(vm)
             }
         }
@@ -600,13 +610,13 @@ private fun HistoryRow(entry: HistoryEntry) {
 }
 
 @Composable
-private fun ColumnScope.LogSection(vm: AppViewModel) {
+private fun LogSection(vm: AppViewModel) {
     val listState = rememberLazyListState()
     val context = LocalContext.current
     LaunchedEffect(vm.logLines.size) {
         if (vm.logLines.isNotEmpty()) listState.scrollToItem(vm.logLines.size - 1)
     }
-    Column(Modifier.fillMaxWidth().weight(1f)) {
+    Column(Modifier.fillMaxWidth().height(320.dp)) {
         Row(
             Modifier.fillMaxWidth().padding(top = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
