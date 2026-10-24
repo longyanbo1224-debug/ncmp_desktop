@@ -3,6 +3,7 @@ package com.ncmp.mobile
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -47,10 +48,17 @@ class AlarmReceiver : BroadcastReceiver() {
                 NotificationChannel("ncmp_alarm", "定时提醒", NotificationManager.IMPORTANCE_HIGH),
             )
         }
+        val pi = PendingIntent.getActivity(
+            context,
+            0,
+            Intent(context, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         val n: Notification = NotificationCompat.Builder(context, "ncmp_alarm")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("ncmp 音乐合伙人")
             .setContentText("到点了，打开 App 执行今日任务")
+            .setContentIntent(pi)
             .setAutoCancel(true)
             .build()
         nm.notify(3001, n)

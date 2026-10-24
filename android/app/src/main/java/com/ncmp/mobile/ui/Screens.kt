@@ -1,11 +1,13 @@
 package com.ncmp.mobile.ui
 
 import android.annotation.SuppressLint
+import android.app.AlarmManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.webkit.CookieManager
@@ -92,6 +94,23 @@ fun NCMPApp(vm: AppViewModel) {
     NCMPTheme {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             if (vm.loggedIn) MainScreen(vm) else LoginScreen(vm)
+        }
+    }
+}
+
+/** 请求「精确闹钟」权限（Android 12+ 定时任务需要，否则定时可能被系统拦截）。 */
+private fun ensureExactAlarmPermission(context: Context) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        try {
+            val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            if (!am.canScheduleExactAlarms()) {
+                context.startActivity(
+                    Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                        data = Uri.parse("package:${context.packageName}")
+                    },
+                )
+            }
+        } catch (_: Exception) {
         }
     }
 }
@@ -553,7 +572,10 @@ private fun ConfigSection(vm: AppViewModel) {
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
-                        onClick = { vm.saveConfig() },
+                        onClick = {
+                            vm.saveConfig()
+                            if (vm.scheduleEnabled) ensureExactAlarmPermission(context)
+                        },
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = NCMP.Brand),
                     ) { Text("保存设置") }
