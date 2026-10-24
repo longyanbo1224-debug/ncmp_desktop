@@ -69,10 +69,8 @@ class NeteaseApi {
         .build()
 
     init {
-        // weapi 会话配置 cookie（与 pyncm 的 weapi_config 一致；eapi 的 header 字段已自带设备信息）
-        cookies["WEVNSM"] = "1.0.0"
-        cookies["sDeviceId"] = sDeviceId
-        cookies["WNMCID"] = wnMCID
+        // 任务请求只需 MUSIC_U + __csrf（与桌面版 core 的 plain session 一致）。
+        // 不再全局塞 WEVNSM/sDeviceId/WNMCID：那是扫码登录用的，且与 WebView 登录会话的设备指纹不一致。
     }
 
     // ------------------------------------------------------------------
@@ -120,8 +118,11 @@ class NeteaseApi {
             val request = Request.Builder().url(fullUrl).post(body).headers(headers.build()).build()
             client.newCall(request).execute().use { resp ->
                 val text = resp.body?.string()
-                android.util.Log.e("ncmp", "weapiPost $url -> http=${resp.code} body=[$text]")
-                debugLogger?.invoke("weapi $url -> [${resp.code}] $text")
+                android.util.Log.e(
+                    "ncmp",
+                    "weapiPost $url -> http=${resp.code} len=${text?.length} ct=${resp.header("Content-Type")} body=[$text]",
+                )
+                debugLogger?.invoke("weapi $url -> [${resp.code}] len=${text?.length} $text")
                 parseJson(text)
             }
         }

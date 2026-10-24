@@ -1,6 +1,9 @@
 package com.ncmp.mobile.ui
 
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -384,6 +387,7 @@ private fun ResultBanner(vm: AppViewModel) {
 @Composable
 private fun ColumnScope.LogSection(vm: AppViewModel) {
     val listState = rememberLazyListState()
+    val context = LocalContext.current
     LaunchedEffect(vm.logLines.size) {
         if (vm.logLines.isNotEmpty()) listState.scrollToItem(vm.logLines.size - 1)
     }
@@ -394,7 +398,11 @@ private fun ColumnScope.LogSection(vm: AppViewModel) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("运行日志", style = MaterialTheme.typography.titleSmall)
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(4.dp))
+            TextButton(onClick = {
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("ncmp log", vm.logLines.joinToString("\n")))
+            }) { Text("复制") }
             TextButton(onClick = { vm.clearLog() }) { Text("清空") }
         }
         Surface(
