@@ -166,14 +166,18 @@ private fun WebLoginTab(vm: AppViewModel, modifier: Modifier = Modifier) {
             settings.userAgentString =
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             settings.useWideViewPort = true
-            settings.loadWithOverviewMode = false
+            // 缩放适配手机宽度：整个页面（含登录按钮）都在一屏内，不用横向滑动
+            settings.loadWithOverviewMode = true
+            settings.setSupportZoom(true)
+            settings.builtInZoomControls = true
+            settings.displayZoomControls = false
             var loginTriggered = false
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView, url: String) {
                     if (!loginTriggered) {
                         loginTriggered = true
                         view.evaluateJavascript(
-                            "(function(){var n=0;function f(){var els=document.querySelectorAll('a,span,div,button');for(var i=0;i<els.length;i++){if(els[i].textContent.trim()==='登录'){els[i].click();return true;}}return false;}function p(){if(f())return;if(++n<24)setTimeout(p,500);}setTimeout(p,1500);})()",
+                            "(function(){var n=0;function f(){var els=document.querySelectorAll('a,span,div,button,li');for(var i=0;i<els.length;i++){var t=(els[i].textContent||'').trim();if(t==='登录'||t==='立即登录'||t==='登录/注册'){els[i].click();return true;}}return false;}function p(){if(f())return;if(++n<30)setTimeout(p,500);}setTimeout(p,1200);})()",
                             null,
                         )
                     }
