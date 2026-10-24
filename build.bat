@@ -91,7 +91,7 @@ if errorlevel 1 (
 )
 python -m pip show pyncm >nul 2>&1
 if errorlevel 1 (
-    echo     pyncm not found - installing from github (needs github access) ...
+    echo     pyncm not found - installing from github ...
     python -m pip install "pyncm @ git+https://github.com/sakarie9/pyncm.git@master"
     if errorlevel 1 (
         echo.
