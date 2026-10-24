@@ -179,7 +179,7 @@ private fun WebLoginTab(vm: AppViewModel, modifier: Modifier = Modifier) {
                     if (!loginTriggered) {
                         loginTriggered = true
                         view.evaluateJavascript(
-                            "(function(){var n=0;function f(){var els=document.querySelectorAll('a,span,div,button,li');for(var i=0;i<els.length;i++){var t=(els[i].textContent||'').trim();if(t==='登录'||t==='立即登录'||t==='登录/注册'){try{els[i].scrollIntoView({block:'center',inline:'center'});}catch(e){}return true;}}return false;}function p(){if(f())return;if(++n<30)setTimeout(p,500);}setTimeout(p,1200);})()",
+                            "(function(){var m=document.querySelector('meta[name=viewport]');if(m){var c=m.getAttribute('content')||'';if(c.indexOf('user-scalable=no')>=0){m.setAttribute('content',c.replace('user-scalable=no','user-scalable=yes'));}}var n=0;function f(){var els=document.querySelectorAll('a,span,div,button,li');for(var i=0;i<els.length;i++){var t=(els[i].textContent||'').trim();if(t==='登录'||t==='立即登录'||t==='登录/注册'){try{els[i].scrollIntoView({block:'center',inline:'center'});}catch(e){}return true;}}return false;}function p(){if(f())return;if(++n<30)setTimeout(p,500);}setTimeout(p,1200);})()",
                             null,
                         )
                     }
@@ -194,7 +194,7 @@ private fun WebLoginTab(vm: AppViewModel, modifier: Modifier = Modifier) {
 
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
-            "页面已自动定位到登录区域。输入手机号 → 获取验证码 → 填短信码，登录后点下方按钮。",
+            "页面已自动定位到登录区域，可双指捏合放大缩小。登录后点下方按钮。",
             fontSize = 12.sp,
             color = NCMP.Muted,
         )
@@ -207,30 +207,22 @@ private fun WebLoginTab(vm: AppViewModel, modifier: Modifier = Modifier) {
             AndroidView(factory = { webView }, modifier = Modifier.fillMaxSize())
         }
         Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(
-                onClick = { webView.zoomOut() },
-                modifier = Modifier.weight(1f).height(42.dp),
-                shape = RoundedCornerShape(10.dp),
-            ) { Text("缩小", fontSize = 13.sp) }
-            OutlinedButton(
-                onClick = { webView.zoomIn() },
-                modifier = Modifier.weight(1f).height(42.dp),
-                shape = RoundedCornerShape(10.dp),
-            ) { Text("放大", fontSize = 13.sp) }
-            OutlinedButton(
-                onClick = { webView.reload() },
-                modifier = Modifier.weight(1f).height(42.dp),
-                shape = RoundedCornerShape(10.dp),
-            ) { Text("刷新", fontSize = 13.sp) }
-        }
-        Spacer(Modifier.height(8.dp))
         Button(
             onClick = { vm.extractCookieFromWebView() },
             modifier = Modifier.fillMaxWidth().height(48.dp),
             shape = RoundedCornerShape(10.dp),
             colors = ButtonDefaults.buttonColors(containerColor = NCMP.Brand),
         ) { Text("我已登录，获取 Cookie", fontSize = 15.sp, fontWeight = FontWeight.SemiBold) }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = { webView.reload() },
+            modifier = Modifier.fillMaxWidth().height(42.dp),
+            shape = RoundedCornerShape(10.dp),
+        ) {
+            Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("刷新页面", fontSize = 13.sp)
+        }
         if (vm.webError.isNotEmpty()) {
             Spacer(Modifier.height(6.dp))
             Text(vm.webError, color = NCMP.Red, fontSize = 12.sp)
