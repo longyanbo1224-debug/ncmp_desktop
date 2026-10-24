@@ -212,39 +212,42 @@ WeAPI = AES-128-CBC（key `0CoJUm6Qyw8W8jud`，IV `0102030405060708`）双重加
 
 ## 从源码构建
 
-### 一键打包（桌面 exe + 手机 APK）
+### 桌面端
 
-依赖：Python 3.10+、Git、JDK 17+、Android SDK（platforms;android-34 / build-tools;34.0.0）
+依赖：Python 3.10+、Git
 
 ```bash
 build.bat
 ```
 
-产物都输出到 `dist/`：
+产物：`dist/ncmp desktop/`（分发时整个文件夹一起 zip，不要只发 exe）
 
-| 产物 | 路径 | 说明 |
-|---|---|---|
-| 桌面 exe | `dist/ncmp desktop/` | 分发时整个文件夹一起 zip，不要只发 exe |
-| 手机 APK | `dist/android/ncmp-mobile.apk` | 需已配置 Android SDK（`android/local.properties` 或 `ANDROID_HOME`），否则自动跳过 |
-
-> 首次打包会自动安装 Python 依赖（pyinstaller + requirements.txt，pyncm 从 GitHub 拉取）并下载 Gradle 8.7（走腾讯镜像）。国内网络建议先配 pip 镜像：
+> 首次打包会自动安装 Python 依赖（pyinstaller + requirements.txt，pyncm 从 GitHub 拉取）。国内网络建议先配 pip 镜像：
 >
 > ```bash
 > pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
 > ```
 
-### 只跑桌面端（源码运行）
+只跑源码（不打包）：
 
 ```bash
 pip install -r requirements.txt
 python app/main.py
 ```
 
-### 只打手机 APK
+### 手机端（Android）
 
-方式一（推荐）：用 Android Studio 打开 `android/` 目录，点 Run。
+依赖：JDK 17+、Android SDK（platforms;android-34 / build-tools;34.0.0）
 
-方式二（命令行）：
+```bash
+build_android.bat
+```
+
+产物：`dist/android/ncmp-mobile.apk`
+
+> 首次打包会通过 Gradle wrapper 下载 Gradle 8.7（走腾讯镜像）。需已配置 Android SDK（`android/local.properties` 或 `ANDROID_HOME`）。
+
+或用 Android Studio 打开 `android/` 目录点 Run；或命令行：
 
 ```bash
 cd android
@@ -252,6 +255,8 @@ cd android
 ./gradlew :app:assembleDebug
 # APK 输出在 android/app/build/outputs/apk/debug/app-debug.apk
 ```
+
+`android/settings.gradle.kts` 已内置阿里云 Maven 镜像加速依赖下载。
 
 `android/settings.gradle.kts` 已内置阿里云 Maven 镜像加速依赖下载。
 
