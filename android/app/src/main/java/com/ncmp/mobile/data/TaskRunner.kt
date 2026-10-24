@@ -14,6 +14,9 @@ import kotlin.random.Random
  *
  * 流程：验证用户 -> 每日签到 -> 拉取每日任务 -> 评分基础任务 -> 额外评分任务。
  */
+/** 今日评分额度已用完（服务端 405「没有更多可评定歌曲」）。 */
+class QuotaExhaustedException(message: String) : RuntimeException(message)
+
 class TaskRunner(
     private val api: NeteaseApi,
     private val config: TaskConfig,
@@ -100,9 +103,14 @@ class TaskRunner(
         onProgress(0, total, "", "")
         for (work in pending) {
             checkCancel()
-            sign(work, taskId, isExtra = false) { w, score ->
-                done++
-                onProgress(done, total, w.name, score)
+            try {
+                sign(work, taskId, isExtra = false) { w, score ->
+                    done++
+                    onProgress(done, total, w.name, score)
+                }
+            } catch (e: QuotaExhaustedException) {
+                log("今日评分额度已用完，停止")
+                break
             }
         }
     }
@@ -146,6 +154,10 @@ class TaskRunner(
                 code == 405 && msg.contains("资源状态异常") -> {
                     log("歌曲「${work.name}」资源状态异常，跳过")
                     return
+                }
+                code == 405 && msg.contains("没有更多") -> {
+                    // 今日额度已用完：不再逐个空转，交由上层停止
+                    throw QuotaExhaustedException(msg)
                 }
                 else -> throw RuntimeException("评分失败: $msg (响应码: $code)")
             }
@@ -198,6 +210,9 @@ class TaskRunner(
                 }
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: QuotaExhaustedException) {
+                log("今日额外评分额度已用完，停止")
+                break
             } catch (e: Exception) {
                 log("处理歌曲 ${work.name} 失败，尝试下一个: ${e.message}")
             }

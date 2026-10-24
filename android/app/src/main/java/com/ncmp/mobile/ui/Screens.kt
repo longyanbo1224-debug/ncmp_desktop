@@ -207,22 +207,30 @@ private fun WebLoginTab(vm: AppViewModel, modifier: Modifier = Modifier) {
             AndroidView(factory = { webView }, modifier = Modifier.fillMaxSize())
         }
         Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = { webView.zoomOut() },
+                modifier = Modifier.weight(1f).height(42.dp),
+                shape = RoundedCornerShape(10.dp),
+            ) { Text("缩小", fontSize = 13.sp) }
+            OutlinedButton(
+                onClick = { webView.zoomIn() },
+                modifier = Modifier.weight(1f).height(42.dp),
+                shape = RoundedCornerShape(10.dp),
+            ) { Text("放大", fontSize = 13.sp) }
+            OutlinedButton(
+                onClick = { webView.reload() },
+                modifier = Modifier.weight(1f).height(42.dp),
+                shape = RoundedCornerShape(10.dp),
+            ) { Text("刷新", fontSize = 13.sp) }
+        }
+        Spacer(Modifier.height(8.dp))
         Button(
             onClick = { vm.extractCookieFromWebView() },
             modifier = Modifier.fillMaxWidth().height(48.dp),
             shape = RoundedCornerShape(10.dp),
             colors = ButtonDefaults.buttonColors(containerColor = NCMP.Brand),
         ) { Text("我已登录，获取 Cookie", fontSize = 15.sp, fontWeight = FontWeight.SemiBold) }
-        Spacer(Modifier.height(8.dp))
-        OutlinedButton(
-            onClick = { webView.reload() },
-            modifier = Modifier.fillMaxWidth().height(44.dp),
-            shape = RoundedCornerShape(10.dp),
-        ) {
-            Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(4.dp))
-            Text("刷新页面")
-        }
         if (vm.webError.isNotEmpty()) {
             Spacer(Modifier.height(6.dp))
             Text(vm.webError, color = NCMP.Red, fontSize = 12.sp)
