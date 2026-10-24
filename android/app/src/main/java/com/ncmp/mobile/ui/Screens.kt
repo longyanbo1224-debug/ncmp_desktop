@@ -36,12 +36,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -56,7 +52,6 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -80,6 +75,7 @@ import com.ncmp.mobile.R
 import com.ncmp.mobile.ui.theme.NCMP
 import com.ncmp.mobile.ui.theme.NCMPTheme
 import com.ncmp.mobile.ui.widgets.SegmentedMeter
+import kotlinx.coroutines.delay
 
 @Composable
 fun NCMPApp(vm: AppViewModel) {
@@ -114,6 +110,11 @@ private fun openBatterySettings(context: Context) {
     }
 }
 
+@Composable
+private fun ThinRule(color: Color = NCMP.Rule) {
+    Box(Modifier.fillMaxWidth().height(1.dp).background(color))
+}
+
 // ======================================================================
 // 登录页
 // ======================================================================
@@ -122,21 +123,21 @@ private fun openBatterySettings(context: Context) {
 @Composable
 fun LoginScreen(vm: AppViewModel) {
     var tab by remember { mutableStateOf(0) }
-    Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
-        Spacer(Modifier.height(44.dp))
+    Column(Modifier.fillMaxSize().padding(horizontal = 22.dp)) {
+        Spacer(Modifier.height(48.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Image(
                 painter = painterResource(R.mipmap.ic_launcher),
                 contentDescription = null,
-                modifier = Modifier.size(56.dp).clip(RoundedCornerShape(14.dp)),
+                modifier = Modifier.size(52.dp).clip(RoundedCornerShape(13.dp)),
             )
             Spacer(Modifier.width(12.dp))
             Column {
-                Text("ncmp", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = NCMP.Ink)
-                Text("音乐合伙人任务自动化", fontSize = 13.sp, color = NCMP.Muted)
+                Text("ncmp", fontSize = 23.sp, fontWeight = FontWeight.Bold, color = NCMP.Ink)
+                Text("音乐合伙人任务自动化", fontSize = 12.sp, color = NCMP.Muted)
             }
         }
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(30.dp))
         TabRow(
             selectedTabIndex = tab,
             containerColor = Color.Transparent,
@@ -185,42 +186,49 @@ private fun WebLoginTab(vm: AppViewModel, modifier: Modifier = Modifier) {
     }
     DisposableEffect(Unit) { onDispose { webView.destroy() } }
 
+    // 登录成功后自动检测并进入，无需手动点按钮
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1500)
+            val c = CookieManager.getInstance().getCookie("https://music.163.com") ?: ""
+            if (c.contains("MUSIC_U=") && c.contains("__csrf=")) {
+                vm.extractCookieFromWebView()
+                break
+            }
+        }
+    }
+
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
-            "下面是网易官方登录页，支持扫码 / 手机号 / 验证码等官方方式",
+            "在下方网页输入手机号，点「获取验证码」，填短信码即可。登录成功后会自动继续。",
             fontSize = 12.sp,
             color = NCMP.Muted,
         )
         Spacer(Modifier.height(10.dp))
         Surface(
             shape = RoundedCornerShape(12.dp),
-            color = NCMP.Panel,
+            color = Color.White,
             modifier = Modifier.weight(1f).fillMaxWidth(),
         ) {
             AndroidView(factory = { webView }, modifier = Modifier.fillMaxSize())
         }
         Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(
                 onClick = { webView.reload() },
-                modifier = Modifier.weight(1f).height(46.dp),
+                modifier = Modifier.height(44.dp),
                 shape = RoundedCornerShape(10.dp),
             ) {
                 Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(4.dp))
                 Text("刷新")
             }
-            Button(
-                onClick = { vm.extractCookieFromWebView() },
-                modifier = Modifier.weight(1.6f).height(46.dp),
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = NCMP.Brand),
-            ) {
-                Text("我已登录，获取 Cookie")
-            }
+            Spacer(Modifier.width(12.dp))
+            Text("登录后自动检测，也可手动", fontSize = 11.sp, color = NCMP.Muted, modifier = Modifier.weight(1f))
+            TextButton(onClick = { vm.extractCookieFromWebView() }) { Text("获取 Cookie", fontSize = 13.sp) }
         }
         if (vm.webError.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
             Text(vm.webError, color = NCMP.Red, fontSize = 12.sp)
         }
     }
@@ -234,7 +242,7 @@ private fun CookieLoginTab(vm: AppViewModel) {
             fontSize = 12.sp,
             color = NCMP.Muted,
         )
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(16.dp))
         OutlinedTextField(
             value = vm.cookieMusicU,
             onValueChange = { vm.cookieMusicU = it },
@@ -256,9 +264,7 @@ private fun CookieLoginTab(vm: AppViewModel) {
             modifier = Modifier.fillMaxWidth().height(48.dp),
             shape = RoundedCornerShape(10.dp),
             colors = ButtonDefaults.buttonColors(containerColor = NCMP.Brand),
-        ) {
-            Text("登录")
-        }
+        ) { Text("登录") }
         if (vm.cookieError.isNotEmpty()) {
             Spacer(Modifier.height(12.dp))
             Text(vm.cookieError, color = NCMP.Red, fontSize = 12.sp)
@@ -274,142 +280,174 @@ private fun CookieLoginTab(vm: AppViewModel) {
 @Composable
 fun MainScreen(vm: AppViewModel) {
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            if (vm.nickname.isEmpty()) "音乐合伙人" else vm.nickname,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = NCMP.Ink,
-                        )
-                        Text("ncmp", fontSize = 11.sp, color = NCMP.Muted)
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { vm.logout() }) {
-                        Icon(Icons.Filled.Logout, contentDescription = "退出登录", tint = NCMP.Muted)
-                    }
-                },
-            )
-        },
+        containerColor = NCMP.Ground,
+        topBar = { Header(vm) },
     ) { padding ->
         Column(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 22.dp),
         ) {
-            HeroCard(vm)
-            Spacer(Modifier.height(12.dp))
-            ConfigCard(vm)
-            Spacer(Modifier.height(12.dp))
-            LogCard(vm)
+            HeroSection(vm)
+            ThinRule()
+            ConfigSection(vm)
+            ThinRule()
+            LogSection(vm)
         }
     }
 }
 
 @Composable
-private fun HeroCard(vm: AppViewModel) {
+private fun Header(vm: AppViewModel) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (vm.nickname.isEmpty()) "音乐合伙人" else vm.nickname,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = NCMP.Ink,
+                )
+                Text("ncmp", fontSize = 11.sp, color = NCMP.Muted)
+            }
+            IconButton(onClick = { vm.logout() }) {
+                Icon(Icons.Filled.Logout, contentDescription = "退出登录", tint = NCMP.Muted)
+            }
+        }
+        ThinRule()
+    }
+}
+
+/** 主角：状态 + 当前歌曲 + 分段电平表 + 主操作。全部坐在底色上，不套卡片。 */
+@Composable
+private fun HeroSection(vm: AppViewModel) {
     val isCancelled = vm.resultLabel == "已取消"
-    val statusText: String
-    val statusColor: Color
-    val subText: String
+
+    val title: String
+    val titleColor: Color
+    val sub: String
     when {
         vm.running -> {
-            statusText = "正在执行…"
-            statusColor = NCMP.Amber
-            subText = if (vm.progressTotal > 0)
-                "${vm.currentStep} · ${vm.progressDone}/${vm.progressTotal}" + if (vm.currentSong.isNotEmpty()) " · ${vm.currentSong}" else ""
-            else vm.currentStep.ifEmpty { "准备中…" }
+            title = "正在评分"
+            titleColor = NCMP.Amber
+            sub = vm.currentStep.ifEmpty { "准备中…" }
         }
         vm.resultLabel.isNotEmpty() && vm.resultIsError -> {
-            statusText = vm.resultLabel
-            statusColor = NCMP.Red
-            subText = vm.resultHint
+            title = "执行失败"
+            titleColor = NCMP.Red
+            sub = vm.resultHint.ifEmpty { vm.resultLabel }
+        }
+        vm.resultLabel.isNotEmpty() && isCancelled -> {
+            title = "已取消"
+            titleColor = NCMP.Muted
+            sub = "随时可以重新开始"
         }
         vm.resultLabel.isNotEmpty() -> {
-            statusText = vm.resultLabel
-            statusColor = if (isCancelled) NCMP.Muted else NCMP.Green
-            subText = if (isCancelled) "" else "今天的评分任务已完成"
+            title = "今天完成"
+            titleColor = NCMP.Green
+            sub = "共 ${vm.progressTotal} 首已评分"
         }
         else -> {
-            statusText = "准备就绪"
-            statusColor = NCMP.Ink
-            subText = "点击下方按钮开始今日评分"
+            title = "今日评分"
+            titleColor = NCMP.Ink
+            sub = "点下方按钮开始"
         }
     }
 
-    Card(
-        colors = CardDefaults.cardColors(containerColor = NCMP.Panel),
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(Modifier.fillMaxWidth().padding(18.dp)) {
-            Text(statusText, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = statusColor)
-            if (subText.isNotEmpty()) {
-                Spacer(Modifier.height(6.dp))
-                Text(subText, fontSize = 13.sp, color = NCMP.Muted)
+    val meterProgress = when {
+        vm.running && vm.progressTotal > 0 -> vm.progressDone.toFloat() / vm.progressTotal
+        vm.resultLabel.isNotEmpty() && !vm.resultIsError && !isCancelled -> 1f
+        vm.progressTotal > 0 -> vm.progressDone.toFloat() / vm.progressTotal
+        else -> 0f
+    }
+    val meterColor = when {
+        vm.resultIsError -> NCMP.Red
+        vm.running -> NCMP.Amber
+        vm.resultLabel.isNotEmpty() && !isCancelled -> NCMP.Green
+        else -> NCMP.Brand
+    }
+
+    Column(Modifier.fillMaxWidth().padding(top = 22.dp, bottom = 20.dp)) {
+        Text(title, fontFamily = FontFamily.Serif, fontSize = 32.sp, fontWeight = FontWeight.Bold, color = titleColor)
+        Spacer(Modifier.height(4.dp))
+        Text(sub, fontSize = 13.sp, color = NCMP.Muted)
+
+        if (vm.running && vm.currentSong.isNotEmpty()) {
+            Spacer(Modifier.height(18.dp))
+            Text(
+                vm.currentSong,
+                fontFamily = FontFamily.Serif,
+                fontSize = 21.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = NCMP.Ink,
+                maxLines = 2,
+            )
+            val meta = buildString {
+                append("${vm.progressDone}/${vm.progressTotal}")
+                if (vm.currentScore.isNotEmpty()) append("  ·  ${vm.currentScore} 分")
             }
-            if (vm.running && vm.progressTotal > 0) {
-                Spacer(Modifier.height(16.dp))
-                SegmentedMeter(
-                    progress = vm.progressDone.toFloat() / vm.progressTotal,
-                    color = if (vm.resultIsError) NCMP.Red else NCMP.Amber,
-                    modifier = Modifier.fillMaxWidth().height(14.dp),
+            Spacer(Modifier.height(3.dp))
+            Text(meta, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = NCMP.Muted)
+        }
+
+        Spacer(Modifier.height(18.dp))
+        SegmentedMeter(
+            progress = meterProgress,
+            color = meterColor,
+            modifier = Modifier.fillMaxWidth().height(18.dp),
+        )
+        Spacer(Modifier.height(20.dp))
+
+        if (vm.running) {
+            OutlinedButton(
+                onClick = { vm.cancelTask() },
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = NCMP.Red),
+            ) { Text("取消", fontSize = 16.sp) }
+        } else {
+            Button(
+                onClick = { vm.runTask() },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = NCMP.Brand),
+            ) {
+                Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    when {
+                        vm.resultIsError -> "重试"
+                        vm.resultLabel.isNotEmpty() && !isCancelled -> "再执行一次"
+                        isCancelled -> "重新开始"
+                        else -> "开始评分"
+                    },
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
                 )
-            }
-            Spacer(Modifier.height(16.dp))
-            if (vm.running) {
-                OutlinedButton(
-                    onClick = { vm.cancelTask() },
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = NCMP.Red),
-                ) {
-                    Icon(Icons.Filled.Stop, contentDescription = null, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("取消任务", fontSize = 16.sp)
-                }
-            } else {
-                Button(
-                    onClick = { vm.runTask() },
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = NCMP.Brand),
-                ) {
-                    Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(22.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("立即执行", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                }
             }
         }
     }
 }
 
 @Composable
-private fun ConfigCard(vm: AppViewModel) {
+private fun ConfigSection(vm: AppViewModel) {
     var expanded by remember { mutableStateOf(false) }
     val context = LocalContext.current
-    Card(
-        colors = CardDefaults.cardColors(containerColor = NCMP.Panel),
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(Modifier.fillMaxWidth().padding(16.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
-            ) {
-                Icon(Icons.Filled.Settings, contentDescription = null, tint = NCMP.Muted, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("任务参数", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = NCMP.Ink, modifier = Modifier.weight(1f))
-                Text(if (expanded) "收起" else "展开", fontSize = 12.sp, color = NCMP.Muted)
-            }
-            if (expanded) {
-                Spacer(Modifier.height(14.dp))
-                Text("评分策略", fontSize = 13.sp, color = NCMP.Muted)
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 15.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("任务参数", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = NCMP.Ink, modifier = Modifier.weight(1f))
+            Text(if (expanded) "收起" else "展开", fontSize = 12.sp, color = NCMP.Muted)
+        }
+        if (expanded) {
+            Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                Text("评分策略", fontSize = 12.sp, color = NCMP.Muted)
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val options = listOf(1 to "1-2分", 2 to "2-3分", 3 to "3-4分", 4 to "固定4分")
@@ -442,12 +480,12 @@ private fun ConfigCard(vm: AppViewModel) {
                 }
                 Spacer(Modifier.height(6.dp))
                 Text("每首歌之间随机等待的秒数，越大越不易被风控", fontSize = 11.sp, color = NCMP.Muted)
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("完成全部额外任务", fontSize = 14.sp, color = NCMP.Ink, modifier = Modifier.weight(1f))
                     Switch(checked = vm.fullExtra, onCheckedChange = { vm.fullExtra = it })
                 }
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
                         onClick = { vm.saveConfig() },
@@ -465,48 +503,42 @@ private fun ConfigCard(vm: AppViewModel) {
 }
 
 @Composable
-private fun ColumnScope.LogCard(vm: AppViewModel) {    val listState = rememberLazyListState()
+private fun ColumnScope.LogSection(vm: AppViewModel) {
+    val listState = rememberLazyListState()
     val context = LocalContext.current
     LaunchedEffect(vm.logLines.size) {
         if (vm.logLines.isNotEmpty()) listState.scrollToItem(vm.logLines.size - 1)
     }
-    Card(
-        colors = CardDefaults.cardColors(containerColor = NCMP.Panel),
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth().weight(1f),
-    ) {
-        Column(Modifier.fillMaxSize().padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("运行日志", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = NCMP.Ink)
-                Spacer(Modifier.width(4.dp))
-                TextButton(onClick = {
-                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    cm.setPrimaryClip(ClipData.newPlainText("ncmp log", vm.logLines.joinToString("\n")))
-                }) { Text("复制", fontSize = 13.sp) }
-                TextButton(onClick = { vm.clearLog() }) { Text("清空", fontSize = 13.sp) }
+    Column(Modifier.fillMaxWidth().weight(1f)) {
+        Row(
+            Modifier.fillMaxWidth().padding(top = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("运行日志", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = NCMP.Ink)
+            Spacer(Modifier.width(4.dp))
+            TextButton(onClick = {
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("ncmp log", vm.logLines.joinToString("\n")))
+            }) { Text("复制", fontSize = 12.sp) }
+            TextButton(onClick = { vm.clearLog() }) { Text("清空", fontSize = 12.sp) }
+        }
+        if (vm.logLines.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("暂无日志", fontSize = 13.sp, color = NCMP.Muted)
             }
-            Spacer(Modifier.height(6.dp))
-            Surface(
-                color = Color(0xFFFAFAFA),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.fillMaxSize(),
+        } else {
+            LazyColumn(
+                state = listState,
+                contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),
             ) {
-                if (vm.logLines.isEmpty()) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("暂无日志", fontSize = 13.sp, color = NCMP.Muted)
-                    }
-                } else {
-                    LazyColumn(state = listState, contentPadding = PaddingValues(10.dp)) {
-                        items(vm.logLines) { line ->
-                            Text(
-                                line,
-                                fontSize = 12.sp,
-                                fontFamily = FontFamily.Monospace,
-                                color = NCMP.Ink,
-                                modifier = Modifier.padding(vertical = 1.dp),
-                            )
-                        }
-                    }
+                items(vm.logLines) { line ->
+                    Text(
+                        line,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = NCMP.Ink,
+                        modifier = Modifier.padding(vertical = 1.dp),
+                    )
                 }
             }
         }

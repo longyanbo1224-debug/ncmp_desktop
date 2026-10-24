@@ -41,6 +41,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var progressDone by mutableStateOf(0)
     var progressTotal by mutableStateOf(0)
     var currentSong by mutableStateOf("")
+    var currentScore by mutableStateOf("")
     var currentStep by mutableStateOf("")
     val logLines = mutableStateListOf<String>()
     var resultLabel by mutableStateOf("")
@@ -69,6 +70,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { TaskBus.done.collect { progressDone = it } }
         viewModelScope.launch { TaskBus.total.collect { progressTotal = it } }
         viewModelScope.launch { TaskBus.song.collect { currentSong = it } }
+        viewModelScope.launch { TaskBus.score.collect { currentScore = it } }
         viewModelScope.launch { TaskBus.step.collect { currentStep = it } }
         viewModelScope.launch { TaskBus.resultLabel.collect { resultLabel = it } }
         viewModelScope.launch { TaskBus.resultHint.collect { resultHint = it } }
@@ -83,6 +85,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             api.csrf = csrf
             loggedIn = true
             nickname = store.nickname ?: ""
+            // 后台刷新昵称：存储里的可能是占位（旧版 cookieLogin 写的「网易云用户」）
+            viewModelScope.launch {
+                try {
+                    val nick = api.verifyUser()
+                    if (nick.isNotEmpty()) {
+                        nickname = nick
+                        store.nickname = nick
+                    }
+                } catch (_: Exception) {
+                }
+            }
         }
     }
 
@@ -95,8 +108,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             cookieError = "请同时填写 MUSIC_U 和 __csrf"
             return
         }
-        cookieError = ""
-        onLoginSuccess(musicU, csrf, "网易云用户")
+        cookieError = "正在验证登录态..."
+        api.musicU = musicU
+        api.csrf = csrf
+        viewModelScope.launch {
+            try {
+                // 用真实昵称，而不是「网易云用户」占位
+                val nick = api.verifyUser()
+                cookieError = ""
+                onLoginSuccess(musicU, csrf, nick)
+            } catch (e: Exception) {
+                cookieError = "Cookie 验证失败：${e.message}"
+            }
+        }
     }
 
     /** 从 WebView 的 CookieManager 提取 MUSIC_U / __csrf。 */

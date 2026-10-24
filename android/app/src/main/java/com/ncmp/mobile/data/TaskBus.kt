@@ -9,6 +9,7 @@ object TaskBus {
     val done = MutableStateFlow(0)
     val total = MutableStateFlow(0)
     val song = MutableStateFlow("")
+    val score = MutableStateFlow("")
     val step = MutableStateFlow("")
     val resultLabel = MutableStateFlow("")
     val resultHint = MutableStateFlow("")
@@ -19,6 +20,7 @@ object TaskBus {
         done.value = 0
         total.value = 0
         song.value = ""
+        score.value = ""
         step.value = ""
         resultLabel.value = ""
         resultHint.value = ""

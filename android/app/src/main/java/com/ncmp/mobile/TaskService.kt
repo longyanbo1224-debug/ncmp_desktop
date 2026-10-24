@@ -77,10 +77,11 @@ class TaskService : Service() {
                     config = cfg,
                     log = { TaskBus.append(it) },
                     onStep = { name, _ -> TaskBus.step.value = name },
-                    onProgress = { done, total, song, _ ->
+                    onProgress = { done, total, song, sc ->
                         TaskBus.done.value = done
                         TaskBus.total.value = total
                         TaskBus.song.value = song
+                        TaskBus.score.value = sc
                     },
                 )
                 runner = r
