@@ -67,6 +67,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         loadSession()
         observeTaskBus()
         refreshHistory()
+        // 启动时恢复定时闹钟（被系统清理/强杀后重新安排）
+        if (store.scheduleEnabled) {
+            AlarmScheduler.schedule(app, store.scheduleHour, store.scheduleMinute)
+        }
     }
 
     fun refreshHistory() {
