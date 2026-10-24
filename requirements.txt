@@ -3,9 +3,9 @@ qtawesome>=1.3
 keyring>=24
 qrcode>=7.4
 Pillow>=10
-# pyncm 不在 PyPI，从 GitHub 活跃镜像 sakarie9/pyncm 安装：
+# pyncm is not on PyPI; install from the active GitHub mirror sakarie9/pyncm.
 #   pip install "pyncm @ git+https://github.com/sakarie9/pyncm.git@master"
-# 若 github.com 网络不通，可改用 tarball：
+# If github.com is unreachable, use the tarball instead:
 #   Invoke-WebRequest "https://api.github.com/repos/sakarie9/pyncm/tarball/master" -OutFile pyncm.tgz
 #   pip install pyncm.tgz --no-build-isolation
 pyncm @ git+https://github.com/sakarie9/pyncm.git@master

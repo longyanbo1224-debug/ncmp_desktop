@@ -7,7 +7,6 @@ from core.utils.config import Config
 from core.utils.logger import Logger
 from .tasks.daily import DailyTask
 from .tasks.extra import ExtraTask
-from .tasks.sign_in import do_sign_in
 class MusicPartnerBot:
     def __init__(self, config: Config, logger: Logger, session: requests.Session,
                  on_step: Optional[Callable[[str, str, float], None]] = None,
@@ -43,13 +42,6 @@ class MusicPartnerBot:
         if self.cancel_event is not None and self.cancel_event.is_set():
             raise CancelledError("用户取消任务")
 
-    def _sign_in_enabled(self) -> bool:
-        """是否执行每日签到。读不到配置就当开启（默认值 True）。"""
-        try:
-            return bool(self.config.get("sign_in_enabled", True))
-        except Exception:
-            return True
-
     def run(self) -> bool:
         self.t0 = time.time()
         try:
@@ -57,21 +49,6 @@ class MusicPartnerBot:
             self._step("验证用户信息", "running")
             self._verify_user()
             self._step("验证用户信息", "success")
-
-            # 每日签到：附赠项。开关打开才跑，失败只把这一步标红，
-            # **不会让整条任务失败**——签到接口挂了不该影响音乐合伙人。
-            if self._sign_in_enabled():
-                self._check_cancel()
-                self._step("每日签到", "running")
-                signed, sign_msg = do_sign_in(self.session, self.logger)
-                if signed:
-                    self.logger.info(sign_msg)
-                    self._step("每日签到", "success")
-                else:
-                    # 标成 failed 是诚实的：签到确实没成，用户该看见。
-                    # 但 run() 照常返回 True，主任务不受影响。
-                    self.logger.warning(sign_msg)
-                    self._step("每日签到", "failed")
 
             self._check_cancel()
             self._step("拉取每日任务", "running")

@@ -81,7 +81,6 @@ DEFAULTS: Dict[str, Any] = {
     "wait_time_max": 20,
     "score": 3,
     "full_extra_tasks": True,
-    "sign_in_enabled": True,
     "notify_email": "",
     "email_password": "",
     "smtp_server": "smtp.qq.com",
@@ -440,15 +439,6 @@ class SettingsPage(QWidget):
         self._apply_hint(full_extra, "full_extra_tasks")
         form.addRow("full_extra_tasks", full_extra)
         self._controls["full_extra_tasks"] = full_extra
-
-        # 每日签到：附赠项，和音乐合伙人并行执行，失败不影响主任务
-        sign_in = QCheckBox("每日执行签到时顺便签到领经验")
-        sign_in.setToolTip(
-            "勾选后每次执行任务会先调一次网易云的每日签到接口（领经验值）。\n"
-            "签到和音乐合伙人是两件独立的事：签到失败只会把这一步标红，"
-            "不会影响评分任务继续跑。")
-        form.addRow("每日签到", sign_in)
-        self._controls["sign_in_enabled"] = sign_in
 
     def _build_email_section(self) -> None:
         form = self._new_section("邮件通知")
@@ -945,7 +935,6 @@ class SettingsPage(QWidget):
         self._set_control("wait_time_max", int(_val("wait_time_max")))
         self._set_control("score", int(_val("score")))
         self._set_control("full_extra_tasks", bool(_val("full_extra_tasks")))
-        self._set_control("sign_in_enabled", bool(_val("sign_in_enabled")))
         self._set_control("notify_email", _val("notify_email"))
         self._set_control("email_password", _val("email_password"))
         self._set_control("smtp_server", _val("smtp_server"))

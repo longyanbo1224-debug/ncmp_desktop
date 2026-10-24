@@ -50,8 +50,7 @@ _KEYRING_SERVICE = "ncmp desktop"
 # （基础 5 首、额外 15 条，额外是大头却只分到 35%）。
 _PHASE_SPAN = {
     "验证用户信息": (0, 2),
-    "每日签到": (2, 4),
-    "拉取每日任务": (4, 8),
+    "拉取每日任务": (2, 8),
     "评分基础任务": (8, 30),
     "额外评分任务": (30, 100),
 }
@@ -429,8 +428,7 @@ class TaskPage(QWidget):
             self._current_phase = name
             self._update_progress(lo)
         elif status in ("success", "failed"):
-            # 阶段结束：推到该阶段终点。failed 也算结束——
-            # 签到失败时这一步不该把进度条卡住，它已经过去了。
+            # 阶段结束：推到该阶段终点。failed 也算结束，不该把进度条卡住。
             self._update_progress(hi)
             if self._current_phase == name:
                 self._current_phase = ""
