@@ -166,8 +166,8 @@ private fun WebLoginTab(vm: AppViewModel, modifier: Modifier = Modifier) {
             settings.userAgentString =
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             settings.useWideViewPort = true
-            // 缩放适配手机宽度：整个页面（含登录按钮）都在一屏内，不用横向滑动
-            settings.loadWithOverviewMode = true
+            // 保持原始大小（可读），靠 JS 自动滚动到登录区域，不用手动横向滑动
+            settings.loadWithOverviewMode = false
             settings.setSupportZoom(true)
             settings.builtInZoomControls = true
             settings.displayZoomControls = false
@@ -177,7 +177,7 @@ private fun WebLoginTab(vm: AppViewModel, modifier: Modifier = Modifier) {
                     if (!loginTriggered) {
                         loginTriggered = true
                         view.evaluateJavascript(
-                            "(function(){var n=0;function f(){var els=document.querySelectorAll('a,span,div,button,li');for(var i=0;i<els.length;i++){var t=(els[i].textContent||'').trim();if(t==='登录'||t==='立即登录'||t==='登录/注册'){els[i].click();return true;}}return false;}function p(){if(f())return;if(++n<30)setTimeout(p,500);}setTimeout(p,1200);})()",
+                            "(function(){var n=0;function f(){var els=document.querySelectorAll('a,span,div,button,li');for(var i=0;i<els.length;i++){var t=(els[i].textContent||'').trim();if(t==='登录'||t==='立即登录'||t==='登录/注册'){try{els[i].scrollIntoView({block:'center',inline:'center'});}catch(e){}return true;}}return false;}function p(){if(f())return;if(++n<30)setTimeout(p,500);}setTimeout(p,1200);})()",
                             null,
                         )
                     }
@@ -204,7 +204,7 @@ private fun WebLoginTab(vm: AppViewModel, modifier: Modifier = Modifier) {
 
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
-            "在下方网页输入手机号，点「获取验证码」，填短信码即可。登录成功后会自动继续。",
+            "已自动定位到登录区域。输入手机号 → 获取验证码 → 填短信码即可，登录后会自动继续。",
             fontSize = 12.sp,
             color = NCMP.Muted,
         )
