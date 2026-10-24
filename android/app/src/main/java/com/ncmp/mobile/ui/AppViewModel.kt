@@ -11,14 +11,18 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.ncmp.mobile.TaskService
+import com.ncmp.mobile.data.AlarmScheduler
+import com.ncmp.mobile.data.HistoryEntry
 import com.ncmp.mobile.data.NeteaseApi
 import com.ncmp.mobile.data.SessionStore
 import com.ncmp.mobile.data.TaskBus
+import com.ncmp.mobile.data.TaskHistoryStore
 import kotlinx.coroutines.launch
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val store = SessionStore(app)
+    private val historyStore = TaskHistoryStore(app)
     private val api = NeteaseApi()
 
     // ---------- 登录态 ----------
@@ -54,9 +58,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var waitMax by mutableStateOf(formatNum(store.waitMax))
     var fullExtra by mutableStateOf(store.fullExtra)
 
+    var scheduleEnabled by mutableStateOf(store.scheduleEnabled)
+    var scheduleTimeText by mutableStateOf("%02d:%02d".format(store.scheduleHour, store.scheduleMinute))
+
+    val history = mutableStateListOf<HistoryEntry>()
+
     init {
         loadSession()
         observeTaskBus()
+        refreshHistory()
+    }
+
+    fun refreshHistory() {
+        history.clear()
+        history.addAll(historyStore.load())
     }
 
     private fun observeTaskBus() {
@@ -198,10 +213,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         store.scoreStrategy = scoreStrategy
         store.waitMin = min
         store.waitMax = max
+        val (h, m) = parseTime(scheduleTimeText) ?: (9 to 0)
         store.fullExtra = fullExtra
+        store.scheduleEnabled = scheduleEnabled
+        store.scheduleHour = h
+        store.scheduleMinute = m
+        val app = getApplication<Application>()
+        if (scheduleEnabled) {
+            AlarmScheduler.schedule(app, h, m)
+        } else {
+            AlarmScheduler.cancel(app)
+        }
         waitMin = formatNum(min)
         waitMax = formatNum(max)
-        TaskBus.append("设置已保存")
+        scheduleTimeText = "%02d:%02d".format(h, m)
+        TaskBus.append(
+            if (scheduleEnabled) "设置已保存，定时：%02d:%02d".format(h, m)
+            else "设置已保存",
+        )
     }
 
     // ================= 任务（交给前台服务在后台跑） =================
@@ -241,4 +270,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun formatNum(f: Float): String =
         if (f == f.toLong().toFloat()) f.toLong().toString() else f.toString()
+
+    private fun parseTime(s: String): Pair<Int, Int>? {
+        val parts = s.trim().split(":")
+        if (parts.size != 2) return null
+        val h = parts[0].trim().toIntOrNull() ?: return null
+        val m = parts[1].trim().toIntOrNull() ?: return null
+        if (h !in 0..23 || m !in 0..59) return null
+        return h to m
+    }
 }

@@ -11,6 +11,7 @@ import android.provider.Settings
 import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -35,6 +36,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -45,6 +47,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -74,6 +79,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.ncmp.mobile.R
+import com.ncmp.mobile.data.HistoryEntry
 import com.ncmp.mobile.ui.theme.NCMP
 import com.ncmp.mobile.ui.theme.NCMPTheme
 import com.ncmp.mobile.ui.widgets.SegmentedMeter
@@ -275,9 +281,36 @@ private fun CookieLoginTab(vm: AppViewModel) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(vm: AppViewModel) {
+    var tab by remember { mutableStateOf(0) }
     Scaffold(
         containerColor = NCMP.Ground,
         topBar = { Header(vm) },
+        bottomBar = {
+            NavigationBar(containerColor = NCMP.Panel) {
+                NavigationBarItem(
+                    selected = tab == 0,
+                    onClick = { tab = 0 },
+                    icon = { Icon(Icons.Filled.PlayArrow, contentDescription = null) },
+                    label = { Text("任务") },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = NCMP.Brand,
+                        selectedTextColor = NCMP.Brand,
+                        indicatorColor = NCMP.Soft,
+                    ),
+                )
+                NavigationBarItem(
+                    selected = tab == 1,
+                    onClick = { tab = 1; vm.refreshHistory() },
+                    icon = { Icon(Icons.Filled.Check, contentDescription = null) },
+                    label = { Text("记录") },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = NCMP.Brand,
+                        selectedTextColor = NCMP.Brand,
+                        indicatorColor = NCMP.Soft,
+                    ),
+                )
+            }
+        },
     ) { padding ->
         Column(
             Modifier
@@ -285,11 +318,15 @@ fun MainScreen(vm: AppViewModel) {
                 .padding(padding)
                 .padding(horizontal = 22.dp),
         ) {
-            HeroSection(vm)
-            ThinRule()
-            ConfigSection(vm)
-            ThinRule()
-            LogSection(vm)
+            if (tab == 0) {
+                HeroSection(vm)
+                ThinRule()
+                ConfigSection(vm)
+                ThinRule()
+                LogSection(vm)
+            } else {
+                HistoryContent(vm)
+            }
         }
     }
 }
@@ -481,6 +518,28 @@ private fun ConfigSection(vm: AppViewModel) {
                     Text("完成全部额外任务", fontSize = 14.sp, color = NCMP.Ink, modifier = Modifier.weight(1f))
                     Switch(checked = vm.fullExtra, onCheckedChange = { vm.fullExtra = it })
                 }
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("定时执行", fontSize = 14.sp, color = NCMP.Ink, modifier = Modifier.weight(1f))
+                    Switch(checked = vm.scheduleEnabled, onCheckedChange = { vm.scheduleEnabled = it })
+                }
+                if (vm.scheduleEnabled) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = vm.scheduleTimeText,
+                        onValueChange = { vm.scheduleTimeText = it },
+                        label = { Text("每天执行时间 (HH:mm)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "系统省电策略可能延迟或拦截定时，建议先做下方「后台保活设置」",
+                        fontSize = 11.sp,
+                        color = NCMP.Muted,
+                    )
+                }
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
@@ -496,6 +555,48 @@ private fun ConfigSection(vm: AppViewModel) {
             }
         }
     }
+}
+
+@Composable
+private fun HistoryContent(vm: AppViewModel) {
+    Column(Modifier.fillMaxSize().padding(top = 18.dp)) {
+        Text("打卡记录", fontFamily = FontFamily.Serif, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = NCMP.Ink)
+        Text("最近 ${vm.history.size} 次执行", fontSize = 12.sp, color = NCMP.Muted)
+        Spacer(Modifier.height(12.dp))
+        if (vm.history.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("还没有打卡记录，执行一次任务后会出现在这里", fontSize = 13.sp, color = NCMP.Muted)
+            }
+        } else {
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(vm.history) { entry ->
+                    HistoryRow(entry)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryRow(entry: HistoryEntry) {
+    val (color, label) = when (entry.status) {
+        "success" -> NCMP.Green to "成功"
+        "fail" -> NCMP.Red to "失败"
+        "cancel" -> NCMP.Amber to "取消"
+        else -> NCMP.Muted to "记录"
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(entry.date, fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = NCMP.Ink)
+            Text(entry.message, fontSize = 12.sp, color = NCMP.Muted, maxLines = 2)
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(label, color = color, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+    }
+    ThinRule()
 }
 
 @Composable
@@ -518,23 +619,30 @@ private fun ColumnScope.LogSection(vm: AppViewModel) {
             }) { Text("复制", fontSize = 12.sp) }
             TextButton(onClick = { vm.clearLog() }) { Text("清空", fontSize = 12.sp) }
         }
-        if (vm.logLines.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("暂无日志", fontSize = 13.sp, color = NCMP.Muted)
-            }
-        } else {
-            LazyColumn(
-                state = listState,
-                contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),
-            ) {
-                items(vm.logLines) { line ->
-                    Text(
-                        line,
-                        fontSize = 12.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = NCMP.Ink,
-                        modifier = Modifier.padding(vertical = 1.dp),
-                    )
+        Surface(
+            color = Color.White,
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, NCMP.Rule),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            if (vm.logLines.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("暂无日志", fontSize = 13.sp, color = NCMP.Muted)
+                }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    contentPadding = PaddingValues(10.dp),
+                ) {
+                    items(vm.logLines) { line ->
+                        Text(
+                            line,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = NCMP.Ink,
+                            modifier = Modifier.padding(vertical = 1.dp),
+                        )
+                    }
                 }
             }
         }

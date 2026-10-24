@@ -10,10 +10,12 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import com.ncmp.mobile.data.HistoryEntry
 import com.ncmp.mobile.data.NeteaseApi
 import com.ncmp.mobile.data.SessionStore
 import com.ncmp.mobile.data.TaskBus
 import com.ncmp.mobile.data.TaskConfig
+import com.ncmp.mobile.data.TaskHistoryStore
 import com.ncmp.mobile.data.TaskResult
 import com.ncmp.mobile.data.TaskRunner
 import kotlinx.coroutines.CoroutineScope
@@ -22,6 +24,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /** 前台服务：在后台可靠地执行任务（常驻通知 + WakeLock，防止被系统冻结）。 */
 class TaskService : Service() {
@@ -99,11 +104,28 @@ class TaskService : Service() {
             } finally {
                 TaskBus.running.value = false
                 releaseLocks()
+                recordHistory()
                 val nm = getSystemService(NotificationManager::class.java)
                 nm.notify(NOTIF_ID, buildNotification(TaskBus.resultLabel.value.ifEmpty { "任务结束" }))
                 stopForeground(STOP_FOREGROUND_DETACH)
                 stopSelf()
             }
+        }
+    }
+
+    private fun recordHistory() {
+        try {
+            val status = when {
+                TaskBus.resultIsError.value -> "fail"
+                TaskBus.resultLabel.value == "已取消" -> "cancel"
+                else -> "success"
+            }
+            val now = Date()
+            val date = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(now)
+            val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(now)
+            val label = TaskBus.resultLabel.value.ifEmpty { "任务结束" }
+            TaskHistoryStore(applicationContext).add(HistoryEntry(date, status, "$time  $label"))
+        } catch (_: Exception) {
         }
     }
 

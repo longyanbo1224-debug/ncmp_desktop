@@ -48,13 +48,22 @@ class SessionStore(context: Context) {
         get() = prefs.getFloat(KEY_WAIT_MAX, 20f)
         set(value) = prefs.edit().putFloat(KEY_WAIT_MAX, value).apply()
 
-    var signInEnabled: Boolean
-        get() = prefs.getBoolean(KEY_SIGN_IN, true)
-        set(value) = prefs.edit().putBoolean(KEY_SIGN_IN, value).apply()
-
     var fullExtra: Boolean
         get() = prefs.getBoolean(KEY_FULL_EXTRA, true)
         set(value) = prefs.edit().putBoolean(KEY_FULL_EXTRA, value).apply()
+
+    // 定时执行
+    var scheduleEnabled: Boolean
+        get() = prefs.getBoolean(KEY_SCHEDULE_ENABLED, false)
+        set(value) = prefs.edit().putBoolean(KEY_SCHEDULE_ENABLED, value).apply()
+
+    var scheduleHour: Int
+        get() = prefs.getInt(KEY_SCHEDULE_HOUR, 9)
+        set(value) = prefs.edit().putInt(KEY_SCHEDULE_HOUR, value).apply()
+
+    var scheduleMinute: Int
+        get() = prefs.getInt(KEY_SCHEDULE_MINUTE, 0)
+        set(value) = prefs.edit().putInt(KEY_SCHEDULE_MINUTE, value).apply()
 
     fun clear() {
         prefs.edit().clear().apply()
@@ -67,7 +76,9 @@ class SessionStore(context: Context) {
         private const val KEY_SCORE = "score"
         private const val KEY_WAIT_MIN = "wait_min"
         private const val KEY_WAIT_MAX = "wait_max"
-        private const val KEY_SIGN_IN = "sign_in"
         private const val KEY_FULL_EXTRA = "full_extra"
+        private const val KEY_SCHEDULE_ENABLED = "schedule_enabled"
+        private const val KEY_SCHEDULE_HOUR = "schedule_hour"
+        private const val KEY_SCHEDULE_MINUTE = "schedule_minute"
     }
 }
