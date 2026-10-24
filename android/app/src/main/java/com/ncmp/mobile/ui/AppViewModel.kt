@@ -1,18 +1,19 @@
 package com.ncmp.mobile.ui
 
 import android.app.Application
+import android.content.Intent
 import android.webkit.CookieManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.ncmp.mobile.TaskService
 import com.ncmp.mobile.data.NeteaseApi
 import com.ncmp.mobile.data.SessionStore
-import com.ncmp.mobile.data.TaskConfig
-import com.ncmp.mobile.data.TaskResult
-import com.ncmp.mobile.data.TaskRunner
+import com.ncmp.mobile.data.TaskBus
 import kotlinx.coroutines.launch
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -34,7 +35,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- 网页登录（WebView，官方登录弹窗） ----------
     var webError by mutableStateOf("")
 
-    // ---------- 任务 ----------
+    // ---------- 任务（镜像自 TaskBus） ----------
     var running by mutableStateOf(false)
         private set
     var progressDone by mutableStateOf(0)
@@ -45,7 +46,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var resultLabel by mutableStateOf("")
     var resultHint by mutableStateOf("")
     var resultIsError by mutableStateOf(false)
-    private var runner: TaskRunner? = null
 
     // ---------- 配置（界面态） ----------
     var scoreStrategy by mutableStateOf(store.scoreStrategy)
@@ -54,8 +54,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var fullExtra by mutableStateOf(store.fullExtra)
 
     init {
-        api.debugLogger = { line -> viewModelScope.launch { appendLog(line) } }
         loadSession()
+        observeTaskBus()
+    }
+
+    private fun observeTaskBus() {
+        viewModelScope.launch { TaskBus.running.collect { running = it } }
+        viewModelScope.launch {
+            TaskBus.logs.collect { lines ->
+                logLines.clear()
+                logLines.addAll(lines)
+            }
+        }
+        viewModelScope.launch { TaskBus.done.collect { progressDone = it } }
+        viewModelScope.launch { TaskBus.total.collect { progressTotal = it } }
+        viewModelScope.launch { TaskBus.song.collect { currentSong = it } }
+        viewModelScope.launch { TaskBus.step.collect { currentStep = it } }
+        viewModelScope.launch { TaskBus.resultLabel.collect { resultLabel = it } }
+        viewModelScope.launch { TaskBus.resultHint.collect { resultHint = it } }
+        viewModelScope.launch { TaskBus.resultIsError.collect { resultIsError = it } }
     }
 
     private fun loadSession() {
@@ -94,7 +111,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         var csrf = ""
         for (u in urls) {
             val cookieStr = cm.getCookie(u) ?: ""
-            android.util.Log.e("ncmp", "getCookie($u) = [$cookieStr]")
             for (part in cookieStr.split(";")) {
                 val idx = part.indexOf('=')
                 if (idx > 0) {
@@ -111,10 +127,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             webError = "还没检测到登录态，请先在网页里完成登录"
             return
         }
-        // 回填到「Cookie」标签的输入框，方便查看/复制
         cookieMusicU = musicU
         cookieCsrf = csrf
-        // 验证 Cookie 是否真的有效，无效则不让进入
         webError = "正在验证登录态..."
         api.musicU = musicU
         api.csrf = csrf
@@ -141,7 +155,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun logout() {
-        runner?.cancelled = true
         store.clear()
         api.musicU = null
         api.csrf = null
@@ -164,82 +177,42 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         store.fullExtra = fullExtra
         waitMin = formatNum(min)
         waitMax = formatNum(max)
-        appendLog("设置已保存")
+        TaskBus.append("设置已保存")
     }
 
-    // ================= 任务 =================
+    // ================= 任务（交给前台服务在后台跑） =================
 
     fun runTask() {
         if (running) return
         val min = (waitMin.toDoubleOrNull() ?: 15.0).coerceAtLeast(0.0)
         val max = (waitMax.toDoubleOrNull() ?: 20.0).coerceAtLeast(0.0)
         if (max < min) {
-            appendLog("等待上限不能小于下限，请检查设置")
+            TaskBus.append("等待上限不能小于下限，请检查设置")
             return
         }
-        val cfg = TaskConfig(
-            scoreStrategy = scoreStrategy,
-            waitMinSeconds = min,
-            waitMaxSeconds = max,
-            fullExtraTasks = fullExtra,
-        )
-
-        running = true
-        resultLabel = ""
-        resultHint = ""
-        resultIsError = false
-        progressDone = 0
-        progressTotal = 0
-        currentSong = ""
-        currentStep = ""
-        logLines.clear()
-
-        val r = TaskRunner(
-            api = api,
-            config = cfg,
-            log = { appendLog(it) },
-            onStep = { name, _ -> currentStep = name },
-            onProgress = { done, total, song, _ ->
-                progressDone = done
-                progressTotal = total
-                currentSong = song
-            },
-        )
-        runner = r
-
-        viewModelScope.launch {
-            val result = r.run()
-            running = false
-            runner = null
-            when (result) {
-                is TaskResult.Success -> {
-                    resultLabel = "任务完成"
-                    resultIsError = false
-                }
-                is TaskResult.Cancelled -> {
-                    resultLabel = "已取消"
-                    resultIsError = false
-                }
-                is TaskResult.Failed -> {
-                    resultLabel = "失败：${result.kind.label}"
-                    resultHint = result.hint
-                    resultIsError = true
-                }
-            }
+        val app = getApplication<Application>()
+        val intent = Intent(app, TaskService::class.java).apply {
+            putExtra(TaskService.EXTRA_SCORE, scoreStrategy)
+            putExtra(TaskService.EXTRA_WAIT_MIN, min)
+            putExtra(TaskService.EXTRA_WAIT_MAX, max)
+            putExtra(TaskService.EXTRA_FULL_EXTRA, fullExtra)
         }
+        ContextCompat.startForegroundService(app, intent)
     }
 
     fun cancelTask() {
-        runner?.cancelled = true
+        val app = getApplication<Application>()
+        val intent = Intent(app, TaskService::class.java).apply {
+            action = TaskService.ACTION_CANCEL
+        }
+        try {
+            app.startService(intent)
+        } catch (_: Exception) {
+        }
     }
 
     fun clearLog() {
-        logLines.clear()
-    }
-
-    private fun appendLog(line: String) {
-        logLines.add(line)
-        while (logLines.size > 500) logLines.removeAt(0)
+        TaskBus.logs.value = emptyList()
     }
 
     private fun formatNum(f: Float): String =
