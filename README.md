@@ -246,7 +246,7 @@ python app/main.py
 
 ### 手机端（Android）
 
-依赖：JDK 17+、Android SDK（platforms;android-34 / build-tools;34.0.0）
+依赖：**JDK 17**（17 或 21 均可）、Android SDK（platforms;android-34 / build-tools;34.0.0）
 
 ```bash
 build_android.bat
@@ -255,6 +255,10 @@ build_android.bat
 产物：`dist/android/ncmp-mobile.apk`
 
 > 首次打包会通过 Gradle wrapper 下载 Gradle 8.7（走腾讯镜像）。需已配置 Android SDK（`android/local.properties` 或 `ANDROID_HOME`）。
+>
+> 设了 `JAVA_HOME` 时脚本会自动把它的 `bin` 加到 PATH 前面；没设则要求 `java` 已在 PATH 上。
+>
+> 不要用 Android Studio 2026 自带的 JBR 跑构建：它是 Java 25，Gradle 8.7 / AGP 8.5.2 不支持，会报 `What went wrong: 25.0.x`。在 Studio 里把 *Settings → Build Tools → Gradle → Gradle JDK* 指向 JDK 17。
 
 或用 Android Studio 打开 `android/` 目录点 Run；或命令行：
 
@@ -264,8 +268,6 @@ cd android
 ./gradlew :app:assembleDebug
 # APK 输出在 android/app/build/outputs/apk/debug/app-debug.apk
 ```
-
-`android/settings.gradle.kts` 已内置阿里云 Maven 镜像加速依赖下载。
 
 `android/settings.gradle.kts` 已内置阿里云 Maven 镜像加速依赖下载。
 

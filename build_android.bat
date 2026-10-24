@@ -8,6 +8,8 @@ REM ===================================================================
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
+REM gradlew.bat needs java on PATH or JAVA_HOME; the JDK check below uses PATH.
+if defined JAVA_HOME set "PATH=%JAVA_HOME%\bin;%PATH%"
 
 echo ============================================
 echo   ncmp mobile - build
@@ -51,7 +53,7 @@ REM [3/4] Build the APK
 REM ---------------------------------------------------------------
 echo [3/4] Building APK ...
 pushd android
-call gradlew.bat --console=plain assembleDebug
+call .\gradlew.bat --console=plain assembleDebug
 set GRADLE_EXIT=%errorlevel%
 popd
 if not "%GRADLE_EXIT%"=="0" (
