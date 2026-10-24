@@ -51,7 +51,7 @@ REM [3/4] Build the APK
 REM ---------------------------------------------------------------
 echo [3/4] Building APK ...
 pushd android
-call gradlew.bat --no-daemon --console=plain assembleDebug
+call gradlew.bat --console=plain assembleDebug
 set GRADLE_EXIT=%errorlevel%
 popd
 if not "%GRADLE_EXIT%"=="0" (
