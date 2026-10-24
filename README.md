@@ -222,7 +222,7 @@ build.bat
 
 产物：`dist/ncmp desktop/`（分发时整个文件夹一起 zip，不要只发 exe）
 
-> 首次打包会自动安装 Python 依赖（pyinstaller + requirements.txt，pyncm 从 GitHub 拉取）。国内网络建议先配 pip 镜像：
+> 首次打包会自动安装 Python 依赖（PyPI 包走清华镜像；pyncm 不在 PyPI，仅在首次未安装时从 GitHub 拉取，之后自动跳过）。国内网络建议先配 pip 镜像：
 >
 > ```bash
 > pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple

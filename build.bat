@@ -82,16 +82,26 @@ if errorlevel 1 (
     if not defined NOPAUSE pause
     exit /b 1
 )
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-pypi.txt
 if errorlevel 1 (
     echo.
-    echo   ERROR: failed to install dependencies.
-    echo   pyncm in requirements.txt is installed from github.com.
-    echo   If github is unreachable, use the tarball method noted
-    echo   in the comments of requirements.txt.
-    echo.
+    echo   ERROR: failed to install PyPI dependencies.
     if not defined NOPAUSE pause
     exit /b 1
+)
+python -m pip show pyncm >nul 2>&1
+if errorlevel 1 (
+    echo     pyncm not found - installing from github (needs github access) ...
+    python -m pip install "pyncm @ git+https://github.com/sakarie9/pyncm.git@master"
+    if errorlevel 1 (
+        echo.
+        echo   ERROR: failed to install pyncm from github.
+        echo   pyncm is not on PyPI. Make sure github is reachable,
+        echo   or use the tarball method noted in requirements.txt.
+        echo.
+        if not defined NOPAUSE pause
+        exit /b 1
+    )
 )
 
 REM ---------------------------------------------------------------
