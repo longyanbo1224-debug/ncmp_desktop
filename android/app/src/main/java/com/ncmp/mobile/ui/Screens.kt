@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -123,8 +125,8 @@ private fun ThinRule(color: Color = NCMP.Rule) {
 @Composable
 fun LoginScreen(vm: AppViewModel) {
     var tab by remember { mutableStateOf(0) }
-    Column(Modifier.fillMaxSize().padding(horizontal = 22.dp)) {
-        Spacer(Modifier.height(48.dp))
+    Column(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 22.dp)) {
+        Spacer(Modifier.height(24.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Image(
                 painter = painterResource(R.mipmap.ic_launcher),
@@ -190,21 +192,9 @@ private fun WebLoginTab(vm: AppViewModel, modifier: Modifier = Modifier) {
     }
     DisposableEffect(Unit) { onDispose { webView.destroy() } }
 
-    // 登录成功后自动检测并进入，无需手动点按钮
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(1500)
-            val c = CookieManager.getInstance().getCookie("https://music.163.com") ?: ""
-            if (c.contains("MUSIC_U=") && c.contains("__csrf=")) {
-                vm.extractCookieFromWebView()
-                break
-            }
-        }
-    }
-
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
-            "已自动定位到登录区域。输入手机号 → 获取验证码 → 填短信码即可，登录后会自动继续。",
+            "页面已自动定位到登录区域。输入手机号 → 获取验证码 → 填短信码，登录后点下方按钮。",
             fontSize = 12.sp,
             color = NCMP.Muted,
         )
@@ -217,19 +207,21 @@ private fun WebLoginTab(vm: AppViewModel, modifier: Modifier = Modifier) {
             AndroidView(factory = { webView }, modifier = Modifier.fillMaxSize())
         }
         Spacer(Modifier.height(10.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(
-                onClick = { webView.reload() },
-                modifier = Modifier.height(44.dp),
-                shape = RoundedCornerShape(10.dp),
-            ) {
-                Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("刷新")
-            }
-            Spacer(Modifier.width(12.dp))
-            Text("登录后自动检测，也可手动", fontSize = 11.sp, color = NCMP.Muted, modifier = Modifier.weight(1f))
-            TextButton(onClick = { vm.extractCookieFromWebView() }) { Text("获取 Cookie", fontSize = 13.sp) }
+        Button(
+            onClick = { vm.extractCookieFromWebView() },
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(10.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = NCMP.Brand),
+        ) { Text("我已登录，获取 Cookie", fontSize = 15.sp, fontWeight = FontWeight.SemiBold) }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = { webView.reload() },
+            modifier = Modifier.fillMaxWidth().height(44.dp),
+            shape = RoundedCornerShape(10.dp),
+        ) {
+            Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("刷新页面")
         }
         if (vm.webError.isNotEmpty()) {
             Spacer(Modifier.height(6.dp))
@@ -304,7 +296,7 @@ fun MainScreen(vm: AppViewModel) {
 
 @Composable
 private fun Header(vm: AppViewModel) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
+    Column(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 22.dp)) {
         Row(
             Modifier.fillMaxWidth().padding(vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
