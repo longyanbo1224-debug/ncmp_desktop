@@ -271,6 +271,8 @@ cd android
 
 `android/settings.gradle.kts` 已内置阿里云 Maven 镜像加速依赖下载。
 
+> Android 工程的目录结构、签名配置等开发细节见 [android/README.md](android/README.md)。
+
 ---
 
 ## 常见问题
