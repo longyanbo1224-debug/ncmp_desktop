@@ -4,6 +4,10 @@ import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
 import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -83,6 +87,30 @@ fun NCMPApp(vm: AppViewModel) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             if (vm.loggedIn) MainScreen(vm) else LoginScreen(vm)
         }
+    }
+}
+
+/** 打开后台保活设置：先请求忽略电池优化，失败则打开应用详情页。 */
+private fun openBatterySettings(context: Context) {
+    try {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(context.packageName)) {
+            context.startActivity(
+                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                },
+            )
+            return
+        }
+    } catch (_: Exception) {
+    }
+    try {
+        context.startActivity(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:${context.packageName}")
+            },
+        )
+    } catch (_: Exception) {
     }
 }
 
@@ -363,6 +391,7 @@ private fun HeroCard(vm: AppViewModel) {
 @Composable
 private fun ConfigCard(vm: AppViewModel) {
     var expanded by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     Card(
         colors = CardDefaults.cardColors(containerColor = NCMP.Panel),
         shape = RoundedCornerShape(16.dp),
@@ -419,19 +448,24 @@ private fun ConfigCard(vm: AppViewModel) {
                     Switch(checked = vm.fullExtra, onCheckedChange = { vm.fullExtra = it })
                 }
                 Spacer(Modifier.height(10.dp))
-                Button(
-                    onClick = { vm.saveConfig() },
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = NCMP.Brand),
-                ) { Text("保存设置") }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = { vm.saveConfig() },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = NCMP.Brand),
+                    ) { Text("保存设置") }
+                    OutlinedButton(
+                        onClick = { openBatterySettings(context) },
+                        shape = RoundedCornerShape(10.dp),
+                    ) { Text("后台保活设置", fontSize = 13.sp) }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ColumnScope.LogCard(vm: AppViewModel) {
-    val listState = rememberLazyListState()
+private fun ColumnScope.LogCard(vm: AppViewModel) {    val listState = rememberLazyListState()
     val context = LocalContext.current
     LaunchedEffect(vm.logLines.size) {
         if (vm.logLines.isNotEmpty()) listState.scrollToItem(vm.logLines.size - 1)

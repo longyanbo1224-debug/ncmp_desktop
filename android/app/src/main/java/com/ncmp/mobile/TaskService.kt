@@ -5,8 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.ncmp.mobile.data.NeteaseApi
 import com.ncmp.mobile.data.SessionStore
@@ -21,12 +23,14 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
-/** 前台服务：在后台可靠地执行任务（带常驻通知，系统不会随便杀）。 */
+/** 前台服务：在后台可靠地执行任务（常驻通知 + WakeLock，防止被系统冻结）。 */
 class TaskService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var job: Job? = null
     private var runner: TaskRunner? = null
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -51,6 +55,7 @@ class TaskService : Service() {
         TaskBus.reset()
         TaskBus.running.value = true
         startForeground(NOTIF_ID, buildNotification("正在执行音乐合伙人任务…"))
+        acquireLocks()
 
         val store = SessionStore(applicationContext)
         val cfg = TaskConfig(
@@ -66,38 +71,69 @@ class TaskService : Service() {
         }
 
         job = scope.launch {
-            val r = TaskRunner(
-                api = api,
-                config = cfg,
-                log = { TaskBus.append(it) },
-                onStep = { name, _ -> TaskBus.step.value = name },
-                onProgress = { done, total, song, _ ->
-                    TaskBus.done.value = done
-                    TaskBus.total.value = total
-                    TaskBus.song.value = song
-                },
-            )
-            runner = r
-            val result = r.run()
-            runner = null
-            when (result) {
-                is TaskResult.Success -> { TaskBus.resultLabel.value = "任务完成"; TaskBus.resultIsError.value = false }
-                is TaskResult.Cancelled -> { TaskBus.resultLabel.value = "已取消"; TaskBus.resultIsError.value = false }
-                is TaskResult.Failed -> {
-                    TaskBus.resultLabel.value = "失败：${result.kind.label}"
-                    TaskBus.resultHint.value = result.hint
-                    TaskBus.resultIsError.value = true
+            try {
+                val r = TaskRunner(
+                    api = api,
+                    config = cfg,
+                    log = { TaskBus.append(it) },
+                    onStep = { name, _ -> TaskBus.step.value = name },
+                    onProgress = { done, total, song, _ ->
+                        TaskBus.done.value = done
+                        TaskBus.total.value = total
+                        TaskBus.song.value = song
+                    },
+                )
+                runner = r
+                val result = r.run()
+                runner = null
+                when (result) {
+                    is TaskResult.Success -> { TaskBus.resultLabel.value = "任务完成"; TaskBus.resultIsError.value = false }
+                    is TaskResult.Cancelled -> { TaskBus.resultLabel.value = "已取消"; TaskBus.resultIsError.value = false }
+                    is TaskResult.Failed -> {
+                        TaskBus.resultLabel.value = "失败：${result.kind.label}"
+                        TaskBus.resultHint.value = result.hint
+                        TaskBus.resultIsError.value = true
+                    }
                 }
+            } finally {
+                TaskBus.running.value = false
+                releaseLocks()
+                val nm = getSystemService(NotificationManager::class.java)
+                nm.notify(NOTIF_ID, buildNotification(TaskBus.resultLabel.value.ifEmpty { "任务结束" }))
+                stopForeground(STOP_FOREGROUND_DETACH)
+                stopSelf()
             }
-            TaskBus.running.value = false
-            val nm = getSystemService(NotificationManager::class.java)
-            nm.notify(NOTIF_ID, buildNotification(TaskBus.resultLabel.value))
-            stopForeground(STOP_FOREGROUND_DETACH)
-            stopSelf()
         }
     }
 
+    private fun acquireLocks() {
+        try {
+            val pm = getSystemService(PowerManager::class.java)
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ncmp:task").apply {
+                setReferenceCounted(false)
+                acquire(30 * 60 * 1000L) // 最长 30 分钟
+            }
+        } catch (_: Exception) {
+        }
+        try {
+            val wm = applicationContext.getSystemService(WifiManager::class.java)
+            wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "ncmp:wifi").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun releaseLocks() {
+        try { wakeLock?.takeIf { it.isHeld }?.release() } catch (_: Exception) {}
+        try { wifiLock?.takeIf { it.isHeld }?.release() } catch (_: Exception) {}
+        wakeLock = null
+        wifiLock = null
+    }
+
     override fun onDestroy() {
+        releaseLocks()
         scope.cancel()
         super.onDestroy()
     }
