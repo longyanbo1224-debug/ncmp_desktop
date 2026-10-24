@@ -198,7 +198,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun logout() {
-        store.clear()
+        store.clearAuth()
         api.musicU = null
         api.csrf = null
         loggedIn = false

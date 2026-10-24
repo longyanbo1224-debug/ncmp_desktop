@@ -69,6 +69,15 @@ class SessionStore(context: Context) {
         prefs.edit().clear().apply()
     }
 
+    /** 仅清除登录态，保留任务配置与定时设置。 */
+    fun clearAuth() {
+        prefs.edit()
+            .remove(KEY_MUSIC_U)
+            .remove(KEY_CSRF)
+            .remove(KEY_NICKNAME)
+            .apply()
+    }
+
     companion object {
         private const val KEY_MUSIC_U = "music_u"
         private const val KEY_CSRF = "csrf"
