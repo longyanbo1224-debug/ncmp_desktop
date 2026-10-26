@@ -53,7 +53,14 @@ class DailyTask(BaseTask):
             if task.get("completed", False):
                 self.logger.info(f'{work["name"]}「{work["authorName"]}」已有评分：{int(task["score"])}分')
             else:
-                signer.sign(work)
+                try:
+                    signer.sign(work)
+                except Exception as e:
+                    # 额度用完是正常终态，不是失败：停止基础评分，让额外阶段继续
+                    if "没有更多" in str(e):
+                        self.logger.info("今日评分额度已用完，停止基础评分")
+                        break
+                    raise
 
     def _emit_progress(self, done: int, total: int,
                        song: str = "", score: str = "") -> None:

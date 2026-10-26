@@ -23,11 +23,27 @@ class TaskRunner(
     private val log: (String) -> Unit,
     private val onStep: (String, String) -> Unit,
     private val onProgress: (Int, Int, String, String) -> Unit,
+    private val onPercent: (Int) -> Unit,
 ) {
     @Volatile var cancelled = false
     private var currentStep = ""
+    private var currentPhase = ""
+    private var percent = 0
+    private var baseDone = 0
+    private var extraDone = 0
+
+    // 阶段在全局进度里的区间（移植自桌面端 task_page.py）。
+    // 两个评分阶段在 8~100 之间按条目数分配，见 planScoring。
+    private val spans = mutableMapOf(
+        "验证用户信息" to (0 to 2),
+        "拉取每日任务" to (2 to 8),
+        "评分基础任务" to (8 to 30),
+        "额外评分任务" to (30 to 100),
+    )
 
     suspend fun run(): TaskResult {
+        baseDone = 0
+        extraDone = 0
         try {
             checkCancel()
             step("验证用户信息", "running")
@@ -53,22 +69,67 @@ class TaskRunner(
             processExtra(daily.id)
             step("额外评分任务", "success")
 
-            return TaskResult.Success
+            return TaskResult.Success(baseDone, extraDone)
         } catch (e: CancellationException) {
             step(currentStep, "cancelled")
             log("任务已取消")
-            return TaskResult.Cancelled
+            return TaskResult.Cancelled(baseDone, extraDone)
         } catch (e: Exception) {
             log("执行失败: ${e.message}")
             step(currentStep, "failed")
             val (kind, hint) = classify(e)
-            return TaskResult.Failed(e, kind, hint)
+            return TaskResult.Failed(e, kind, hint, baseDone, extraDone)
         }
     }
 
     private fun step(name: String, status: String) {
         currentStep = name
         onStep(name, status)
+        val span = spans[name] ?: return
+        when (status) {
+            "running" -> {
+                currentPhase = name
+                advance(span.first)
+            }
+            // 取消不推到阶段终点：进度条应该停在用户按下取消的那一刻
+            "success", "failed" -> {
+                advance(span.second)
+                if (currentPhase == name) currentPhase = ""
+            }
+            "cancelled" -> {
+                if (currentPhase == name) currentPhase = ""
+            }
+        }
+    }
+
+    /** 全局进度只前进不后退；补跑阶段不会把进度条拉回去。 */
+    private fun advance(pct: Int) {
+        val v = pct.coerceIn(0, 100)
+        if (v > percent) {
+            percent = v
+            onPercent(v)
+        }
+    }
+
+    /** 把本阶段的 done/total 映射到本阶段区间内。 */
+    private fun phaseProgress(done: Int, total: Int) {
+        val span = spans[currentPhase] ?: return
+        if (total <= 0) return
+        val frac = (done.toFloat() / total).coerceIn(0f, 1f)
+        advance((span.first + (span.second - span.first) * frac).roundToInt())
+    }
+
+    /** 按条目数把 8~100 分给基础和额外两个评分阶段（与桌面端同一算法）。 */
+    private fun planScoring(baseTotal: Int) {
+        if (baseTotal <= 0) return
+        val extraEst = if (!config.fullExtraTasks) 7 else baseTotal * 3
+        if (extraEst <= 0) return
+        val spanSize = 100 - 8
+        val baseHi = (8 + spanSize * baseTotal.toFloat() / (baseTotal + extraEst))
+            .roundToInt()
+            .coerceIn(9, 99)
+        spans["评分基础任务"] = 8 to baseHi
+        spans["额外评分任务"] = baseHi to 100
     }
 
     private suspend fun checkCancel() {
@@ -100,13 +161,17 @@ class TaskRunner(
         log("开始评分...")
         var done = 0
         val total = pending.size
+        planScoring(total)
         onProgress(0, total, "", "")
+        phaseProgress(0, total)
         for (work in pending) {
             checkCancel()
             try {
                 sign(work, taskId, isExtra = false) { w, score ->
                     done++
+                    baseDone = done
                     onProgress(done, total, w.name, score)
+                    phaseProgress(done, total)
                 }
             } catch (e: QuotaExhaustedException) {
                 log("今日评分额度已用完，停止")
@@ -175,10 +240,11 @@ class TaskRunner(
     }
 
     private suspend fun processExtra(taskId: Any) {
-        val (uncompleted, completedCount) = api.getExtraTasks()
-        val totalTasks = if (!config.fullExtraTasks) 7 else uncompleted.size + completedCount
+        var (uncompleted, completedCount) = api.getExtraTasks()
+        val full = config.fullExtraTasks
+        var target = if (full) uncompleted.size else 7 - completedCount
 
-        if (completedCount >= totalTasks) {
+        if (target <= 0) {
             log("今日已完成 $completedCount 个额外评分任务，已达到每日上限")
             return
         }
@@ -188,36 +254,69 @@ class TaskRunner(
         }
         log("发现 ${uncompleted.size} 个待额外评定任务")
 
-        val remaining = totalTasks - completedCount
         var success = 0
-        onProgress(0, remaining, "", "")
-        for (item in uncompleted) {
-            if (success >= remaining) break
-            checkCancel()
-            val work = item.work
-            try {
-                api.reportListen(work)
-                log("歌曲 ${work.name} 听歌记录上报成功")
-                sign(work, taskId, isExtra = true) { w, score ->
-                    success++
-                    onProgress(success, remaining, w.name, score)
+        onProgress(0, target, "", "")
+        phaseProgress(0, target)
+        var quota = false
+        for (pass in 0 until 2) {
+            if (success >= target) break
+            if (pass > 0) {
+                // 单首失败只会跳过，整轮跑完重新核对一次，把漏掉的补上
+                val refreshed = try {
+                    api.getExtraTasks()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    log("补跑检查失败，结束额外评分: ${e.message}")
+                    break
                 }
-                log("成功完成第 $success/$remaining 个额外评分任务")
-                if (success < remaining) {
-                    val delaySec = randomWait()
-                    log("等待 %.1f 秒后继续...".format(delaySec))
-                    sleepCancellable(delaySec)
+                uncompleted = refreshed.first
+                completedCount = refreshed.second
+                target = if (full) maxOf(target, success + uncompleted.size)
+                else maxOf(target, 7 - completedCount)
+                if (uncompleted.isEmpty() || success >= target) {
+                    log("补跑检查：没有剩余额外任务")
+                    break
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: QuotaExhaustedException) {
-                log("今日额外评分额度已用完，停止")
-                break
-            } catch (e: Exception) {
-                log("处理歌曲 ${work.name} 失败，尝试下一个: ${e.message}")
+                log("补跑检查：还有 ${target - success} 个额外任务未完成")
             }
+            for (item in uncompleted) {
+                if (success >= target) break
+                checkCancel()
+                val work = item.work
+                try {
+                    api.reportListen(work)
+                    log("歌曲 ${work.name} 听歌记录上报成功")
+                    sign(work, taskId, isExtra = true) { w, score ->
+                        success++
+                        extraDone = success
+                        onProgress(success, target, w.name, score)
+                        phaseProgress(success, target)
+                    }
+                    log("成功完成第 $success/$target 个额外评分任务")
+                    if (success < target) {
+                        val delaySec = randomWait()
+                        log("等待 %.1f 秒后继续...".format(delaySec))
+                        sleepCancellable(delaySec)
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: QuotaExhaustedException) {
+                    log("今日额外评分额度已用完，停止")
+                    quota = true
+                    break
+                } catch (e: Exception) {
+                    log("处理歌曲 ${work.name} 失败，尝试下一个: ${e.message}")
+                }
+            }
+            if (quota) break
         }
-        log("额外评分任务处理完成，成功评分 $success 首")
+        extraDone = success
+        if (success < target) {
+            log("检查后仍有 ${target - success} 个额外评分任务未完成")
+        } else {
+            log("额外评分任务处理完成，成功评分 $success 首")
+        }
     }
 }
 

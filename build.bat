@@ -109,7 +109,7 @@ REM [4/6] Clean previous output
 REM ---------------------------------------------------------------
 echo [4/6] Cleaning previous output ...
 if exist build rmdir /s /q build
-if exist dist rmdir /s /q dist
+if exist "dist\ncmp desktop" rmdir /s /q "dist\ncmp desktop"
 if exist "ncmp desktop.spec" del /q "ncmp desktop.spec"
 
 REM ---------------------------------------------------------------

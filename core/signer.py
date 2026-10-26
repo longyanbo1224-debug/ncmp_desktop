@@ -12,6 +12,10 @@ from core import CancelledError
 from core.utils.config import Config
 from core.utils.logger import Logger
 class Signer:
+    #: 单首遇到"频繁"时最多尝试几次（首次 + 2 次重试）。
+    #: 不设上限会一直递归等下去，定时任务可能永远结束不了。
+    _MAX_ATTEMPTS = 3
+
     def __init__(self, session: requests.Session, task_id: str, logger: Logger, config: Config,
                  on_progress: Optional[Callable[[int, Optional[int], str, str], None]] = None,
                  cancel_event: Optional["object"] = None,
@@ -103,8 +107,8 @@ class Signer:
             score = "4"
 
         return score, f"{score}-A-1"
-    def sign(self, work: dict, is_extra: bool = False) -> None:
-        """为作品评分"""
+    def sign(self, work: dict, is_extra: bool = False, _retry: int = 0) -> None:
+        """为作品评分。``_retry`` 是内部重试计数，调用方不用传。"""
         # 评分入口处响应取消
         self._check_cancel()
         try:
@@ -156,10 +160,19 @@ class Signer:
             else:
                 error_msg = response.get('message') or response.get('msg', '未知错误')
                 if "频繁" in error_msg:
+                    # 和手机端一致：试满 3 次就放弃这一首，交给上层决定
+                    # （基础阶段中止整轮，额外阶段跳过继续）
+                    if _retry + 1 >= self._MAX_ATTEMPTS:
+                        self.logger.warning(
+                            f"连续 {self._MAX_ATTEMPTS} 次触发频率限制，放弃这首")
+                        raise RuntimeError(
+                            f"评分失败: {error_msg} (响应码: {response.get('code')})")
                     retry_delay = self.config.get_wait_time()
-                    self.logger.info(f"遇到频率限制，等待 {retry_delay:.1f} 秒后重试...")
+                    self.logger.info(
+                        f"遇到频率限制，等待 {retry_delay:.1f} 秒后重试"
+                        f"（第 {_retry + 1} 次）...")
                     self._sleep(retry_delay)
-                    self.sign(work, is_extra)
+                    self.sign(work, is_extra, _retry + 1)
                 elif response["code"] == 405 and "资源状态异常" in error_msg:
                     self.logger.warning(f'歌曲「{work["name"]}」资源状态异常，跳过')
                 else:
