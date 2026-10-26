@@ -36,6 +36,8 @@ class TaskService : Service() {
     private var runner: TaskRunner? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var historyMessage = ""
+    private var historyDetail = ""
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -59,6 +61,8 @@ class TaskService : Service() {
         if (job?.isActive == true) return
         TaskBus.reset()
         TaskBus.running.value = true
+        historyMessage = ""
+        historyDetail = ""
         startForeground(NOTIF_ID, buildNotification("正在执行音乐合伙人任务…"))
         acquireLocks()
 
@@ -88,23 +92,36 @@ class TaskService : Service() {
                         TaskBus.song.value = song
                         TaskBus.score.value = sc
                     },
+                    onPercent = { TaskBus.percent.value = it },
                 )
                 runner = r
                 val result = r.run()
                 runner = null
                 when (result) {
-                    is TaskResult.Success -> { TaskBus.resultLabel.value = "任务完成"; TaskBus.resultIsError.value = false }
-                    is TaskResult.Cancelled -> { TaskBus.resultLabel.value = "已取消"; TaskBus.resultIsError.value = false }
+                    is TaskResult.Success -> {
+                        TaskBus.resultLabel.value = "任务完成"
+                        TaskBus.resultIsError.value = false
+                        historyMessage = "成功，基础 ${result.base} 首、额外 ${result.extra} 首"
+                    }
+                    is TaskResult.Cancelled -> {
+                        TaskBus.resultLabel.value = "已取消"
+                        TaskBus.resultIsError.value = false
+                        historyMessage = "已取消，基础 ${result.base} 首、额外 ${result.extra} 首"
+                    }
                     is TaskResult.Failed -> {
                         TaskBus.resultLabel.value = "失败：${result.kind.label}"
                         TaskBus.resultHint.value = result.hint
                         TaskBus.resultIsError.value = true
+                        historyMessage = "失败：${result.kind.label}"
+                        historyDetail = result.hint
                     }
                 }
+                TaskBus.resultSummary.value = historyMessage
             } finally {
+                // 先落历史再置 running=false：界面观察到结束时记录已经写好了
+                recordHistory()
                 TaskBus.running.value = false
                 releaseLocks()
-                recordHistory()
                 val nm = getSystemService(NotificationManager::class.java)
                 nm.notify(NOTIF_ID, buildNotification(TaskBus.resultLabel.value.ifEmpty { "任务结束" }))
                 stopForeground(STOP_FOREGROUND_DETACH)
@@ -114,6 +131,8 @@ class TaskService : Service() {
     }
 
     private fun recordHistory() {
+        // 服务被系统杀掉时没有结果可记，别把一次中断写成成功
+        if (TaskBus.resultLabel.value.isEmpty()) return
         try {
             val status = when {
                 TaskBus.resultIsError.value -> "fail"
@@ -123,8 +142,15 @@ class TaskService : Service() {
             val now = Date()
             val date = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(now)
             val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(now)
-            val label = TaskBus.resultLabel.value.ifEmpty { "任务结束" }
-            TaskHistoryStore(applicationContext).add(HistoryEntry(date, status, "$time  $label"))
+            TaskHistoryStore(applicationContext).add(
+                HistoryEntry(
+                    date = date,
+                    time = time,
+                    status = status,
+                    message = historyMessage.ifEmpty { TaskBus.resultLabel.value.ifEmpty { "任务结束" } },
+                    detail = historyDetail,
+                ),
+            )
         } catch (_: Exception) {
         }
     }

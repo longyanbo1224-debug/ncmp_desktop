@@ -28,9 +28,15 @@ data class TaskConfig(
 )
 
 sealed class TaskResult {
-    object Success : TaskResult()
-    object Cancelled : TaskResult()
-    data class Failed(val error: Throwable, val kind: FailureKind, val hint: String) : TaskResult()
+    data class Success(val base: Int, val extra: Int) : TaskResult()
+    data class Cancelled(val base: Int, val extra: Int) : TaskResult()
+    data class Failed(
+        val error: Throwable,
+        val kind: FailureKind,
+        val hint: String,
+        val base: Int,
+        val extra: Int,
+    ) : TaskResult()
 }
 
 enum class FailureKind(val label: String) {

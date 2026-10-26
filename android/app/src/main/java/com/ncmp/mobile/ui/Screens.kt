@@ -41,6 +41,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -79,15 +81,24 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.ncmp.mobile.R
-import com.ncmp.mobile.data.HistoryEntry
+import com.ncmp.mobile.data.DayRecord
+import com.ncmp.mobile.data.gridDays
+import com.ncmp.mobile.data.groupDays
+import com.ncmp.mobile.data.streakDays
 import com.ncmp.mobile.ui.theme.NCMP
 import com.ncmp.mobile.ui.theme.NCMPTheme
 import com.ncmp.mobile.ui.widgets.SegmentedMeter
+import com.ncmp.mobile.ui.widgets.StreakGrid
+import com.ncmp.mobile.ui.widgets.StreakLegend
 import kotlinx.coroutines.delay
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 
 @Composable
 fun NCMPApp(vm: AppViewModel) {
@@ -395,7 +406,7 @@ private fun HeroSection(vm: AppViewModel) {
     when {
         vm.running -> {
             title = "正在评分"
-            titleColor = NCMP.Amber
+            titleColor = NCMP.AmberText
             sub = vm.currentStep.ifEmpty { "准备中…" }
         }
         vm.resultLabel.isNotEmpty() && vm.resultIsError -> {
@@ -411,7 +422,7 @@ private fun HeroSection(vm: AppViewModel) {
         vm.resultLabel.isNotEmpty() -> {
             title = "今天完成"
             titleColor = NCMP.Green
-            sub = "共 ${vm.progressTotal} 首已评分"
+            sub = vm.resultSummary.ifEmpty { "共 ${vm.progressTotal} 首已评分" }
         }
         else -> {
             title = "今日评分"
@@ -420,16 +431,18 @@ private fun HeroSection(vm: AppViewModel) {
         }
     }
 
+    // 用跨阶段的全局进度：基础 5 首跑完不会先顶到 100%，额外任务也不会从 0 重新开始
     val meterProgress = when {
-        vm.running && vm.progressTotal > 0 -> vm.progressDone.toFloat() / vm.progressTotal
+        vm.running -> vm.percent / 100f
         vm.resultLabel.isNotEmpty() && !vm.resultIsError && !isCancelled -> 1f
-        vm.progressTotal > 0 -> vm.progressDone.toFloat() / vm.progressTotal
+        vm.percent > 0 -> vm.percent / 100f
         else -> 0f
     }
     val meterColor = when {
         vm.resultIsError -> NCMP.Red
         vm.running -> NCMP.Amber
-        vm.resultLabel.isNotEmpty() && !isCancelled -> NCMP.Green
+        isCancelled -> NCMP.Muted
+        vm.resultLabel.isNotEmpty() -> NCMP.Green
         else -> NCMP.Brand
     }
 
@@ -450,6 +463,7 @@ private fun HeroSection(vm: AppViewModel) {
             )
             val meta = buildString {
                 append("${vm.progressDone}/${vm.progressTotal}")
+                if (vm.percent > 0) append("  ·  ${vm.percent}%")
                 if (vm.currentScore.isNotEmpty()) append("  ·  ${vm.currentScore} 分")
             }
             Spacer(Modifier.height(3.dp))
@@ -591,44 +605,198 @@ private fun ConfigSection(vm: AppViewModel) {
 
 @Composable
 private fun HistoryContent(vm: AppViewModel) {
-    Column(Modifier.fillMaxSize().padding(top = 18.dp)) {
-        Text("打卡记录", fontFamily = FontFamily.Serif, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = NCMP.Ink)
-        Text("最近 ${vm.history.size} 次执行", fontSize = 12.sp, color = NCMP.Muted)
-        Spacer(Modifier.height(12.dp))
-        if (vm.history.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("还没有打卡记录，执行一次任务后会出现在这里", fontSize = 13.sp, color = NCMP.Muted)
+    // toList() 会读取快照状态：历史一更新就重组，不能直接拿可变列表当 remember 的 key
+    val runs = vm.history.toList()
+    val cells = remember(runs) { gridDays(runs) }
+    val days = remember(runs) { groupDays(runs) }
+    val streak = remember(cells) { streakDays(cells) }
+    val successDays = remember(cells) { cells.count { it.status == "success" } }
+
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = 18.dp, bottom = 24.dp),
+    ) {
+        item {
+            Text(
+                "打卡记录",
+                fontFamily = FontFamily.Serif,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Bold,
+                color = NCMP.Ink,
+            )
+            Spacer(Modifier.height(3.dp))
+            Text("过去一年，每格一天", fontSize = 12.sp, color = NCMP.Muted)
+            Spacer(Modifier.height(14.dp))
+            StreakGrid(cells)
+            Spacer(Modifier.height(10.dp))
+            StreakLegend(streak, successDays)
+            Spacer(Modifier.height(20.dp))
+            ThinRule()
+            Spacer(Modifier.height(18.dp))
+            Text(
+                "执行情况",
+                fontFamily = FontFamily.Serif,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = NCMP.Ink,
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                "一天一条；同一天多次执行合并在这里，点开看明细",
+                fontSize = 12.sp,
+                color = NCMP.Muted,
+            )
+            Spacer(Modifier.height(6.dp))
+        }
+
+        if (days.isEmpty()) {
+            item {
+                Box(
+                    Modifier.fillMaxWidth().padding(vertical = 40.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "还没有执行记录，去「任务」页跑第一次",
+                        fontSize = 13.sp,
+                        color = NCMP.Muted,
+                    )
+                }
             }
         } else {
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(vm.history) { entry ->
-                    HistoryRow(entry)
-                }
+            items(days, key = { it.date }) { day ->
+                DayRow(day)
             }
         }
     }
 }
 
+/** 一天一条：默认只显示结论，点开看当天的每一次执行。 */
 @Composable
-private fun HistoryRow(entry: HistoryEntry) {
-    val (color, label) = when (entry.status) {
-        "success" -> NCMP.Green to "成功"
-        "fail" -> NCMP.Red to "失败"
-        "cancel" -> NCMP.Amber to "取消"
-        else -> NCMP.Muted to "记录"
+private fun DayRow(day: DayRecord) {
+    var expanded by remember(day.date) { mutableStateOf(false) }
+    val latest = day.runs.firstOrNull()
+    val summary = if (day.runs.size == 1) {
+        latest?.message.orEmpty()
+    } else {
+        "执行 ${day.runs.size} 次，最近 ${latest?.time.orEmpty()} ${statusWord(latest?.status.orEmpty())}"
     }
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clickable { expanded = !expanded }
+            .padding(vertical = 12.dp),
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(entry.date, fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = NCMP.Ink)
-            Text(entry.message, fontSize = 12.sp, color = NCMP.Muted, maxLines = 2)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                dayTitle(day.date),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = NCMP.Ink,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(weekdayOf(day.date), fontSize = 11.sp, color = NCMP.Muted)
+            Spacer(Modifier.weight(1f))
+            Text(
+                statusWord(day.status),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = statusColor(day.status),
+            )
+            Icon(
+                imageVector = if (expanded) Icons.Filled.KeyboardArrowUp
+                else Icons.Filled.KeyboardArrowDown,
+                contentDescription = if (expanded) "收起" else "展开",
+                tint = NCMP.Muted,
+                modifier = Modifier.size(18.dp),
+            )
         }
-        Spacer(Modifier.width(10.dp))
-        Text(label, color = color, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        Spacer(Modifier.height(3.dp))
+        Text(
+            summary,
+            fontSize = 12.sp,
+            color = NCMP.Muted,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+
+        if (expanded) {
+            Spacer(Modifier.height(10.dp))
+            Surface(
+                color = NCMP.Panel,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, NCMP.Rule),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    day.runs.forEachIndexed { index, run ->
+                        if (index > 0) {
+                            Spacer(Modifier.height(8.dp))
+                            ThinRule()
+                            Spacer(Modifier.height(8.dp))
+                        }
+                        Row(verticalAlignment = Alignment.Top) {
+                            Text(
+                                run.time.ifEmpty { "--" },
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp,
+                                color = NCMP.Muted,
+                                modifier = Modifier.width(44.dp),
+                            )
+                            Text(
+                                statusWord(run.status),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = statusColor(run.status),
+                                modifier = Modifier.width(38.dp),
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(run.message, fontSize = 12.sp, color = NCMP.Ink)
+                                if (run.detail.isNotEmpty()) {
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(run.detail, fontSize = 11.sp, color = NCMP.Muted)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
     ThinRule()
+}
+
+private fun statusColor(status: String): Color = when (status) {
+    "success" -> NCMP.Green
+    "fail" -> NCMP.Red
+    "cancel" -> NCMP.AmberText
+    else -> NCMP.Muted
+}
+
+private fun statusWord(status: String): String = when (status) {
+    "success" -> "成功"
+    "fail" -> "失败"
+    "cancel" -> "取消"
+    else -> "记录"
+}
+
+private fun dayTitle(date: String): String {
+    val parts = date.split("-")
+    if (parts.size != 3) return date
+    val month = parts[1].toIntOrNull() ?: return date
+    val day = parts[2].toIntOrNull() ?: return date
+    return "${month}月${day}日"
+}
+
+private fun weekdayOf(date: String): String = try {
+    val cal = Calendar.getInstance().apply {
+        time = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(date)!!
+    }
+    listOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")[
+        cal.get(Calendar.DAY_OF_WEEK) - 1
+    ]
+} catch (_: Exception) {
+    ""
 }
 
 @Composable

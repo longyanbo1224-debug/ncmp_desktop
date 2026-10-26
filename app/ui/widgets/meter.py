@@ -62,17 +62,22 @@ class LevelMeter(QWidget):
     # ------------------------------------------------------------------
     # 对外
     # ------------------------------------------------------------------
-    def set_progress(self, value: int) -> None:
-        """设置进度（0~100）。只前进不后退，避免粗粒度阶段进度盖掉更精确的值。"""
+    def set_progress(self, value: int) -> int:
+        """设置进度（0~100）。只前进不后退，避免粗粒度阶段进度盖掉更精确的值。
+
+        :returns: 实际生效的进度。补跑时目标数变大，界面读数要用它而不是入参。
+        """
         try:
             value = int(value)
         except Exception:
-            return
+            return self._progress
         value = max(0, min(100, value))
-        if value == self._progress:
-            return
+        # 只前进不后退：补跑阶段目标数可能变大，分母变了也不该让进度倒退
+        if value <= self._progress:
+            return self._progress
         self._progress = value
         self.update()
+        return value
 
     def set_state(self, state: str) -> None:
         """设置状态（running / success / failed / cancelled / pending），决定填充色。"""

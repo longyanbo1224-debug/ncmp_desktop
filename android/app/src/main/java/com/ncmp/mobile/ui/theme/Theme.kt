@@ -16,9 +16,11 @@ object NCMP {
     val Rule = Color(0xFFE5E5E5)       // 细线/边框
     val Ground = Color(0xFFF5F5F5)     // 页面底色
     val Panel = Color(0xFFFFFFFF)      // 面板
-    val Amber = Color(0xFFE8A33D)      // 进行中
+    val Amber = Color(0xFFE8A33D)      // 进行中（只能当填充色）
+    val AmberText = Color(0xFF8A5A0A)  // 琥珀色的文字替代，对比度 5.4:1
     val Green = Color(0xFF2C7549)      // 成功
     val Red = Color(0xFFB3352B)        // 失败
+    val Track = Color(0xFFE0E0E0)      // 打卡图里"当天没跑"的格子
     val Soft = Color(0x14C20C0C)       // 品牌红浅底
 }
 

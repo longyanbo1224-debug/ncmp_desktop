@@ -11,6 +11,7 @@ closeEvent 拦截：按 ``AppConfig.close_action`` 决定直接关或最小化�
 """
 import math
 import random
+import sys
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
@@ -234,10 +235,21 @@ class MainWindow(QMainWindow):
         self._dashboard.show_toast("Cookie 已就绪，可立即执行任务")
         self._nav.setCurrentRow(0)
 
+    def show_from_second_instance(self) -> None:
+        """用户又点了桌面图标：把已有窗口（可能最小化/收进托盘）拉到前台。"""
+        self._show_and_raise()
+
     def _show_and_raise(self) -> None:
         self.showNormal()
         self.raise_()
         self.activateWindow()
+        # Windows 的前台窗口锁会无视 activateWindow，再直接抢一次
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                ctypes.windll.user32.SetForegroundWindow(int(self.winId()))
+            except Exception:
+                pass
 
     def _on_tray_activated(self, reason) -> None:
         from PySide6.QtWidgets import QSystemTrayIcon

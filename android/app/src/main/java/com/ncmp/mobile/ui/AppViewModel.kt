@@ -44,12 +44,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var progressDone by mutableStateOf(0)
     var progressTotal by mutableStateOf(0)
+
+    /** 全局进度 0~100，跨「基础 / 额外」两个阶段连续推进。 */
+    var percent by mutableStateOf(0)
     var currentSong by mutableStateOf("")
     var currentScore by mutableStateOf("")
     var currentStep by mutableStateOf("")
     val logLines = mutableStateListOf<String>()
     var resultLabel by mutableStateOf("")
     var resultHint by mutableStateOf("")
+    var resultSummary by mutableStateOf("")
     var resultIsError by mutableStateOf(false)
 
     // ---------- 配置（界面态） ----------
@@ -79,7 +83,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun observeTaskBus() {
-        viewModelScope.launch { TaskBus.running.collect { running = it } }
+        viewModelScope.launch {
+            TaskBus.running.collect {
+                running = it
+                // 服务端先落记录再置 false，所以这时读到的就是本次结果
+                if (!it) refreshHistory()
+            }
+        }
         viewModelScope.launch {
             TaskBus.logs.collect { lines ->
                 logLines.clear()
@@ -88,11 +98,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch { TaskBus.done.collect { progressDone = it } }
         viewModelScope.launch { TaskBus.total.collect { progressTotal = it } }
+        viewModelScope.launch { TaskBus.percent.collect { percent = it } }
         viewModelScope.launch { TaskBus.song.collect { currentSong = it } }
         viewModelScope.launch { TaskBus.score.collect { currentScore = it } }
         viewModelScope.launch { TaskBus.step.collect { currentStep = it } }
         viewModelScope.launch { TaskBus.resultLabel.collect { resultLabel = it } }
         viewModelScope.launch { TaskBus.resultHint.collect { resultHint = it } }
+        viewModelScope.launch { TaskBus.resultSummary.collect { resultSummary = it } }
         viewModelScope.launch { TaskBus.resultIsError.collect { resultIsError = it } }
     }
 

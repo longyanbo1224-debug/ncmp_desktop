@@ -16,14 +16,23 @@ class ExtraTask:
             "report_listen": "https://interface.music.163.com/weapi/partner/resource/interact/report"
         }
         self.signer = Signer(session, "", logger, config)  # task_id 为空字符串，因为上报听歌不需要
+    #: 额外评分最多跑几轮：首轮 + 一次补跑。
+    #: 单首失败只跳过不重试，跑完不重新核对就会"15 条只评了 12 首"却报成功。
+    _MAX_PASSES = 2
+
     def process_extra_tasks(self, task_id: str) -> None:
-        """处理额外的评分任务"""
+        """处理额外的评分任务。
+
+        每轮结束后重新拉一次任务列表：单首失败被跳过时，服务端仍把它标成
+        未完成，补跑这一轮就能把漏掉的补上，用户不必再手动点一次执行。
+        """
         try:
             extra_tasks, completed_count = self._get_extra_tasks()
-            total_tasks = (7 if not self.config.get('full_extra_tasks', False) else len(extra_tasks) + completed_count)
+            full = bool(self.config.get('full_extra_tasks', False))
+            target = len(extra_tasks) if full else 7 - completed_count
 
             # 如果已经完成任务，直接返回
-            if completed_count >= total_tasks:
+            if target <= 0:
                 self.logger.info(f"今日已完成 {completed_count} 个额外评分任务，已达到每日上限")
                 return
 
@@ -32,53 +41,80 @@ class ExtraTask:
                 return
             self.logger.info(f"发现 {len(extra_tasks)} 个待额外评定任务")
 
-            # 记录本次成功评分的数量
+            # 跨轮累计的成功数：进度条只前进，补跑时不会倒回 0
             success_count = 0
-            remaining_tasks = total_tasks - completed_count
             # 先给一个 0/total，进度条在等待第一首歌时就能显示任务总量
             if self.on_progress:
                 try:
-                    self.on_progress(0, remaining_tasks, "", "")
+                    self.on_progress(0, target, "", "")
                 except Exception as e:
                     self.logger.warning(f"on_progress 回调异常: {e}")
 
-            for task in extra_tasks:
-                if success_count >= remaining_tasks:
-                    self.logger.info(f"已完成 {success_count} 个额外评分任务，总计完成 {completed_count + success_count} 个")
+            for attempt in range(self._MAX_PASSES):
+                if success_count >= target:
+                    break
+                if attempt:
+                    # 补跑前重新核对服务端状态，别拿旧列表硬跑
+                    try:
+                        extra_tasks, completed_count = self._get_extra_tasks()
+                    except Exception as e:
+                        self.logger.warning(f"补跑检查失败，结束额外评分: {e}")
+                        break
+                    if full:
+                        target = max(target, success_count + len(extra_tasks))
+                    else:
+                        target = max(target, 7 - completed_count)
+                    if not extra_tasks or success_count >= target:
+                        self.logger.info("补跑检查：没有剩余额外任务")
+                        break
+                    self.logger.info(
+                        f"补跑检查：还有 {target - success_count} 个额外任务未完成")
+
+                quota_exhausted = False
+                for task in extra_tasks:
+                    if success_count >= target:
+                        break
+
+                    # 任务循环开始处响应取消
+                    if self.cancel_event is not None and self.cancel_event.is_set():
+                        self.logger.info("用户取消任务，停止额外评分")
+                        raise CancelledError("用户取消任务，停止额外评分")
+
+                    try:
+                        self._process_single_task(
+                            task, task_id,
+                            done_offset=success_count,
+                            total=target,
+                        )
+                        # 只有在没有抛出异常时才增加成功计数
+                        success_count += 1
+                        self.logger.info(f"成功完成第 {success_count}/{target} 个额外评分任务")
+
+                        # 添加随机等待时间
+                        if success_count < target:  # 最后一个任务不需要等待
+                            delay = self.config.get_wait_time()
+                            self.logger.info(f"等待 {delay:.1f} 秒后继续...")
+                            time.sleep(delay)
+
+                    except CancelledError:
+                        # 取消异常必须向上传递，不能按单首失败吞掉
+                        raise
+                    except Exception as e:
+                        # 额度用完时后面每一首都会失败，立刻停，别空转
+                        if "没有更多" in str(e):
+                            self.logger.info("今日额外评分额度已用完，停止")
+                            quota_exhausted = True
+                            break
+                        self.logger.warning(f"处理歌曲 {task['work']['name']} 失败，尝试下一个: {str(e)}")
+                        continue
+                if quota_exhausted:
                     break
 
-                # 任务循环开始处响应取消
-                if self.cancel_event is not None and self.cancel_event.is_set():
-                    self.logger.info("用户取消任务，停止额外评分")
-                    raise CancelledError("用户取消任务，停止额外评分")
-
-                try:
-                    work_name = task['work']['name']
-                    self._process_single_task(
-                        task, task_id,
-                        done_offset=success_count,
-                        total=remaining_tasks,
-                    )
-                    # 只有在没有抛出异常时才增加成功计数
-                    success_count += 1
-                    self.logger.info(f"成功完成第 {success_count}/{remaining_tasks} 个额外评分任务")
-
-                    # 添加随机等待时间
-                    if success_count < remaining_tasks:  # 最后一个任务不需要等待
-                        delay = self.config.get_wait_time()
-                        self.logger.info(f"等待 {delay:.1f} 秒后继续...")
-                        time.sleep(delay)
-
-                except CancelledError:
-                    # 取消异常必须向上传递，不能按单首失败吞掉
-                    raise
-                except Exception as e:
-                    self.logger.warning(f"处理歌曲 {task['work']['name']} 失败，尝试下一个: {str(e)}")
-                    continue
-            self.logger.info(f"额外评分任务处理完成，成功评分 {success_count} 首")
-
-            if success_count < remaining_tasks:
-                self.logger.warning(f"未能完成所有额外评分任务，仅完成 {success_count}/{remaining_tasks} 个")
+            if success_count < target:
+                self.logger.warning(
+                    f"检查后仍有 {target - success_count} 个额外评分任务未完成")
+            else:
+                self.logger.info(f"额外评分任务处理完成，成功评分 {success_count} 首")
         except CancelledError:
             raise
         except Exception as e:

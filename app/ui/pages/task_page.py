@@ -453,9 +453,8 @@ class TaskPage(QWidget):
 
     def _update_progress(self, pct: int) -> None:
         """单调推进，避免阶段粗粒度进度回退覆盖更精确的歌曲进度。"""
-        pct = max(0, min(100, int(pct)))
-        self._meter.set_progress(pct)
-        self._percent_label.setText(f"{pct}%")
+        applied = self._meter.set_progress(max(0, min(100, int(pct))))
+        self._percent_label.setText(f"{applied}%")
 
     def _on_finished(self, ok: bool, status: str, kind: str = "") -> None:
         """本地 worker 完成：按 status 显示 success/cancelled/failed。
