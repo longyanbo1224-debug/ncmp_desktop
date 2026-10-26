@@ -107,7 +107,7 @@ ncmp 把网易云音乐「音乐合伙人」的每日评分任务自动化，提
 2. **配置**：「设置」页默认值已预填，按需修改后保存
 3. **执行**：「任务」页点「立即执行」，实时看进度和日志
 
-### 手机端（APK，v1.1.0）
+### 手机端（APK，v1.1.1）
 
 1. 安装 `ncmp-mobile.apk`（见 [Releases](https://github.com/longyanbo1224-debug/ncmp_desktop/releases)，或从源码构建）
 2. 打开 App →「网页登录」→ 在官方登录页里登录（手机号 / 验证码 / 扫码）→ 点「我已登录，获取 Cookie」
@@ -337,12 +337,15 @@ cd android
 
 ## 版本记录
 
+桌面端与手机端同步发布 **v1.1.1**，安装包见 [Releases](https://github.com/longyanbo1224-debug/ncmp_desktop/releases)，详细说明见 [v1.1.1 更新记录](release-notes/v1.1.1.md)。
+
 ### 手机端（Android）
 
 安装包见 [Releases](https://github.com/longyanbo1224-debug/ncmp_desktop/releases)；每个版本的详细说明见对应文件。
 
 | 版本 | 日期 | 主要更新 |
 |---|---|---|
+| [v1.1.1](release-notes/v1.1.1.md) | 2026-10-26 | 年度打卡图 + 按天执行情况、与桌面端一致的阶段进度条、额外任务补跑、失败策略统一 |
 | [v1.1.0](release-notes/android-v1.1.0.md) | 2026-10-25 | 定时执行（含精确闹钟授权、重启/重开自动重排）、打卡记录、前台服务后台执行、界面按桌面端设计语言重构、网页登录双指缩放、退出登录保留配置 |
 | [v1.0.0](release-notes/android-v1.0.0.md) | 2026-10-24 | 首个版本：官方网页登录 / Cookie 登录、手动执行任务 |
 
