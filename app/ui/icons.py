@@ -148,16 +148,19 @@ def result_icon(ok: bool) -> QIcon:
 
 
 def create_app_icon(size: int = 256) -> QIcon:
-    """绘制品牌图标：品牌红圆角方底 + 白色音符居中。
+    """品牌图标：加载 ``resources/app.ico``（与 exe/快捷方式同一张图）。
 
-    刻意用**圆角方形**而不是圆形：圆形红底＋白色音符就是网易云音乐自己的商标，
-    这是第三方非官方程序，不该做得像官方图标。圆角方形同色系但不混淆。
-
-    用 QPainter 在透明 QPixmap 上画：
-      1. 圆角矩形（半径 = size // 5）填品牌红
-      2. 叠加白色音符图标，尺寸 = size * 0.56，居中
-    返回 QIcon(pixmap)，Qt 自动多分辨率缩放。
+    ICO 内含 16~256 多档尺寸，窗口、托盘、通知都从这里取，保证三处一致。
+    图片缺失时兜底现场画一个红底音符，保证程序不会没有图标。
     """
+    try:
+        icon = QIcon(theme.repo_resource_path("resources", "app.ico"))
+        if not icon.isNull():
+            return icon
+    except Exception:
+        pass
+
+    # ---- 兜底：resources/app.ico 缺失时现场绘制 ----
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.transparent)
     painter = QPainter(pixmap)

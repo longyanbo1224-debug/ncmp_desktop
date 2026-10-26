@@ -128,6 +128,7 @@ pyinstaller --noconsole --windowed --clean -y ^
   --add-data "app\ui\fonts;ui\fonts" ^
   --add-data "app\ui\styles\check.png;ui\styles" ^
   --add-data "resources\workflow_example.yml;resources" ^
+  --add-data "resources\app.ico;resources" ^
   --hidden-import keyring.backends ^
   --hidden-import keyring.backends.Windows ^
   --exclude-module PySide6.QtWebEngineWidgets ^
@@ -181,6 +182,7 @@ set PROBLEM=
 if not exist "dist\ncmp desktop\_internal\ui\fonts\NCMPSansSC-Regular.ttf" set PROBLEM=%PROBLEM% fonts
 if not exist "dist\ncmp desktop\_internal\ui\styles\check.png"              set PROBLEM=%PROBLEM% checkbox-icon
 if not exist "dist\ncmp desktop\_internal\resources\workflow_example.yml"   set PROBLEM=%PROBLEM% workflow-template
+if not exist "dist\ncmp desktop\_internal\resources\app.ico"                set PROBLEM=%PROBLEM% app-icon
 if defined PROBLEM (
     echo.
     echo   ERROR: these resources were NOT bundled:%PROBLEM%

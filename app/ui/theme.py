@@ -182,6 +182,19 @@ def resource_path(*parts: str) -> str:
     return os.path.join(os.path.dirname(_HERE), *parts)
 
 
+def repo_resource_path(*parts: str) -> str:
+    """仓库根 ``resources/`` 下的资源。
+
+    打包后 ``--add-data "resources\\...;resources"`` 会把它放到
+    ``_internal/resources/``，与上面的 ``resource_path`` 同一个 ``_MEIPASS`` 根；
+    开发模式则回到仓库根目录。
+    """
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        return os.path.join(base, *parts)
+    return os.path.join(os.path.dirname(os.path.dirname(_HERE)), *parts)
+
+
 def fonts_dir() -> str:
     """随包字体目录。"""
     return resource_path("ui", "fonts")

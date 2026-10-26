@@ -1,85 +1,45 @@
-"""生成 resources/app.ico：多分辨率 Windows ICO。
+"""从 resources/app-icon.png 生成 resources/app.ico（多分辨率 Windows ICO）。
 
-用 QPainter 绘 6 个尺寸 PNG (16, 32, 48, 64, 128, 256)：
-圆角方形主色蓝 (#2E7DDE) 底 + 白色 fa5s.music 元素居中，
-再用 Pillow 合并保存为多分辨率 ICO，供 PyInstaller ``--icon`` 与 exe 文件图标使用。
+``app-icon.png`` 是图标设计的唯一来源：改图标只需替换这张 256×256 PNG，
+再运行 ``python scripts/gen_icon.py``。生成的多尺寸 ICO 同时供：
+
+- PyInstaller ``--icon``：exe 文件图标 / 快捷方式图标
+- 运行时 ``app/ui/icons.py``：窗口、系统托盘、应用内通知
+
+三处共用同一份文件，不会再出现 exe 是新图标、托盘还是旧图标的情况。
 
 用法：
     python scripts/gen_icon.py
 """
-import io
 import os
 import sys
 
-from PySide6.QtCore import QBuffer, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPixmap
-from PySide6.QtWidgets import QApplication
-from PIL import Image
-import qtawesome as qta
+from PIL import Image, ImageOps
 
-COLOR_PRIMARY = "#2E7DDE"
-ICON_NAME = "fa5s.music"
-SIZES = (16, 32, 48, 64, 128, 256)
-
-
-def render_pixmap(size: int) -> QPixmap:
-    """以指定尺寸绘制品牌图标 QPixmap。"""
-    pm = QPixmap(size, size)
-    pm.fill(Qt.transparent)
-    painter = QPainter(pm)
-    try:
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        # 圆角方形底
-        radius = max(2, size // 6)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(COLOR_PRIMARY))
-        painter.drawRoundedRect(QRectF(0, 0, size, size), radius, radius)
-        # 白色 music 元素居中
-        icon = qta.icon(ICON_NAME, color="#ffffff")
-        icon_size = int(size * 0.6)
-        margin = (size - icon_size) // 2
-        icon.paint(painter, margin, margin, icon_size, icon_size)
-    finally:
-        painter.end()
-    return pm
-
-
-def to_png_bytes(pm: QPixmap) -> bytes:
-    """QPixmap → PNG 字节。"""
-    buf = QBuffer()
-    buf.open(QBuffer.ReadWrite)
-    pm.save(buf, "PNG")
-    return bytes(buf.data())
+SIZES = (16, 24, 32, 48, 64, 128, 256)
 
 
 def main() -> int:
     here = os.path.dirname(os.path.abspath(__file__))
     root = os.path.dirname(here)
     res_dir = os.path.join(root, "resources")
-    os.makedirs(res_dir, exist_ok=True)
+    src_path = os.path.join(res_dir, "app-icon.png")
     out = os.path.join(res_dir, "app.ico")
 
-    # qtawesome 需要 QCoreApplication 已构造
-    app = QApplication.instance() or QApplication(sys.argv)
+    if not os.path.exists(src_path):
+        print(f"ERROR: missing source image: {src_path}")
+        return 1
 
-    images = []
-    for s in SIZES:
-        pm = render_pixmap(s)
-        bio = io.BytesIO(to_png_bytes(pm))
-        images.append(Image.open(bio).convert("RGBA"))
-
-    # 用最大尺寸作 base，其余作 append_images；
-    # 同时给 sizes= 全部目标尺寸，PIL 会为每个目标挑选最贴合的源图（精确匹配则不缩放）。
-    base = max(images, key=lambda im: im.size[0])
-    others = [im for im in images if im is not base]
+    src = Image.open(src_path).convert("RGBA")
+    base = ImageOps.fit(src, (256, 256), Image.LANCZOS)
+    others = [ImageOps.fit(src, (s, s), Image.LANCZOS)
+              for s in SIZES if s != 256]
     base.save(out, format="ICO",
               sizes=[(s, s) for s in SIZES],
               append_images=others)
 
-    size_bytes = os.path.getsize(out)
     print(f"Generated: {out}")
-    print(f"File size: {size_bytes} bytes")
+    print(f"File size: {os.path.getsize(out)} bytes")
 
     # 校验：读回 ICO，列出内部所有 entry 尺寸
     try:

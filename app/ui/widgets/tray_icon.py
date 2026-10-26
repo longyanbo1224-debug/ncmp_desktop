@@ -1,7 +1,7 @@
 """系统托盘图标。
 
 提供 4 项右键菜单：显示主窗口 / 立即执行任务 / 检查/刷新 Cookie / 退出。
-图标优先用 qtawesome 生成（fa5s.music 着主色），替代 app.png 与 SP_ComputerIcon 回退。
+图标用 ``resources/app.ico``（与 exe / 快捷方式同一张图），加载失败再退回 qtawesome。
 菜单项也带图标。
 """
 from PySide6.QtCore import Signal
@@ -34,7 +34,7 @@ class TrayIcon(QSystemTrayIcon):
     # ------------------------------------------------------------------
     @staticmethod
     def _make_icon() -> QIcon:
-        """优先用品牌 create_app_icon（圆角蓝底 + 白色 music）。"""
+        """品牌图标（resources/app.ico，与 exe / 快捷方式同一张图）。"""
         try:
             return create_app_icon()
         except Exception:

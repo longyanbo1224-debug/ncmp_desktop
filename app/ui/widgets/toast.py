@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui import theme
-from app.ui.icons import op_icon
+from app.ui.icons import create_app_icon
 
 _MARGIN = 16          # 距屏幕右下角的边距
 _GAP = 10             # 气泡之间的间距
@@ -63,7 +63,8 @@ class Toast(QWidget):
 
         icon = QLabel()
         icon.setFixedSize(22, 22)
-        icon.setPixmap(op_icon("ph.music-notes", theme.BRAND).pixmap(22, 22))
+        # 和窗口 / 托盘 / exe 用同一张品牌图，避免通知里还是旧音符
+        icon.setPixmap(create_app_icon().pixmap(22, 22))
         row.addWidget(icon, 0, Qt.AlignTop)
 
         text_col = QVBoxLayout()
