@@ -28,7 +28,11 @@ data class TaskConfig(
 )
 
 sealed class TaskResult {
-    data class Success(val base: Int, val extra: Int) : TaskResult()
+    data class Success(
+        val base: Int,
+        val extra: Int,
+        val extraAllDone: Boolean = false,
+    ) : TaskResult()
     data class Cancelled(val base: Int, val extra: Int) : TaskResult()
     data class Failed(
         val error: Throwable,

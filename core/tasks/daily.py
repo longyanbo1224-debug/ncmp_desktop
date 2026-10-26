@@ -56,9 +56,9 @@ class DailyTask(BaseTask):
                 try:
                     signer.sign(work)
                 except Exception as e:
-                    # 额度用完是正常终态，不是失败：停止基础评分，让额外阶段继续
+                    # 今天没有更多可评的歌了：这是完成信号，不是异常
                     if "没有更多" in str(e):
-                        self.logger.info("今日评分额度已用完，停止基础评分")
+                        self.logger.info("今日已没有更多可评定歌曲，停止基础评分")
                         break
                     raise
 

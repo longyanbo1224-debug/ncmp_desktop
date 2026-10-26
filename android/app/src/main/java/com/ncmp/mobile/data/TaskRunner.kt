@@ -14,8 +14,8 @@ import kotlin.random.Random
  *
  * 流程：验证用户 -> 每日签到 -> 拉取每日任务 -> 评分基础任务 -> 额外评分任务。
  */
-/** 今日评分额度已用完（服务端 405「没有更多可评定歌曲」）。 */
-class QuotaExhaustedException(message: String) : RuntimeException(message)
+/** 服务端 405「今日没有更多可评定歌曲」：当天已没有可评的歌，不是额度异常。 */
+class NoMoreWorksException(message: String) : RuntimeException(message)
 
 class TaskRunner(
     private val api: NeteaseApi,
@@ -31,6 +31,7 @@ class TaskRunner(
     private var percent = 0
     private var baseDone = 0
     private var extraDone = 0
+    private var extraAllDone = false
 
     // 阶段在全局进度里的区间（移植自桌面端 task_page.py）。
     // 两个评分阶段在 8~100 之间按条目数分配，见 planScoring。
@@ -44,6 +45,7 @@ class TaskRunner(
     suspend fun run(): TaskResult {
         baseDone = 0
         extraDone = 0
+        extraAllDone = false
         try {
             checkCancel()
             step("验证用户信息", "running")
@@ -69,7 +71,7 @@ class TaskRunner(
             processExtra(daily.id)
             step("额外评分任务", "success")
 
-            return TaskResult.Success(baseDone, extraDone)
+            return TaskResult.Success(baseDone, extraDone, extraAllDone)
         } catch (e: CancellationException) {
             step(currentStep, "cancelled")
             log("任务已取消")
@@ -173,8 +175,8 @@ class TaskRunner(
                     onProgress(done, total, w.name, score)
                     phaseProgress(done, total)
                 }
-            } catch (e: QuotaExhaustedException) {
-                log("今日评分额度已用完，停止")
+            } catch (e: NoMoreWorksException) {
+                log("今日已没有更多可评定歌曲，停止基础评分")
                 break
             }
         }
@@ -221,8 +223,8 @@ class TaskRunner(
                     return
                 }
                 code == 405 && msg.contains("没有更多") -> {
-                    // 今日额度已用完：不再逐个空转，交由上层停止
-                    throw QuotaExhaustedException(msg)
+                    // 今天没有可评的歌了：这是完成信号，不是额度异常
+                    throw NoMoreWorksException(msg)
                 }
                 else -> throw RuntimeException("评分失败: $msg (响应码: $code)")
             }
@@ -244,12 +246,13 @@ class TaskRunner(
         val full = config.fullExtraTasks
         var target = if (full) uncompleted.size else 7 - completedCount
 
-        if (target <= 0) {
-            log("今日已完成 $completedCount 个额外评分任务，已达到每日上限")
-            return
-        }
         if (uncompleted.isEmpty()) {
             log("额外评定完成数: $completedCount")
+            extraAllDone = true
+            return
+        }
+        if (target <= 0) {
+            log("今日已完成 $completedCount 个额外评分任务，已达到每日上限")
             return
         }
         log("发现 ${uncompleted.size} 个待额外评定任务")
@@ -257,7 +260,7 @@ class TaskRunner(
         var success = 0
         onProgress(0, target, "", "")
         phaseProgress(0, target)
-        var quota = false
+        var noMore = false
         for (pass in 0 until 2) {
             if (success >= target) break
             if (pass > 0) {
@@ -301,17 +304,22 @@ class TaskRunner(
                     }
                 } catch (e: CancellationException) {
                     throw e
-                } catch (e: QuotaExhaustedException) {
-                    log("今日额外评分额度已用完，停止")
-                    quota = true
+                } catch (e: NoMoreWorksException) {
+                    log("今日已没有更多可评定歌曲，额外任务今日已全部完成")
+                    noMore = true
                     break
                 } catch (e: Exception) {
                     log("处理歌曲 ${work.name} 失败，尝试下一个: ${e.message}")
                 }
             }
-            if (quota) break
+            if (noMore) break
         }
         extraDone = success
+        if (noMore) {
+            // 服务端已经没有可评的歌了：这是完成，不是"还有 N 个没完成"，也不再补跑
+            extraAllDone = true
+            return
+        }
         if (success < target) {
             log("检查后仍有 ${target - success} 个额外评分任务未完成")
         } else {

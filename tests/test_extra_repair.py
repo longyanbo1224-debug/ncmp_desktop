@@ -31,7 +31,8 @@ class _Config:
 class _FakeExtra(ExtraTask):
     """把网络调用换成脚本化的任务列表。"""
 
-    def __init__(self, script, full: bool = True, fail_on=(12, 13, 14)) -> None:
+    def __init__(self, script, full: bool = True, fail_on=(12, 13, 14),
+                 no_more: bool = False) -> None:
         self.logger = _Logger()
         self.config = _Config(full)
         self.cancel_event = None
@@ -42,6 +43,7 @@ class _FakeExtra(ExtraTask):
         self.fetches = 0
         self.attempts = 0
         self.fail_on = set(fail_on)
+        self.no_more = no_more
 
     def _get_extra_tasks(self):
         pending, completed = self.script[min(self.fetches, len(self.script) - 1)]
@@ -51,6 +53,8 @@ class _FakeExtra(ExtraTask):
 
     def _process_single_task(self, task, task_id, done_offset=0, total=None):
         self.attempts += 1
+        if self.no_more:
+            raise RuntimeError("评分失败: 今日没有更多可评定歌曲啦 (响应码: 405)")
         if self.attempts in self.fail_on:
             raise RuntimeError("模拟单首失败")
         self.on_progress(done_offset + 1, total,
@@ -76,6 +80,16 @@ class ExtraRepairTest(unittest.TestCase):
 
         self.assertEqual(job.attempts, 7)
         self.assertEqual(job.fetches, 1)
+
+    def test_no_more_songs_is_completion_not_shortfall(self):
+        # 405「今日没有更多可评定歌曲」= 今天已经评完，不能报"还有 15 个没完成"
+        job = _FakeExtra([(15, 0)], fail_on=(), no_more=True)
+        job.process_extra_tasks("task")
+
+        messages = [m for _, m in job.logger.lines]
+        self.assertEqual(job.fetches, 1, "没有更多时不应再补跑")
+        self.assertTrue(any("额外任务今日已全部完成" in m for m in messages))
+        self.assertFalse(any("仍有" in m for m in messages))
 
 
 if __name__ == "__main__":

@@ -101,7 +101,11 @@ class TaskService : Service() {
                     is TaskResult.Success -> {
                         TaskBus.resultLabel.value = "任务完成"
                         TaskBus.resultIsError.value = false
-                        historyMessage = "成功，基础 ${result.base} 首、额外 ${result.extra} 首"
+                        historyMessage = if (result.extraAllDone) {
+                            "成功，基础 ${result.base} 首、额外任务今日已全部完成"
+                        } else {
+                            "成功，基础 ${result.base} 首、额外 ${result.extra} 首"
+                        }
                     }
                     is TaskResult.Cancelled -> {
                         TaskBus.resultLabel.value = "已取消"

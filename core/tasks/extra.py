@@ -50,6 +50,7 @@ class ExtraTask:
                 except Exception as e:
                     self.logger.warning(f"on_progress 回调异常: {e}")
 
+            no_more = False
             for attempt in range(self._MAX_PASSES):
                 if success_count >= target:
                     break
@@ -70,7 +71,6 @@ class ExtraTask:
                     self.logger.info(
                         f"补跑检查：还有 {target - success_count} 个额外任务未完成")
 
-                quota_exhausted = False
                 for task in extra_tasks:
                     if success_count >= target:
                         break
@@ -100,16 +100,18 @@ class ExtraTask:
                         # 取消异常必须向上传递，不能按单首失败吞掉
                         raise
                     except Exception as e:
-                        # 额度用完时后面每一首都会失败，立刻停，别空转
+                        # 服务端说没有更多可评的歌了：这是完成信号，不是额度异常
                         if "没有更多" in str(e):
-                            self.logger.info("今日额外评分额度已用完，停止")
-                            quota_exhausted = True
+                            self.logger.info("今日已没有更多可评定歌曲，额外任务今日已全部完成")
+                            no_more = True
                             break
                         self.logger.warning(f"处理歌曲 {task['work']['name']} 失败，尝试下一个: {str(e)}")
                         continue
-                if quota_exhausted:
+                if no_more:
                     break
 
+            if no_more:
+                return
             if success_count < target:
                 self.logger.warning(
                     f"检查后仍有 {target - success_count} 个额外评分任务未完成")
