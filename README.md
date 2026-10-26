@@ -339,15 +339,19 @@ cd android
 
 ## 版本记录
 
-桌面端与手机端同步发布 **v1.1.1**，安装包见 [Releases](https://github.com/longyanbo1224-debug/ncmp_desktop/releases)，详细说明见 [v1.1.1 更新记录](release-notes/v1.1.1.md)。
+安装包见 [Releases](https://github.com/longyanbo1224-debug/ncmp_desktop/releases)，每个版本的详细说明见对应文件。
 
-### 手机端（Android）
-
-安装包见 [Releases](https://github.com/longyanbo1224-debug/ncmp_desktop/releases)；每个版本的详细说明见对应文件。
+### 桌面端（Windows）
 
 | 版本 | 日期 | 主要更新 |
 |---|---|---|
-| [v1.1.1](release-notes/v1.1.1.md) | 2026-10-26 | 年度打卡图 + 按天执行情况、与桌面端一致的阶段进度条、额外任务补跑、失败策略统一、桌面图标统一 |
+| [v1.1.1](release-notes/desktop-v1.1.1.md) | 2026-10-26 | 额外任务补跑、失败策略调整、单实例唤醒、窗口 / 托盘 / 通知图标统一 |
+
+### 手机端（Android）
+
+| 版本 | 日期 | 主要更新 |
+|---|---|---|
+| [v1.1.1](release-notes/android-v1.1.1.md) | 2026-10-26 | 年度打卡图 + 按天执行情况、与桌面端一致的阶段进度条、额外任务补跑、失败策略统一 |
 | [v1.1.0](release-notes/android-v1.1.0.md) | 2026-10-25 | 定时执行（含精确闹钟授权、重启/重开自动重排）、打卡记录、前台服务后台执行、界面按桌面端设计语言重构、网页登录双指缩放、退出登录保留配置 |
 | [v1.0.0](release-notes/android-v1.0.0.md) | 2026-10-24 | 首个版本：官方网页登录 / Cookie 登录、手动执行任务 |
 
