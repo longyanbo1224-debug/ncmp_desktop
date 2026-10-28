@@ -15,6 +15,8 @@ import os
 import sys
 from string import Template
 
+from PySide6.QtCore import Qt
+
 # ----------------------------------------------------------------------
 # 颜色 —— 中性色（五个）
 # ----------------------------------------------------------------------
@@ -1005,6 +1007,21 @@ def reduced_motion() -> bool:
             return str(value).strip() == "0"
     except Exception:
         return False
+
+
+def prepare_popup(widget) -> None:
+    """让弹出菜单真正按样式表画圆角。
+
+    Qt 的 QMenu 是独立顶层窗口，默认没有半透明背景：QSS 里写的 border-radius
+    会被系统的方形窗口裁掉。表现就是"别处都圆了，托盘右键菜单还是方的"。
+    开半透明背景 + 去掉系统投影，圆角才会按样式表裁出来。
+    """
+    try:
+        widget.setAttribute(Qt.WA_TranslucentBackground, True)
+        widget.setWindowFlags(widget.windowFlags() | Qt.FramelessWindowHint
+                              | Qt.NoDropShadowWindowHint)
+    except Exception:
+        pass
 
 
 def apply_theme(app, mode: str = "") -> None:

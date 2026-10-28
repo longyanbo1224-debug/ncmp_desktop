@@ -68,6 +68,9 @@ class TrayIcon(QSystemTrayIcon):
         menu.addAction(act_quit)
 
         self.setContextMenu(menu)
+        # 托盘右键菜单是独立弹出窗口，不这么设圆角不生效（见 theme.prepare_popup）
+        from app.ui import theme
+        theme.prepare_popup(menu)
 
     def _connect_internal(self) -> None:
         # 双击托盘时也显示主窗口
