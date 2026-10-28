@@ -247,6 +247,33 @@ WeAPI = AES-128-CBC（key `0CoJUm6Qyw8W8jud`，IV `0102030405060708`）双重加
 
 ## 从源码构建
 
+构建/发布相关的文件（都在仓库里，不是本机临时产物）：
+
+| 文件 | 作用 |
+|---|---|
+| `build.bat` | 桌面端一键打包（PyInstaller，产物在 `dist/`） |
+| `build_android.bat` | 手机端一键打包（Gradle，产物 `dist\android\ncmp-mobile.apk`） |
+| `ncmp desktop.spec` | 桌面端 PyInstaller 打包定义（**已纳入版本控制**，CI 要用） |
+| `scripts/make_assets.py` | 生成 `app/ui/styles/check.png` 等样式资源——**这些生成物不进仓库**，打包前必须先跑它 |
+| `scripts/make_fonts.py` / `scripts/gen_icon.py` | 字体子集化 / 应用图标生成（只在改字体或改图标时才需要跑） |
+| `.github/workflows/release.yml` | 自动发布：打 tag → 两端编译 → 建 Release 并挂包 |
+
+### 发布一个版本（自动）
+
+1. 改版本号：`app/version.py` 与 `android/app/build.gradle.kts`（`versionCode` 加 1、`versionName` 同步）
+2. 在 `release-notes/` 下加一篇 `vX.Y.Z.md`（一篇覆盖双端，未更新的那一端要写明）
+3. 提交并推送 `main`
+4. 打 tag 并推送：
+
+```bash
+git tag -a vX.Y.Z -m "vX.Y.Z"
+git push origin vX.Y.Z
+```
+
+workflow 会在 Windows runner 上打桌面端包、在 Ubuntu runner 上打 debug APK，然后自动创建 Release 并挂上两个产物（更新说明自动生成，也可手动改）。手动 `Run workflow` 只构建、不发布。
+
+> 排过的坑（改 workflow 时别踩回去）：`app/ui/styles/check.png` 是生成物、`ncmp desktop.spec` 曾在 `.gitignore` 里——两者都会让"本地能打、干净检出打不出来"。
+
 ### 桌面端
 
 依赖：Python 3.10+、Git
