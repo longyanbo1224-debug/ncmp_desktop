@@ -1017,20 +1017,28 @@ private fun HistoryContent(vm: AppViewModel) {
                             .clickable { zoomed = false },
                         contentAlignment = Alignment.Center,
                     ) {
-                        // 图本身转 90°：53 列贴着手机的**长边**铺开，格子才放得大。
-                        // 只转这张图，不动整个应用的屏幕方向（转完把手机横过来看正好正着）。
-                        //
-                        // 注意用 requiredWidth 而不是 width：width 只是"偏好宽度"，
-                        // 父约束里最大只有屏宽（竖屏约 360dp），会被夹回去——表现就是
-                        // "图横过来了，但没变大"。
+                        // 只在**竖屏**时把图转 90°：53 列贴着长边铺开，格子才放得大。
+                        // 横屏（平板通常这样用）本来宽度就够，再转 90° 等于把宽方向
+                        // 压成高度，图反而变小——那种情况直接用整屏宽度。
                         BoxWithConstraints(Modifier.fillMaxSize()) {
-                            Box(
-                                Modifier
-                                    .requiredWidth(maxHeight - 24.dp)
-                                    .rotate(90f)
-                                    .align(Alignment.Center),
-                            ) {
-                                StreakGrid(cells)
+                            if (maxHeight > maxWidth) {
+                                Box(
+                                    Modifier
+                                        .requiredWidth(maxHeight - 24.dp)
+                                        .rotate(90f)
+                                        .align(Alignment.Center),
+                                ) {
+                                    StreakGrid(cells)
+                                }
+                            } else {
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 24.dp)
+                                        .align(Alignment.Center),
+                                ) {
+                                    StreakGrid(cells)
+                                }
                             }
                         }
                     }
