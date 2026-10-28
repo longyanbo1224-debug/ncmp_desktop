@@ -24,6 +24,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -81,6 +82,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -946,19 +948,27 @@ private fun HistoryContent(vm: AppViewModel) {
                         Modifier
                             .fillMaxSize()
                             .background(Color(0xEE000000))
-                            .clickable { zoomed = false }
-                            .padding(horizontal = 12.dp),
+                            .clickable { zoomed = false },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            StreakGrid(cells, maxCell = 16.dp)
-                            Spacer(Modifier.height(12.dp))
-                            Text(
-                                "过去一年，每格一天 · 点空白处退出",
-                                fontSize = 12.sp,
-                                color = Color(0xFFBDBDBD),
-                            )
+                        // 图本身转 90°：53 列贴着手机的**长边**铺开，格子才放得大。
+                        // 只转这张图，不动整个应用的屏幕方向（转完把手机横过来看正好正着）。
+                        BoxWithConstraints(Modifier.fillMaxSize()) {
+                            Box(
+                                Modifier
+                                    .width(maxHeight - 24.dp)
+                                    .rotate(90f)
+                                    .align(Alignment.Center),
+                            ) {
+                                StreakGrid(cells, maxCell = 16.dp)
+                            }
                         }
+                        Text(
+                            "点空白处退出",
+                            fontSize = 12.sp,
+                            color = Color(0xFFBDBDBD),
+                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp),
+                        )
                     }
                 }
             }
