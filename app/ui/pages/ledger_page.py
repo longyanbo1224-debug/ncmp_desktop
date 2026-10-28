@@ -99,10 +99,10 @@ class LedgerPage(QWidget):
         outer.addWidget(self._recent, 1)
 
     def _stat_block(self, label: str, value: str) -> QWidget:
-        block = QFrame()
-        block.setObjectName("panel")
+        # 不做卡片：三个数直接坐在页面底色上（手机端记录页同样处理）
+        block = QWidget()
         lay = QVBoxLayout(block)
-        lay.setContentsMargins(theme.SP_4, theme.SP_3, theme.SP_4, theme.SP_3)
+        lay.setContentsMargins(0, 0, theme.SP_5, 0)
         lay.setSpacing(theme.SP_1)
         caption = QLabel(label)
         caption.setObjectName("captionText")

@@ -27,7 +27,13 @@ object NCMP {
 private val LightColors = lightColorScheme(
     primary = NCMP.Brand,
     onPrimary = Color.White,
+    // 容器色不给品牌浅红的话，FilterChip / Switch 的选中态会用 Material 默认的
+    // 灰紫色，和桌面端的红色选中态完全不是一套。
+    primaryContainer = NCMP.Soft,
+    onPrimaryContainer = NCMP.Brand,
     secondary = NCMP.Muted,
+    secondaryContainer = NCMP.Soft,
+    onSecondaryContainer = NCMP.Brand,
     background = NCMP.Ground,
     onBackground = NCMP.Ink,
     surface = NCMP.Panel,

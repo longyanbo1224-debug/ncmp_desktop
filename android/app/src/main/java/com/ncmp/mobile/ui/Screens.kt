@@ -827,6 +827,22 @@ private fun tierBarColor(tier: String): Color = when (tier) {
     else -> NCMP.Red
 }
 
+/** 三个数：小标签 + 宋体大字，和桌面端记录页一致。 */
+@Composable
+private fun StatCell(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(label, fontSize = 11.sp, color = NCMP.Muted)
+        Spacer(Modifier.height(2.dp))
+        Text(
+            value,
+            fontFamily = FontFamily.Serif,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            color = NCMP.Ink,
+        )
+    }
+}
+
 /**
  * 记录页的"口味"块：累计曲目 / 档位分布 / 最近评过的曲子。
  *
@@ -849,14 +865,10 @@ private fun LedgerSection(vm: AppViewModel) {
     Spacer(Modifier.height(20.dp))
     ThinRule()
     Spacer(Modifier.height(18.dp))
-    Text("口味", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = NCMP.Ink)
-    Spacer(Modifier.height(3.dp))
-    Text(
-        "累计 ${stats.total} 首，其中 ${stats.notes} 首留下了批注",
-        fontSize = 12.sp,
-        color = NCMP.Muted,
-    )
-    Spacer(Modifier.height(14.dp))
+    Text("口味曲线", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = NCMP.Ink)
+    Spacer(Modifier.height(8.dp))
+    ThinRule()
+    Spacer(Modifier.height(12.dp))
 
     val peak = stats.maxTierCount().coerceAtLeast(1)
     for (tier in listOf("5", "4", "3", "2", "1")) {
@@ -952,11 +964,23 @@ private fun HistoryContent(vm: AppViewModel) {
             Text(
                 "打卡记录",
                 fontFamily = FontFamily.Serif,
-                fontSize = 26.sp,
+                fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
                 color = NCMP.Ink,
             )
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(14.dp))
+            // 和桌面端记录页同一个顺序：先三个数，再分块
+            Row(Modifier.fillMaxWidth()) {
+                StatCell("连续", "$streak 天", Modifier.weight(1f))
+                StatCell("累计曲目", "${vm.trackStats.total} 首", Modifier.weight(1f))
+                StatCell("累计批注", "${vm.trackStats.notes} 条", Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(22.dp))
+            // 和桌面端同一个分组骨架：小标题（15sp 半粗）+ 细线 + 内容
+            Text("坚持", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = NCMP.Ink)
+            Spacer(Modifier.height(8.dp))
+            ThinRule()
+            Spacer(Modifier.height(10.dp))
             Text("过去一年，每格一天 · 点一下放大看", fontSize = 12.sp, color = NCMP.Muted)
             Spacer(Modifier.height(14.dp))
             // 点一下：整屏浮层放大显示格子图（不旋转整个应用）。

@@ -205,7 +205,7 @@ class TaskPage(QWidget):
     def _build_rail(self) -> QWidget:
         """右栏账本摘要：今日进度、批注数、最近一次运行。"""
         rail = QFrame()
-        rail.setObjectName("panel")
+        rail.setObjectName("rail")
         rail.setFixedWidth(_RAIL_WIDTH)
         lay = QVBoxLayout(rail)
         lay.setContentsMargins(theme.SP_4, theme.SP_4, theme.SP_4, theme.SP_4)

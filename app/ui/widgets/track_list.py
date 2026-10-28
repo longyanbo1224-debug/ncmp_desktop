@@ -188,10 +188,10 @@ class TrackList(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        self._panel = QFrame()
-        self._panel.setObjectName("panel")
+        # 不做卡片：和手机端一致，曲目直接坐在页面底色上，只靠行间细线分隔
+        self._panel = QWidget()
         panel_lay = QVBoxLayout(self._panel)
-        panel_lay.setContentsMargins(theme.SP_4, 0, theme.SP_4, 0)
+        panel_lay.setContentsMargins(0, 0, 0, 0)
         panel_lay.setSpacing(0)
 
         self._rows_box = QWidget()

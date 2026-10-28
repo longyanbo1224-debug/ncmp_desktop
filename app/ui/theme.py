@@ -252,8 +252,10 @@ FS_DATA = 12
 # 圆角与间距
 # ----------------------------------------------------------------------
 # 控件变小后圆角也要跟着收，否则 6px 圆角配 31px 高的按钮会显得肥。
-R_CONTROL = 4
-R_PANEL = 6
+# v1.2 起向手机端看齐：圆角加大一档（手机端按钮是 10~12dp），
+# 让"方盒子"变成"圆角块"，两端的视觉语言才是一套。
+R_CONTROL = 8
+R_PANEL = 10
 
 SP_1, SP_2, SP_3, SP_4, SP_5, SP_6, SP_7 = 4, 8, 12, 16, 24, 32, 48
 
@@ -390,8 +392,8 @@ QPushButton {
     color: $INK;
     border: 1px solid $RULE;
     border-radius: ${R_CONTROL}px;
-    padding: 6px 14px;
-    min-height: 16px;
+    padding: 7px 16px;
+    min-height: 20px;
 }
 
 QPushButton:hover {
@@ -413,7 +415,7 @@ QPushButton:disabled {
    控件外框尺寸完全不变，不会引起重排。 */
 QPushButton:focus {
     border: 2px solid $BRAND;
-    padding: 5px 13px;
+    padding: 6px 15px;
 }
 
 /* 主按钮：网易云品牌红实心。 */
@@ -443,7 +445,7 @@ QPushButton#primaryButton:disabled {
 /* 红底上再用红焦点框看不见，换墨色 */
 QPushButton#primaryButton:focus {
     border: 2px solid $INK;
-    padding: 5px 13px;
+    padding: 6px 15px;
 }
 
 /* 次按钮：白底描边，就是默认按钮的样子（保留 objectName 以便语义清晰） */
@@ -557,6 +559,13 @@ QFrame#panel, QFrame#card, QFrame#cookieCard {
     background-color: $PANEL;
     border: 1px solid $RULE;
     border-radius: ${R_PANEL}px;
+}
+
+/* 右栏：不是卡片，是一条竖线隔开的"旁注"（手机端没有卡片，桌面端也收掉） */
+QFrame#rail {
+    background: transparent;
+    border: none;
+    border-left: 1px solid $RULE;
 }
 
 /* 一条细线（分组之间的分隔、设置页的分组标题下划线） */
