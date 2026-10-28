@@ -990,7 +990,7 @@ private fun HistoryContent(vm: AppViewModel) {
                                     .rotate(90f)
                                     .align(Alignment.Center),
                             ) {
-                                StreakGrid(cells, maxCell = 16.dp)
+                                StreakGrid(cells)
                             }
                         }
                     }
