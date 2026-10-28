@@ -971,7 +971,9 @@ private fun HistoryContent(vm: AppViewModel) {
                     Box(
                         Modifier
                             .fillMaxSize()
-                            .background(Color(0xEE000000))
+                            // 用页面底色而不是黑底：放大后仍然像"这一页被拿起来看"，
+                            // 而不是弹出一个遮罩层；点任意处退出。
+                            .background(NCMP.Ground)
                             .clickable { zoomed = false },
                         contentAlignment = Alignment.Center,
                     ) {
@@ -991,12 +993,6 @@ private fun HistoryContent(vm: AppViewModel) {
                                 StreakGrid(cells, maxCell = 16.dp)
                             }
                         }
-                        Text(
-                            "点空白处退出",
-                            fontSize = 12.sp,
-                            color = Color(0xFFBDBDBD),
-                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp),
-                        )
                     }
                 }
             }
