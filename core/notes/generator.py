@@ -41,6 +41,14 @@ def _pick(pool, seed: int) -> str:
     return pool[seed % len(pool)]
 
 
+def _sentence(text: str) -> str:
+    """句子收尾统一加一个句号，已经有的不重复加。
+
+    简短语气的判断句自带句号，拼接时再补就是「。。」。
+    """
+    return text if text.endswith("。") else text + "。"
+
+
 class NoteGenerator:
     """按固定骨架拼一句批注。线程内可复用，内部只记「已用过的句子」。"""
 
@@ -121,13 +129,13 @@ class NoteGenerator:
         text = ""
         for salt in range(_MAX_REROLL):
             seed = _seed(work, score, salt)
-            candidate = self._compose(seed, score)
+            candidate = self._compose(seed, score, work)
             if candidate and candidate not in self._used:
                 text = candidate
                 break
         if not text:
             # 全撞车了就接受第一句，总比没有批注好
-            text = self._compose(_seed(work, score, 0), score)
+            text = self._compose(_seed(work, score, 0), score, work)
         text = self._fit(text)
         self._used.add(text)
         return text
@@ -135,17 +143,39 @@ class NoteGenerator:
     # ------------------------------------------------------------------
     # 内部
     # ------------------------------------------------------------------
-    def _compose(self, seed: int, score: str) -> str:
+    def _compose(self, seed: int, score: str, work: Dict[str, Any]) -> str:
+        """按种子拼一句。排法也由种子决定，四种轮着来。"""
         tier = templates.tier_for_score(score)
         voice = self.voice
         opener = _pick(templates.openers_for(voice), seed)
         judgement = _pick(templates.judgements_for(voice, tier), seed // 7)
+
+        closer = ""
         closers = templates.closers_for(voice)
-        if not closers:
-            # 简短语气：一句说完，不铺垫也不收尾
-            return f"{opener}{judgement}。"
-        closer = _pick(closers, seed // 31)
-        return f"{opener}{judgement}。{closer}"
+        if closers:
+            closer = self._fill(_pick(closers, seed // 31), work)
+
+        # 简短语气只有一句；收尾缺失（拿不到歌名）时也不硬凑
+        if voice == "brief" or not closer:
+            fmt = "single"
+        else:
+            fmt = templates.FORMATS[seed % len(templates.FORMATS)]
+
+        if fmt == "full":
+            return f"{opener}{_sentence(judgement)}{closer}"
+        if fmt == "no_closer":
+            return f"{opener}{_sentence(judgement)}"
+        if fmt == "no_opener":
+            return f"{_sentence(judgement)}{closer}"
+        return _sentence(judgement)
+
+    @staticmethod
+    def _fill(text: str, work: Dict[str, Any]) -> str:
+        """把 ``{name}`` 换成歌名；拿不到歌名就返回空串（调用方当没有这句）。"""
+        if "{name}" not in text:
+            return text
+        name = str(work.get("name") or "").strip()
+        return text.replace("{name}", name) if name else ""
 
     def _fit(self, text: str) -> str:
         """把批注压到长度上限内：先丢收尾，再截断判断部分。"""

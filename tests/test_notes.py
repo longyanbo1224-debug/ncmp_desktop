@@ -58,12 +58,46 @@ class TestDeterminism(unittest.TestCase):
 
 
 class TestShape(unittest.TestCase):
-    def test_three_part_shape(self):
-        note = NoteGenerator(_Cfg()).generate(_WORK, "4")
-        self.assertTrue(note.endswith("。"), note)
-        # 开场以逗号收，判断与收尾之间有一个句号 → 至少两个句读
-        self.assertIn("，", note)
-        self.assertGreaterEqual(note.count("。"), 1)
+    def test_ends_with_period_and_fills_placeholder(self):
+        for score in ("1", "2", "3", "4", "5"):
+            note = NoteGenerator(_Cfg()).generate(_WORK, score)
+            self.assertTrue(note.endswith("。"), note)
+            self.assertNotIn("{name}", note)
+
+    def test_formats_vary(self):
+        """四种排法要真的用上：既要有两句的，也要有只有一句的。"""
+        gen = NoteGenerator(_Cfg())
+        works = [{"id": i, "name": f"歌{i}", "authorName": "某"} for i in range(40)]
+        notes = [gen.generate(work, "4") for work in works]
+        doubles = [n for n in notes if n.count("。") >= 2]
+        singles = [n for n in notes if n.count("。") == 1]
+        self.assertTrue(doubles, "没有出现两句的批注")
+        self.assertTrue(singles, "没有出现一句的批注")
+
+    def test_corpus_is_varied(self):
+        """语料扩容后，40 首同档位的歌不应该大面积重复。"""
+        gen = NoteGenerator(_Cfg())
+        works = [{"id": i, "name": f"歌{i}", "authorName": "某"} for i in range(40)]
+        notes = {gen.generate(work, "4") for work in works}
+        self.assertGreaterEqual(len(notes), 20)
+
+    def test_no_double_period(self):
+        """简短语气的判断句自带句号，拼接时不能再补一个。"""
+        works = [{"id": i, "name": f"歌{i}", "authorName": "某"} for i in range(12)]
+        for voice in ("restrained", "warm", "brief"):
+            gen = NoteGenerator(_Cfg(note_voice=voice))
+            for work in works:
+                note = gen.generate(work, "4")
+                self.assertNotIn("。。", note, f"{voice}: {note}")
+
+    def test_brief_stays_short(self):
+        """简短语气就是一句，不带开场也不带收尾。"""
+        works = [{"id": i, "name": f"歌{i}", "authorName": "某"} for i in range(12)]
+        gen = NoteGenerator(_Cfg(note_voice="brief"))
+        for work in works:
+            note = gen.generate(work, "4")
+            self.assertEqual(note.count("。"), 1, note)
+            self.assertLessEqual(len(note), 16, note)
 
     def test_max_chars_respected(self):
         note = NoteGenerator(_Cfg(note_max_chars=20)).generate(_WORK, "4")

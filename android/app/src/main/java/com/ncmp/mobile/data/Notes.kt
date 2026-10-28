@@ -1,29 +1,44 @@
 package com.ncmp.mobile.data
 
 /**
- * 批注文案模板库 + 生成器（从 `core/notes/templates.py` + `core/notes/generator.py`
- * 逐句移植：句池、骨架、截断规则都和桌面端一致）。
+ * 批注（乐评文案）生成器 —— 与桌面端 `core/notes/templates.py` 逐句一致。
  *
- * 批注是**随评分一起提交到网易云的那句话**，会公开留在账号名下，
- * 所以这里的每一句都遵守两条底线：
+ * 两条底线（改语料时别破坏它们）：
+ *  1. 不编造听觉细节。程序没有听过这首歌，写"副歌前的留白用得很克制"就是凭空捏造；
+ *     只允许谈听歌场景、整体完成度的判断、以及怎么处置。
+ *  2. 不喊口号。"太好听了""必须单曲循环"是刷屏语，不是批注。
  *
- * 1. **不编造听觉细节。** 程序没有听过这首歌，写"副歌前的留白用得很克制"
- *    就是凭空捏造。模板只允许谈听歌场景、整体判断和处置方式。
- * 2. **不喊口号。**"太好听了！""必须单曲循环！"这类句子是刷屏语，不是批注。
- *    批注要像内页上的一句手写批注：短、具体、克制。
+ * 为了不"每句都像同一个模子"，语料分三段（开场 / 判断 / 收尾），并且允许四种排法：
+ * 三段全用、省掉收尾、省掉开场、只留判断。排法由同一颗种子决定，
+ * 所以同一首歌、同一个分数永远生成同一句。
  *
- * 三段式骨架（见 docs/DESIGN.md §6）：
- * 开场（听歌场景） → 判断（和档位对应） → 收尾（怎么处置）
- *
- * 手机端没有 LLM：`note_source = "llm"` 时也按 "template" 处理。
+ * `{name}` 会被替换成歌名；拿不到歌名时，含占位符的句子会被跳过。
  */
 object Notes {
+
+    val VOICES = listOf("restrained", "warm", "brief")
+    const val DEFAULT_VOICE = "restrained"
+
+    val VOICE_LABELS = mapOf(
+        "restrained" to "克制",
+        "warm" to "热络",
+        "brief" to "简短",
+    )
+
+    /** 四种排法：三段全用 / 省收尾 / 省开场 / 只留判断。 */
+    val FORMATS = listOf("full", "no_closer", "no_opener", "single")
+
+    fun normalizeVoice(voice: String?): String =
+        if (voice != null && voice in VOICES) voice else DEFAULT_VOICE
+
+    fun voiceLabel(voice: String?): String =
+        VOICE_LABELS[normalizeVoice(voice)] ?: VOICE_LABELS.getValue(DEFAULT_VOICE)
 
     // ==================================================================
     // 语料
     // ==================================================================
 
-    /** 开场：谈的是"我什么时候、为什么点开它"，不涉及音乐本身。三套语气共用。 */
+    /** 开场：谈的是"我什么时候、为什么点开它"，不涉及音乐本身。 */
     private val OPENERS = listOf(
         "通勤路上点开的，",
         "今天排到的一首，",
@@ -35,9 +50,18 @@ object Notes {
         "列表里排在最后的那首，",
         "趁着空闲听的，",
         "等车的时候放完的，",
+        "睡前随手点开的，",
+        "午休时放的，",
+        "洗碗的时候听的，",
+        "朋友提过一嘴，今天才点开，",
+        "挂着当背景音听的，",
+        "从推荐位点进去的，",
+        "上一首放完自动接着放的，",
+        "加班时放的，",
+        "走路回家路上听的，",
+        "翻旧列表翻到的，",
     )
 
-    /** 判断：与评分的档位对应。写得越具体越像假话，所以只谈整体完成度。 */
     private val JUDGEMENTS = mapOf(
         "high" to listOf(
             "结构完整，该收的地方都收住了",
@@ -46,6 +70,12 @@ object Notes {
             "完成度比预期高，重复听也不腻",
             "整体是统一的，没有前后打架的地方",
             "该给的东西都给了，没有敷衍的地方",
+            "起承转合是清楚的，不是拼起来的",
+            "有自己的想法，而且守得住",
+            "分寸感好，知道什么时候该停",
+            "听过一遍还想再放一遍",
+            "前后接得上，不是凑时长",
+            "收得干净，没有拖尾巴",
         ),
         "mid" to listOf(
             "整体稳，但记不太住",
@@ -54,18 +84,29 @@ object Notes {
             "不难听，但听完想不起哪一句",
             "中规中矩，和歌名给的期待差不多",
             "底子是好的，差一点自己的东西",
+            "每部分都对，合起来少点惊喜",
+            "听着顺，但没有哪一段让我停下来",
+            "完成度是够的，只是不太勾人",
+            "每段单拎出来都还行，合起来不够紧",
+            "该有的都有，串起来不够紧",
+            "听得下去，但不会主动再点",
         ),
         "low" to listOf(
             "和我预期的差得有点远",
-            "编曲偏平，听到后半段就走神了",
+            "编曲偏平，听到后面就走神了",
             "制作上没问题，但没对上我的口味",
             "不是我会主动找的那一类",
             "该有的都有，只是没打动我",
             "听完的当下没什么感觉",
+            "听完一遍，没有想再点的冲动",
+            "听着有点累，中途想切歌",
+            "想法是有的，落得不太稳",
+            "和我对这类作品的期待不在一处",
+            "平静听完，没有起伏",
+            "听完了，但没留下什么",
         ),
     )
 
-    /** 收尾：给出处置方式。这是批注里最有信息量的一句。 */
     private val CLOSERS = listOf(
         "先放进歌单，改天再听一遍。",
         "适合晚上走路的时候放。",
@@ -75,9 +116,15 @@ object Notes {
         "记下来了，回头再验证一次。",
         "放进常听列表，不着急定论。",
         "下次排到的时候再听一次。",
+        "《{name}》先放着，改天再说。",
+        "暂时不进循环，留着当备选。",
+        "这一首先记下，不作结论。",
+        "给它一次重听的机会。",
+        "存进列表，过一阵再看还对不对。",
+        "就这样放着，什么时候想听再点。",
     )
 
-    /** 热络：情绪更外露，但依然不描述音乐本身。 */
+    // 热络：情绪更外露，但依然不描述音乐本身
     private val WARM_JUDGEMENTS = mapOf(
         "high" to listOf(
             "听着很舒服，心情被照顾到了",
@@ -85,6 +132,11 @@ object Notes {
             "是愿意反复放的那一类",
             "听完会不自觉放慢手上的事",
             "整体很舒服，挑不出毛病",
+            "愿意把它推给同样爱听歌的人",
+            "这种东西听一次就记住了",
+            "放完会想再点一遍",
+            "刚好合今天的心气",
+            "听的时候不想干别的",
         ),
         "mid" to listOf(
             "听着还行，情绪差一点到位",
@@ -92,13 +144,23 @@ object Notes {
             "不难听，只是没留住我",
             "和今天的心情擦肩而过",
             "氛围是对的，内容少了点",
+            "听完心情没变化，也不算白听",
+            "有点可惜，差一口气",
+            "听的时候舒服，听完就忘了",
+            "能听，但不会到处推荐",
+            "热度过了之后大概不会再点",
         ),
         "low" to listOf(
             "今天就当听个响",
             "情绪对不上，听着有点走神",
             "不是我此刻想听的声音",
-            "差了点意思，听完没什么感觉",
+            "差点意思，听完没什么感觉",
             "没能把注意力拉过去",
+            "放了半首就想换了",
+            "不是今天想听的那种",
+            "听完没有想说什么的冲动",
+            "和我之间隔着一层",
+            "就这样吧，不强求",
         ),
     )
 
@@ -108,62 +170,49 @@ object Notes {
         "就放在列表里，慢慢听。",
         "先记一下，改天再来。",
         "留着，不着急下结论。",
+        "《{name}》先收进歌单。",
+        "有机会想再听一遍。",
+        "放到常听里，来回多听几次。",
+        "暂时收藏，过阵子再回来看。",
+        "先放着，说不定哪天就听进去了。",
     )
 
-    /** 简短：一句话，不铺垫、不收尾。 */
+    // 简短：一句话，不铺垫、不收尾
     private val BRIEF_JUDGEMENTS = mapOf(
         "high" to listOf(
             "完成度挺高，值得留个位置。",
             "稳，没什么可挑的。",
             "该有的都有，听着舒服。",
             "比预期好，可以循环。",
+            "干净利落，听了两遍。",
+            "挑不出毛病。",
+            "这首留得住。",
+            "对味，先收着。",
         ),
         "mid" to listOf(
             "中规中矩，记住的不多。",
             "还行，但不算我的类型。",
             "听完就过了，不难听。",
             "差一点自己的东西。",
+            "稳，但平。",
+            "能听，不会再点。",
+            "和预期差不多。",
+            "就这样，谈不上喜欢。",
         ),
         "low" to listOf(
             "和预期差得远。",
             "不是我的口味，先放着。",
             "听得有点散，先跳过。",
             "没对上，就这样吧。",
+            "听完没印象。",
+            "不是我的菜。",
+            "先放了，下次再说。",
+            "听不下去，切了。",
         ),
     )
 
-    // ==================================================================
-    // 三套语气（D3，见 docs/DESIGN.md §8）
-    // ==================================================================
-    // 同一个默认语气服务所有人，结果就是谁都不像。但语气只能是"说话的松紧"，
-    // 不能是"知道得更多"——第三套原叫"技术流"，写两句就发现它必须描述编曲和
-    // 人声位置，而程序根本没听过这首歌，那就是编造。所以改成"简短"。
-
-    val VOICES: List<String> = listOf("restrained", "warm", "brief")
-    const val DEFAULT_VOICE = "restrained"
-
-    val VOICE_LABELS: Map<String, String> = mapOf(
-        "restrained" to "克制",
-        "warm" to "热络",
-        "brief" to "简短",
-    )
-
-    /** 不认识的语气回落默认，永远返回一个合法值。 */
-    fun normalizeVoice(voice: String?): String {
-        val value = (voice ?: "").trim().lowercase()
-        return if (value in VOICES) value else DEFAULT_VOICE
-    }
-
-    /** 语气的中文名（设置页 chip 用）。 */
-    fun voiceLabel(voice: String?): String = VOICE_LABELS.getValue(normalizeVoice(voice))
-
-    // ==================================================================
-    // 档位与句池
-    // ==================================================================
-
-    /** 分数 → 档位。无法解析时按中间档处理，不抛异常。 */
-    fun tierForScore(score: String?): String {
-        val value = score?.trim()?.toIntOrNull() ?: return "mid"
+    fun tierForScore(score: String): String {
+        val value = score.trim().toIntOrNull() ?: return "mid"
         return when {
             value >= 4 -> "high"
             value == 3 -> "mid"
@@ -171,24 +220,19 @@ object Notes {
         }
     }
 
-    /** 开场句池：三套语气共用——它只是"什么时候点开的"，语气无关。 */
     fun openersFor(): List<String> = OPENERS
 
-    /** 取某套语气的判断句池。voice 不认识就回落默认。 */
-    fun judgementsFor(voice: String?, tier: String): List<String> =
-        when (normalizeVoice(voice)) {
-            "warm" -> WARM_JUDGEMENTS[tier] ?: WARM_JUDGEMENTS.getValue("mid")
-            "brief" -> BRIEF_JUDGEMENTS[tier] ?: BRIEF_JUDGEMENTS.getValue("mid")
-            else -> JUDGEMENTS[tier] ?: JUDGEMENTS.getValue("mid")
-        }
+    fun judgementsFor(voice: String, tier: String): List<String> = when (voice) {
+        "warm" -> WARM_JUDGEMENTS[tier] ?: WARM_JUDGEMENTS.getValue("mid")
+        "brief" -> BRIEF_JUDGEMENTS[tier] ?: BRIEF_JUDGEMENTS.getValue("mid")
+        else -> JUDGEMENTS[tier] ?: JUDGEMENTS.getValue("mid")
+    }
 
-    /** 取某套语气的收尾句池（简短语气没有收尾）。 */
-    fun closersFor(voice: String?): List<String> =
-        when (normalizeVoice(voice)) {
-            "warm" -> WARM_CLOSERS
-            "brief" -> emptyList()
-            else -> CLOSERS
-        }
+    fun closersFor(voice: String): List<String> = when (voice) {
+        "warm" -> WARM_CLOSERS
+        "brief" -> emptyList()
+        else -> CLOSERS
+    }
 
     // ==================================================================
     // 本次运行的生成入口
@@ -256,7 +300,7 @@ class NoteGenerator(
     fun fromTemplate(work: Work, score: String): String {
         var text = ""
         for (salt in 0 until MAX_REROLL) {
-            val candidate = compose(seed(work, score, salt), score)
+            val candidate = compose(seed(work, score, salt), score, work)
             if (candidate.isNotEmpty() && candidate !in used) {
                 text = candidate
                 break
@@ -264,7 +308,7 @@ class NoteGenerator(
         }
         if (text.isEmpty()) {
             // 全撞车了就接受第一句，总比没有批注好
-            text = compose(seed(work, score, 0), score)
+            text = compose(seed(work, score, 0), score, work)
         }
         val fitted = fit(text)
         used.add(fitted)
@@ -289,17 +333,41 @@ class NoteGenerator(
     private fun pick(pool: List<String>, seed: Long): String =
         pool[(seed % pool.size).toInt()]
 
-    private fun compose(seed: Long, score: String): String {
+    /** 把 `{name}` 换成歌名；拿不到歌名就返回空串（调用方当没有这句）。 */
+    private fun fill(text: String, work: Work): String {
+        if (!text.contains("{name}")) return text
+        val name = work.name.trim()
+        return if (name.isEmpty()) "" else text.replace("{name}", name)
+    }
+
+    /** 按种子拼一句。排法也由种子决定，四种轮着来。 */
+    private fun compose(seed: Long, score: String, work: Work): String {
         val tier = Notes.tierForScore(score)
         val opener = pick(Notes.openersFor(), seed)
         val judgement = pick(Notes.judgementsFor(voice, tier), seed / 7)
+
         val closers = Notes.closersFor(voice)
-        if (closers.isEmpty()) {
-            // 简短语气：一句说完，不铺垫也不收尾
-            return "$opener$judgement。"
+        var closer = ""
+        if (closers.isNotEmpty()) closer = fill(pick(closers, seed / 31), work)
+
+        // 简短语气只有一句；收尾缺失（拿不到歌名）时也不硬凑
+        val format = if (voice == "brief" || closer.isEmpty()) {
+            "single"
+        } else {
+            Notes.FORMATS[(seed % Notes.FORMATS.size).toInt()]
         }
-        val closer = pick(closers, seed / 31)
-        return "$opener$judgement。$closer"
+
+        return when (format) {
+            "full" -> "$opener${sentence(judgement)}$closer"
+            "no_closer" -> "$opener${sentence(judgement)}"
+            "no_opener" -> "${sentence(judgement)}$closer"
+            else -> sentence(judgement)
+        }
+    }
+
+    /** 句子收尾统一一个句号；已经有的不重复加（简短语气的判断句自带句号）。 */
+    private fun sentence(text: String): String =
+        if (text.endsWith("。")) text else "$text。"
     }
 
     /** 把批注压到长度上限内：先丢收尾，再截断判断部分。 */
