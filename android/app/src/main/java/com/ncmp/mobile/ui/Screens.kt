@@ -386,6 +386,13 @@ fun MainScreen(vm: AppViewModel) {
 
 @Composable
 private fun Header(vm: AppViewModel) {
+    // 版本号取自安装包信息（项目没开 buildConfig，取 PackageManager 更稳）
+    val context = LocalContext.current
+    val versionName = remember(context) {
+        runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull().orEmpty()
+    }
     Column(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 22.dp)) {
         Row(
             Modifier.fillMaxWidth().padding(vertical = 16.dp),
@@ -398,7 +405,11 @@ private fun Header(vm: AppViewModel) {
                     fontWeight = FontWeight.Bold,
                     color = NCMP.Ink,
                 )
-                Text("ncmp", fontSize = 11.sp, color = NCMP.Muted)
+                Text(
+                    if (versionName.isEmpty()) "ncmp" else "ncmp · v$versionName",
+                    fontSize = 11.sp,
+                    color = NCMP.Muted,
+                )
             }
             IconButton(onClick = { vm.logout() }) {
                 Icon(Icons.Filled.Logout, contentDescription = "退出登录", tint = NCMP.Muted)

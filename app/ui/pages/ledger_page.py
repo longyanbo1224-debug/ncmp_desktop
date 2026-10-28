@@ -45,7 +45,7 @@ class LedgerPage(QWidget):
                                  theme.PAGE_MARGIN, theme.PAGE_MARGIN)
         outer.setSpacing(theme.SP_4)
 
-        title = QLabel("账本")
+        title = QLabel("记录")
         title.setObjectName("pageTitle")
         outer.addWidget(title)
 

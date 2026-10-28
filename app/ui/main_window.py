@@ -89,7 +89,7 @@ class MainWindow(QMainWindow):
         self._nav.setSpacing(2)
         self._nav.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         for text, key in (("首页", "home"), ("账号", "account"),
-                          ("今日", "task"), ("账本", "ledger"),
+                          ("今日", "task"), ("记录", "ledger"),
                           ("设置", "settings"), ("关于", "about")):
             item = QListWidgetItem(nav_icon(key), text)
             self._nav.addItem(item)

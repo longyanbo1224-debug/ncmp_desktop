@@ -143,7 +143,7 @@ FIELD_HINTS: Dict[str, Dict[str, str]] = {
     "note_enabled": {
         "tooltip": (
             "勾选后，评分时同时提交一条批注（乐评短句）。\n"
-            "批注会公开显示在你的账号下，可在「账本」里回看每一条。"),
+            "批注会公开显示在你的账号下，可在「记录」里回看每一条。"),
     },
     "note_voice": {
         "tooltip": (

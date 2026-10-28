@@ -1,7 +1,8 @@
-"""关于页 —— 版权页。
+"""关于页 —— 这个程序是什么、谁做的、基于什么。
 
-安静的定义列表：版本 / 作者 / 致谢 / 核心依赖 / 许可。
-宋体标题，次要色正文，没有别的。
+v1.2 起把这一页从"版权信息表"改成一页**能看懂来历**的说明：
+先说它是干什么的（一句话），再说它站在谁的肩膀上（上游 + 参考项目），
+最后才是版本、依赖、许可这些"查得到但不常看"的东西。
 """
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QGridLayout, QLabel, QVBoxLayout, QWidget
@@ -10,16 +11,29 @@ from app.ui import theme
 from app.version import GITHUB_REPO, RELEASES_URL, __version__
 
 APP_NAME = "ncmp desktop"
+APP_TAGLINE = "在电脑上把音乐合伙人的每日评分跑完，并留下今天的记录。"
+
 APP_DESCRIPTION = (
-    "基于 ACAne0320/ncmp 改造的桌面程序。本地执行音乐合伙人任务，"
-    "支持扫码/密码登录、任务可视化、GitHub Actions 云端触发。"
+    "登录你自己的网易云账号，按设定的评分策略给「音乐合伙人」的待评作品打分，"
+    "可以同时留下一条简短的批注。支持扫码/密码登录、本地定时与云端触发、"
+    "断点补跑与失败分类；今天的曲目、分数和批注会存成本地记录，随时回看或导出。"
 )
+
+#: 值得一提的参考来源（放在"致谢"里，写清抄了什么、没抄什么）
+REFERENCE_NOTE = (
+    "v1.2 的评分环节参考了 Grails125/ncmm：从它那里学到"
+    "「把评分当成留下一条批注来做」，并把每天的曲目与批注做成可回看的记录；"
+    "没有采用它的多账号并行与 WebUI/Docker 部署形态。"
+)
+
 AUTHOR = "Galvin"
 GITHUB_URL = f"https://github.com/{GITHUB_REPO}"
 GITHUB_LABEL = GITHUB_REPO
 UPSTREAM_URL = "https://github.com/ACAne0320/ncmp"
 UPSTREAM_LABEL = "ACAne0320/ncmp"
-LICENSE = "MIT License"
+REFERENCE_URL = "https://github.com/Grails125/ncmm"
+REFERENCE_LABEL = "Grails125/ncmm"
+LICENSE = "YanboLong Non-Commercial License（基于 MIT 修改）"
 
 
 def _link(url: str, label: str) -> str:
@@ -54,9 +68,21 @@ class AboutPage(QWidget):
 
         layout.addSpacing(theme.SP_2)
 
-        version = QLabel(f"版本 {__version__}")
-        version.setObjectName("captionText")
-        layout.addWidget(version)
+        # 一句话说清它是干什么的：这一行是全页最重要的内容
+        tagline = QLabel(APP_TAGLINE)
+        tagline.setObjectName("displayStatement")
+        tagline.setWordWrap(True)
+        tagline.setMaximumWidth(theme.CAPTION_MAX_WIDTH + 120)
+        layout.addWidget(tagline)
+
+        layout.addSpacing(theme.SP_3)
+
+        version_row = QLabel(
+            f"版本 {__version__}　·　{_link(RELEASES_URL, '更新说明')}")
+        version_row.setObjectName("captionText")
+        version_row.setOpenExternalLinks(True)
+        version_row.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        layout.addWidget(version_row)
 
         # 更新入口：默认隐藏，后台查到新版本才出现（见 set_update_available）
         self._update_label = QLabel("")
@@ -67,6 +93,14 @@ class AboutPage(QWidget):
 
         layout.addSpacing(theme.SP_6)
 
+        desc = QLabel(APP_DESCRIPTION)
+        desc.setObjectName("subtitle")
+        desc.setWordWrap(True)
+        desc.setMaximumWidth(theme.CAPTION_MAX_WIDTH)
+        layout.addWidget(desc)
+
+        layout.addSpacing(theme.SP_6)
+
         grid = QGridLayout()
         grid.setHorizontalSpacing(theme.SP_5)
         grid.setVerticalSpacing(theme.SP_3)
@@ -74,10 +108,11 @@ class AboutPage(QWidget):
 
         rows = [
             ("作者", AUTHOR, False),
-            ("致谢", _link(UPSTREAM_URL, UPSTREAM_LABEL), True),
+            ("上游项目", _link(UPSTREAM_URL, UPSTREAM_LABEL), True),
+            ("参考项目", _link(REFERENCE_URL, REFERENCE_LABEL), True),
+            ("GitHub", _link(GITHUB_URL, GITHUB_LABEL), True),
             ("核心依赖", self._deps_text(), False),
             ("许可", LICENSE, False),
-            ("GitHub", _link(GITHUB_URL, GITHUB_LABEL), True),
         ]
         for i, (key, value, is_html) in enumerate(rows):
             key_label = QLabel(key)
@@ -96,13 +131,23 @@ class AboutPage(QWidget):
 
         layout.addLayout(grid)
 
-        layout.addSpacing(theme.SP_6)
+        layout.addSpacing(theme.SP_4)
 
-        desc = QLabel(APP_DESCRIPTION)
-        desc.setObjectName("captionText")
-        desc.setWordWrap(True)
-        desc.setMaximumWidth(560)
-        layout.addWidget(desc)
+        note = QLabel(REFERENCE_NOTE)
+        note.setObjectName("captionText")
+        note.setWordWrap(True)
+        note.setMaximumWidth(theme.CAPTION_MAX_WIDTH)
+        layout.addWidget(note)
+
+        layout.addSpacing(theme.SP_4)
+
+        disclaimer = QLabel(
+            "非官方第三方程序，与网易云音乐无关联；仅供个人学习、研究和技术交流，"
+            "使用风险自负。批注会以你自己的身份公开发布，请自行确认内容。")
+        disclaimer.setObjectName("captionText")
+        disclaimer.setWordWrap(True)
+        disclaimer.setMaximumWidth(theme.CAPTION_MAX_WIDTH)
+        layout.addWidget(disclaimer)
 
         layout.addStretch(1)
 

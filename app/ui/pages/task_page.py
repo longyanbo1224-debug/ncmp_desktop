@@ -819,7 +819,7 @@ class TaskPage(QWidget):
 
         if ok:
             summary = "云端执行成功"
-            self._set_status("云端跑完了。曲目与批注请在「账本」里回看。", "successText")
+            self._set_status("云端跑完了。曲目与批注请在「记录」里回看。", "successText")
             self._meter.set_state("success")
             self._meter.set_progress(100)
             self._percent_label.setText("100%")
