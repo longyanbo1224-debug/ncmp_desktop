@@ -14,9 +14,11 @@ import com.ncmp.mobile.TaskService
 import com.ncmp.mobile.data.AlarmScheduler
 import com.ncmp.mobile.data.HistoryEntry
 import com.ncmp.mobile.data.NeteaseApi
+import com.ncmp.mobile.data.Notes
 import com.ncmp.mobile.data.SessionStore
 import com.ncmp.mobile.data.TaskBus
 import com.ncmp.mobile.data.TaskHistoryStore
+import com.ncmp.mobile.data.TrackItem
 import kotlinx.coroutines.launch
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -62,6 +64,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var waitMax by mutableStateOf(formatNum(store.waitMax))
     var fullExtra by mutableStateOf(store.fullExtra)
 
+    // 批注（乐评文案）
+    var noteEnabled by mutableStateOf(store.noteEnabled)
+    var noteVoice by mutableStateOf(store.noteVoice)
+    var noteMaxChars by mutableStateOf(store.noteMaxChars)
+
+    /** 今日曲目表：今天评了哪几首、每首几分、留下了什么批注。 */
+    var tracks by mutableStateOf<List<TrackItem>>(emptyList())
+        private set
+
     var scheduleEnabled by mutableStateOf(store.scheduleEnabled)
     var scheduleTimeText by mutableStateOf("%02d:%02d".format(store.scheduleHour, store.scheduleMinute))
 
@@ -106,12 +117,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { TaskBus.resultHint.collect { resultHint = it } }
         viewModelScope.launch { TaskBus.resultSummary.collect { resultSummary = it } }
         viewModelScope.launch { TaskBus.resultIsError.collect { resultIsError = it } }
+        viewModelScope.launch { TaskBus.tracks.collect { tracks = it } }
     }
 
     private fun loadSession() {
         val musicU = store.musicU
         val csrf = store.csrf
         if (!musicU.isNullOrEmpty() && !csrf.isNullOrEmpty()) {
+            // 登录态来自存储时也要把值填进「Cookie」页的输入框，
+            // 否则直接退出登录后去看那一页会是空的（只有网页登录流程才会填）。
+            cookieMusicU = musicU
+            cookieCsrf = csrf
             api.musicU = musicU
             api.csrf = csrf
             loggedIn = true
@@ -210,6 +226,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun logout() {
+        // 退出前先把当前登录态写回输入框：用户退出后常去「Cookie」页核对上次的值，
+        // 这时候界面必须还看得见 MUSIC_U / __csrf（否则一片空白）。
+        val lastMusicU = api.musicU ?: store.musicU
+        val lastCsrf = api.csrf ?: store.csrf
+        if (!lastMusicU.isNullOrEmpty()) cookieMusicU = lastMusicU
+        if (!lastCsrf.isNullOrEmpty()) cookieCsrf = lastCsrf
         store.clearAuth()
         api.musicU = null
         api.csrf = null
@@ -218,7 +240,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         resultLabel = ""
         resultHint = ""
         resultIsError = false
-        // 保留 cookieMusicU / cookieCsrf，方便在「Cookie」页查看上次获取的值
+        // cookieMusicU / cookieCsrf 刻意保留，方便在「Cookie」页查看上次获取的值
     }
 
     // ================= 配置 =================
@@ -231,6 +253,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         store.waitMax = max
         val (h, m) = parseTime(scheduleTimeText) ?: (9 to 0)
         store.fullExtra = fullExtra
+        store.noteEnabled = noteEnabled
+        store.noteVoice = Notes.normalizeVoice(noteVoice)
+        store.noteMaxChars = noteMaxChars.coerceIn(10, 200)
+        noteVoice = Notes.normalizeVoice(noteVoice)
+        noteMaxChars = noteMaxChars.coerceIn(10, 200)
         store.scheduleEnabled = scheduleEnabled
         store.scheduleHour = h
         store.scheduleMinute = m
@@ -259,6 +286,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             TaskBus.append("等待上限不能小于下限，请检查设置")
             return
         }
+        // 批注设置即时生效：开始评分前落盘，保证前台服务读到的是界面上看到的值
+        // （note_source 不在这里改：手机端没有 LLM，生成器自己按 template 处理）
+        store.noteEnabled = noteEnabled
+        store.noteVoice = Notes.normalizeVoice(noteVoice)
+        store.noteMaxChars = noteMaxChars.coerceIn(10, 200)
         val app = getApplication<Application>()
         val intent = Intent(app, TaskService::class.java).apply {
             putExtra(TaskService.EXTRA_SCORE, scoreStrategy)

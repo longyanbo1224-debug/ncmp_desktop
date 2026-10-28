@@ -11,13 +11,15 @@ class MusicPartnerBot:
     def __init__(self, config: Config, logger: Logger, session: requests.Session,
                  on_step: Optional[Callable[[str, str, float], None]] = None,
                  on_progress: Optional[Callable[[int, Optional[int], str, str], None]] = None,
-                 cancel_event: Optional[threading.Event] = None):
+                 cancel_event: Optional[threading.Event] = None,
+                 on_note: Optional[Callable[[dict, str, str], None]] = None):
         self.config = config
         self.logger = logger
         self.session = session
         # 桌面版新增的回调与取消支持
         self.on_step = on_step            # callback(name, status, elapsed)
         self.on_progress = on_progress    # callback(done, total, song_name, score)
+        self.on_note = on_note            # callback(work, score, note)
         self.cancel_event = cancel_event  # threading.Event
         self.t0 = 0.0
         self._current_step = ""
@@ -56,6 +58,7 @@ class MusicPartnerBot:
                 self.session, self.logger, self.config,
                 on_progress=self.on_progress,
                 cancel_event=self.cancel_event,
+                on_note=self.on_note,
             )
             complete, task_data = daily_task._get_daily_tasks()
             self._step("拉取每日任务", "success")
@@ -72,6 +75,7 @@ class MusicPartnerBot:
                 self.session, self.logger, self.config,
                 on_progress=self.on_progress,
                 cancel_event=self.cancel_event,
+                on_note=self.on_note,
             )
             extra_task.process_extra_tasks(task_data["id"])
             self._step("额外评分任务", "success")

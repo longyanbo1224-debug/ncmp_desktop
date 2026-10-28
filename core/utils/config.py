@@ -247,6 +247,13 @@ class Config:
         config.setdefault("smtp_port", 465)
         config.setdefault("score", 3)  # 默认使用3-4分策略
         config.setdefault("full_extra_tasks", True)
+        # 批注（乐评文案）：随评分一起提交到 comment 字段
+        config.setdefault("note_enabled", True)
+        config.setdefault("note_source", "template")  # template | llm
+        config.setdefault("note_max_chars", 80)
+        config.setdefault("note_voice", "restrained")  # restrained | warm | brief
+        # 用户点过"这一首不写批注"的歌曲（值可以是 work id 或歌名）
+        config.setdefault("note_muted_songs", [])
         # 邮件通知开关（默认勾选）
         config.setdefault("notify_on_task_done", True)
         config.setdefault("notify_on_cookie_expired", True)

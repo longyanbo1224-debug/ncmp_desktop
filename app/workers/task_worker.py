@@ -30,6 +30,8 @@ class TaskWorker(QThread):
     step = Signal(str, str, float)
     # done, total, song_name, score
     progress = Signal(int, int, str, str)
+    # song_name, score, note —— 批注提交成功后发出，供曲目表把"留下了什么话"落到行上
+    note = Signal(str, str, str)
     # (ok, status, kind)，status ∈ {"success", "cancelled", "failed"}，
     # kind 是失败原因分类（见 core/utils/errors.py），成功时为空
     finished_sig = Signal(bool, str, str)
@@ -126,6 +128,7 @@ class TaskWorker(QThread):
             on_step=self._on_step,
             on_progress=self._on_progress,
             cancel_event=self.cancel_event,
+            on_note=self._on_note,
         )
         try:
             ok = bot.run()
@@ -212,6 +215,15 @@ class TaskWorker(QThread):
         # total 可能为 None
         self.progress.emit(int(done), int(total) if total is not None else 0,
                            str(song_name), str(score))
+
+    def _on_note(self, work, score: str, note: str) -> None:
+        """批注提交成功：转成信号发给界面（core 线程 → 主线程）。"""
+        name = ""
+        try:
+            name = str(work.get("name", "") or "")
+        except Exception:
+            name = ""
+        self.note.emit(name, str(score), str(note))
 
     def _build_session_from_store(self) -> Optional[requests.Session]:
         """从 CookieStore 构造 requests.Session。"""

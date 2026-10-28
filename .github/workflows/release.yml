@@ -1,0 +1,108 @@
+name: release
+
+# 打一个 v* 的 tag 就会：编译桌面端 exe + 手机端 APK，然后自动建一个 GitHub Release
+# 并把两个包挂上去。也可以在 Actions 页面手动点「Run workflow」（只构建、不发布）。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ------------------------------------------------------------------
+  # 桌面端：Windows 上跑 PyInstaller，产物是 dist 目录打成的 zip
+  # ------------------------------------------------------------------
+  build-desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: 打包（PyInstaller spec）
+        run: pyinstaller "ncmp desktop.spec" --noconfirm
+
+      - name: 压缩产物
+        run: Compress-Archive -Path dist/* -DestinationPath "ncmp-desktop-${{ github.ref_name }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop
+          path: ncmp-desktop-*.zip
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------
+  # 手机端：Gradle 出 debug APK（仓库里没有 release 签名配置，先发 debug 包）
+  # ------------------------------------------------------------------
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Gradle 缓存
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+
+      - name: 编译 debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------
+  # 发布：只有打 tag 时才建 Release
+  # ------------------------------------------------------------------
+  publish:
+    needs: [build-desktop, build-android]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 整理产物
+        run: |
+          mkdir -p release
+          find artifacts -name "*.zip" -exec cp {} release/ \;
+          find artifacts -name "*.apk" -exec cp {} release/ \;
+          ls -lh release
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          body: |
+            对应 tag：${{ github.ref_name }}
+
+            桌面端：解压 zip 后运行 ncmp desktop.exe（配置与旧版兼容，不会覆盖 setting.json）。
+            手机端：debug APK，安装前需允许「安装未知来源应用」。

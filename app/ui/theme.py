@@ -104,6 +104,125 @@ _SCROLL_HANDLE_HOVER = "#B0B0B0"
 METER_TRACK = _METER_TRACK
 
 # ----------------------------------------------------------------------
+# 深色主题（"夜间值班"）
+# ----------------------------------------------------------------------
+# 深色**不是把浅色反相**：浅色里"面板比底色白"的层级，在深色里靠"面板比底色
+# 亮一档"维持同一方向（面板永远比底亮）。两套主题因此共享同一组层级语义。
+#
+# 实现方式：把下面这张表里的同名全局变量**就地覆盖**。全程序的取值都写成
+# ``theme.X``（模块属性访问），所以覆盖后各处自然拿到新值；``build_qss``
+# 本身也是在调用时才读全局变量，因此重新 build 即得深色样式表。
+#
+# 已知限制：只在启动时决定（跟随系统），不做运行中切换——运行中切换需要
+# 重建所有已经构造好的控件，收益远小于代价。
+_DARK_OVERRIDE = {
+    "GROUND": "#121416",
+    "PANEL": "#191C1F",
+    "INK": "#E8E9EA",
+    "MUTED": "#9AA0A4",
+    "RULE": "#2A2E31",
+    "BRAND": "#E85256",
+    "BRAND_HOVER": "#F0666A",
+    "BRAND_PRESSED": "#C93F44",
+    "BRAND_DISABLED": "#5C2A2D",
+    "BRAND_SOFT": "rgba(232, 82, 86, 0.14)",
+    "BRAND_SOFT_HOVER": "rgba(232, 82, 86, 0.22)",
+    "RUNNING_FILL": "#E0A85C",
+    "RUNNING_TEXT": "#E0A85C",
+    "SUCCESS": "#4FA97C",
+    "FAILED": "#E06A5E",
+    "PENDING_FILL": "#6E7377",
+    "PENDING_TEXT_DARK": "#9AA0A4",
+}
+
+_DARK_INTERNALS = {
+    "_HOVER_BG": "#22262A",
+    "_PRESSED_BG": "#2A2E32",
+    "_DISABLED_BG": "#1E2225",
+    "_DISABLED_FG": "#5E6367",
+    "_DISABLED_BORDER": "#2A2E31",
+    "_HOVER_BORDER": "#3A3F43",
+    "_METER_TRACK": "#2C3033",
+    "_SCROLL_HANDLE": "#3A3F43",
+    "_SCROLL_HANDLE_HOVER": "#4A5054",
+}
+
+#: 当前主题模式："light" / "dark"
+_mode = "light"
+
+#: 浅色原值快照，用于在明暗之间来回切换（测试与用户手动切换都要用到）
+_LIGHT_SNAPSHOT: dict = {}
+
+
+def _snapshot_light() -> None:
+    """把当前（浅色）全局色值记下来，供 set_mode 来回切。"""
+    if _LIGHT_SNAPSHOT:
+        return
+    names = list(_DARK_OVERRIDE) + list(_DARK_INTERNALS) + ["PENDING_TEXT"]
+    for name in names:
+        value = globals().get(name)
+        if value is not None:
+            _LIGHT_SNAPSHOT[name] = value
+
+
+def set_mode(mode: str) -> str:
+    """切换明暗主题，返回实际生效的模式。
+
+    覆盖模块全局色值 + 重算状态色表。调用方随后应重新 ``build_qss()``
+    并 setStyleSheet（``apply_theme`` 已经这么做）。
+    """
+    global _mode, STATE_FILL, STATE_TEXT
+    _snapshot_light()
+    mode = "dark" if str(mode).lower() == "dark" else "light"
+    if mode == "dark":
+        globals().update(_DARK_INTERNALS)
+        for name, value in _DARK_OVERRIDE.items():
+            if name == "PENDING_TEXT_DARK":
+                continue
+            globals()[name] = value
+        globals()["PENDING_TEXT"] = _DARK_OVERRIDE["PENDING_TEXT_DARK"]
+    else:
+        globals().update(_LIGHT_SNAPSHOT)
+    _mode = mode
+    # 状态色表是派生的，必须跟着重算
+    STATE_FILL = {
+        "running": globals()["RUNNING_FILL"],
+        "success": globals()["SUCCESS"],
+        "failed": globals()["FAILED"],
+        "pending": globals()["PENDING_FILL"],
+        "cancelled": globals()["PENDING_FILL"],
+    }
+    STATE_TEXT = {
+        "running": globals()["RUNNING_TEXT"],
+        "success": globals()["SUCCESS"],
+        "failed": globals()["FAILED"],
+        "pending": globals()["PENDING_TEXT"],
+        "cancelled": globals()["PENDING_TEXT"],
+    }
+    return mode
+
+
+def current_mode() -> str:
+    return _mode
+
+
+def detect_system_mode() -> str:
+    """跟随系统深浅色：Windows 读注册表，其余平台默认浅色。"""
+    if sys.platform != "win32":
+        return "light"
+    try:
+        import winreg
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+        ) as key:
+            value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            return "light" if int(value) else "dark"
+    except Exception:
+        return "light"
+
+
+# ----------------------------------------------------------------------
 # 字体
 # ----------------------------------------------------------------------
 # 前两个是随包分发的子集化字体（OFL，见 app/ui/fonts/OFL.txt）；
@@ -123,7 +242,7 @@ FONT_DATA = 'Consolas, "Cascadia Mono", monospace'
 # 比值 34/20/15/13/12 —— 底部三档挨得近是 UI 阶梯的正常形态，
 # 正文和说明本来就不需要拉开距离，靠字重和颜色区分就够。
 FS_DISPLAY = 34
-FS_TITLE = 20
+FS_TITLE = 22      # 页标题与日期（v1.2 从 20 提到 22，配合"值班簿"的页头）
 FS_HEADING = 15
 FS_BODY = 13
 FS_CAPTION = 12
@@ -513,6 +632,74 @@ QLabel#toast {
     font-size: ${FS_BODY}px;
 }
 
+/* ---- 曲目表（v1.2 核心组件，见 docs/DESIGN.md §4.1）----
+   曲目行不是卡片：没有圆角、没有阴影，只有序号、名字、档位和一条细线。
+   批注用宋体，是"引文"不是"数据"，所以不走等宽。 */
+QLabel#trackIndex {
+    font-family: $FONT_DISPLAY;
+    font-size: ${FS_CAPTION}px;
+    color: $MUTED;
+}
+
+QLabel#trackName {
+    font-family: $FONT_DISPLAY;
+    font-size: ${FS_HEADING}px;
+    font-weight: 600;
+    color: $INK;
+}
+
+QLabel#trackMeta {
+    font-size: ${FS_CAPTION}px;
+    color: $MUTED;
+}
+
+/* 档位标：4⁄5。属于展示层，用宋体表格式数字，不用等宽 */
+QLabel#tierMark {
+    font-family: $FONT_DISPLAY;
+    font-size: ${FS_HEADING}px;
+    font-weight: 600;
+    color: $INK;
+}
+
+QLabel#trackState {
+    font-size: ${FS_CAPTION}px;
+    color: $MUTED;
+}
+
+QLabel#noteText {
+    font-family: $FONT_DISPLAY;
+    font-size: ${FS_BODY}px;
+    color: $INK;
+}
+
+QLabel#noteTextEmpty {
+    font-family: $FONT_DISPLAY;
+    font-size: ${FS_BODY}px;
+    color: $MUTED;
+}
+
+/* 批注左侧的竖线：引文标记 */
+QFrame#noteRule {
+    background-color: $RULE;
+    border: none;
+    min-width: 1px;
+    max-width: 1px;
+}
+
+/* 曲目行之间的分隔线 */
+QFrame#rowRule {
+    background-color: $RULE;
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}
+
+/* 折叠区标题（运行详情） */
+QLabel#disclosure {
+    color: $BRAND;
+    font-size: ${FS_CAPTION}px;
+}
+
 /* ---- 应用内通知气泡（右下角，见 widgets/toast.py）----
    系统托盘气泡的样式由操作系统决定，改不了，所以自己画一个。 */
 QWidget#toastPanel {
@@ -811,17 +998,20 @@ def reduced_motion() -> bool:
         return False
 
 
-def apply_theme(app) -> None:
+def apply_theme(app, mode: str = "") -> None:
     """把主题套到 QApplication 上：Fusion 风格 + 随包字体 + 生成的样式表。
 
     用 Fusion 而不是 Windows 原生风格：Fusion 对各控件的渲染更一致，
     也更听 QSS 的话，不会出现原生控件和新配色打架的情况。
+
+    :param mode: "light" / "dark"；留空则跟随系统深浅色设置。
     """
     try:
         app.setStyle("Fusion")
     except Exception:
         pass
     load_bundled_fonts()
+    set_mode(mode or detect_system_mode())
     try:
         app.setStyleSheet(build_qss())
     except Exception:

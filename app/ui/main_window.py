@@ -33,6 +33,7 @@ from app.ui.pages.about_page import AboutPage
 from app.ui.pages.dashboard_page import DashboardPage
 from app.ui.pages.login_page import LoginPage
 from app.ui.pages.settings_page import SettingsPage
+from app.ui.pages.ledger_page import LedgerPage
 from app.ui.pages.task_page import TaskPage
 from app.ui.widgets.log_view import GuiLogHandler
 from app.ui.widgets.tray_icon import TrayIcon
@@ -88,8 +89,8 @@ class MainWindow(QMainWindow):
         self._nav.setSpacing(2)
         self._nav.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         for text, key in (("首页", "home"), ("账号", "account"),
-                          ("任务", "task"), ("设置", "settings"),
-                          ("关于", "about")):
+                          ("今日", "task"), ("账本", "ledger"),
+                          ("设置", "settings"), ("关于", "about")):
             item = QListWidgetItem(nav_icon(key), text)
             self._nav.addItem(item)
         self._nav.setCurrentRow(0)
@@ -101,11 +102,13 @@ class MainWindow(QMainWindow):
         self._dashboard = DashboardPage()
         self._login = LoginPage()
         self._task = TaskPage()
+        self._ledger = LedgerPage()
         self._settings = SettingsPage()
         self._about = AboutPage()
         self._stack.addWidget(self._dashboard)
         self._stack.addWidget(self._login)
         self._stack.addWidget(self._task)
+        self._stack.addWidget(self._ledger)
         self._stack.addWidget(self._settings)
         self._stack.addWidget(self._about)
         self._stack.setCurrentIndex(0)
@@ -136,7 +139,7 @@ class MainWindow(QMainWindow):
         # Dashboard 快捷按钮
         self._dashboard.run_task.connect(self._goto_task_and_run)
         self._dashboard.goto_login.connect(lambda: self._goto_page(1))
-        self._dashboard.goto_settings.connect(lambda: self._goto_page(3))
+        self._dashboard.goto_settings.connect(lambda: self._goto_page(4))
         self._dashboard.refresh_cookie.connect(self._refresh_cookie_status)
 
         # 登录成功 → 刷新 Cookie 卡片 + 跳回首页
@@ -144,7 +147,7 @@ class MainWindow(QMainWindow):
 
         # 任务页 Cookie 预检失败 → 跳登录页
         self._task.goto_login.connect(lambda: self._goto_page(1))
-        self._task.goto_settings.connect(lambda: self._goto_page(3))
+        self._task.goto_settings.connect(lambda: self._goto_page(4))
         # 云端 worker 完成 → 托盘通知（定时 + 手动都走这条）
         self._task.cloud_finished_sig.connect(self._on_schedule_cloud_finished)
 
@@ -207,6 +210,9 @@ class MainWindow(QMainWindow):
                 # 进入登录页时启动扫码
                 self._login.start()
             elif row == 3:
+                # 进入账本页时重读本地记录（曲目/批注可能刚被别处写入）
+                self._ledger.refresh()
+            elif row == 4:
                 # 进入设置页时从磁盘重读 AppConfig（close_action 可能被关闭弹窗修改）
                 self._settings.refresh_app_config()
 
@@ -221,7 +227,7 @@ class MainWindow(QMainWindow):
     def _goto_about(self) -> None:
         """托盘「关于」入口：显示主窗口并跳关于页。"""
         self._show_and_raise()
-        self._nav.setCurrentRow(4)
+        self._nav.setCurrentRow(5)
 
     def _refresh_cookie_status(self) -> None:
         self._dashboard.refresh_cookie_card()

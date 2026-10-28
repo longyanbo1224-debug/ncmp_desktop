@@ -34,6 +34,7 @@ NAV_ICONS = {
     "home": "ph.house",
     "account": "ph.key",
     "task": "ph.play-circle",
+    "ledger": "ph.books",
     "settings": "ph.gear-six",
     "about": "ph.info",
 }

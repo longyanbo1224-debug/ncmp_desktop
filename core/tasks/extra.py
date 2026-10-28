@@ -5,12 +5,15 @@ from typing import Dict, List, Tuple, Optional
 from core import CancelledError
 from ..signer import Signer
 class ExtraTask:
-    def __init__(self, session, logger, config, on_progress=None, cancel_event=None):
+    def __init__(self, session, logger, config, on_progress=None, cancel_event=None,
+                 on_note=None):
         self.session = session
         self.logger = logger
         self.config = config
         self.on_progress = on_progress
         self.cancel_event = cancel_event
+        # callback(work, score, note)：批注提交后回调界面
+        self.on_note = on_note
         self.api = {
             "extra_list": "https://interface.music.163.com/api/music/partner/extra/wait/evaluate/work/list",
             "report_listen": "https://interface.music.163.com/weapi/partner/resource/interact/report"
@@ -155,6 +158,7 @@ class ExtraTask:
                 cancel_event=self.cancel_event,
                 total=total,
                 done_offset=done_offset,
+                on_note=self.on_note,
             )
             signer.sign(work, is_extra=True)
         except CancelledError:

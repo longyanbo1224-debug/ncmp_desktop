@@ -24,6 +24,12 @@ class TaskRunner(
     private val onStep: (String, String) -> Unit,
     private val onProgress: (Int, Int, String, String) -> Unit,
     private val onPercent: (Int) -> Unit,
+    // callback(song, score, note)：批注提交成功后通知界面
+    private val onNote: (String, String, String) -> Unit = { _, _, _ -> },
+    // callback(works)：今日待评队列，先把曲目行"待评"地摆出来
+    private val onQueue: (List<Work>) -> Unit = {},
+    // callback(work, state)：单曲状态变化（评分中 / 跳过 / 失败）
+    private val onTrack: (Work, String) -> Unit = { _, _ -> },
 ) {
     @Volatile var cancelled = false
     private var currentStep = ""
@@ -46,6 +52,11 @@ class TaskRunner(
         baseDone = 0
         extraDone = 0
         extraAllDone = false
+        Notes.resetRun()
+        if (config.noteSource.equals("llm", ignoreCase = true)) {
+            // 手机端没有 LLM：选了 llm 也走本地模板，说清楚比悄悄回落好
+            log("手机端不接 LLM，批注仍用本地模板生成")
+        }
         try {
             checkCancel()
             step("验证用户信息", "running")
@@ -164,6 +175,8 @@ class TaskRunner(
         var done = 0
         val total = pending.size
         planScoring(total)
+        // 今日曲目先整体摆成「待评」，评分结果回来再逐条改状态
+        onQueue(pending)
         onProgress(0, total, "", "")
         phaseProgress(0, total)
         for (work in pending) {
@@ -184,19 +197,28 @@ class TaskRunner(
 
     private suspend fun sign(work: Work, taskId: Any, isExtra: Boolean, onScored: (Work, String) -> Unit) {
         checkCancel()
+        onTrack(work, TrackState.RUNNING)
         val delaySec = randomWait()
         log("等待 %.1f 秒后继续...".format(delaySec))
         sleepCancellable(delaySec)
 
         val score = scoreFor(work)
         val tag = "$score-A-1"
+        // 批注随评分一次提交；noteEnabled 关闭时为空串（等同于旧版行为）
+        val comment = Notes.generate(
+            work = work,
+            score = score,
+            enabled = config.noteEnabled,
+            voice = config.noteVoice,
+            maxChars = config.noteMaxChars,
+        )
         val data = JSONObject().apply {
             put("taskId", taskId)
             put("workId", work.id)
             put("score", score)
             put("tags", tag)
             put("customTags", "%5B%5D")
-            put("comment", "")
+            put("comment", comment)
             put("syncYunCircle", "true")
             if (isExtra) put("extraResource", "true")
         }
@@ -209,6 +231,11 @@ class TaskRunner(
             if (code == 200) {
                 log("${work.name}「${work.authorName}」评分完成：${score}分")
                 onScored(work, score)
+                // 批注单独一条日志 + 单独回调：界面靠它把"留下了什么话"落到曲目行上
+                if (comment.isNotEmpty()) {
+                    log("批注已提交：$comment")
+                    onNote(work.name, score, comment)
+                }
                 return
             }
             val msg = resp.optString("message", resp.optString("msg", "未知错误"))
@@ -220,13 +247,17 @@ class TaskRunner(
                 }
                 code == 405 && msg.contains("资源状态异常") -> {
                     log("歌曲「${work.name}」资源状态异常，跳过")
+                    onTrack(work, TrackState.SKIPPED)
                     return
                 }
                 code == 405 && msg.contains("没有更多") -> {
                     // 今天没有可评的歌了：这是完成信号，不是额度异常
                     throw NoMoreWorksException(msg)
                 }
-                else -> throw RuntimeException("评分失败: $msg (响应码: $code)")
+                else -> {
+                    onTrack(work, TrackState.FAILED)
+                    throw RuntimeException("评分失败: $msg (响应码: $code)")
+                }
             }
         }
     }
@@ -256,6 +287,8 @@ class TaskRunner(
             return
         }
         log("发现 ${uncompleted.size} 个待额外评定任务")
+        // 额外任务也先摆进曲目表：只摆这一轮真正要评的那些
+        onQueue(if (target < uncompleted.size) uncompleted.take(target).map { it.work } else uncompleted.map { it.work })
 
         var success = 0
         onProgress(0, target, "", "")

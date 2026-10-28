@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -37,6 +39,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -81,12 +84,16 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.ncmp.mobile.R
 import com.ncmp.mobile.data.DayRecord
+import com.ncmp.mobile.data.Notes
+import com.ncmp.mobile.data.TrackItem
+import com.ncmp.mobile.data.TrackState
 import com.ncmp.mobile.data.gridDays
 import com.ncmp.mobile.data.groupDays
 import com.ncmp.mobile.data.streakDays
@@ -352,11 +359,14 @@ fun MainScreen(vm: AppViewModel) {
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 22.dp),
             ) {
+                // 主视角是曲目表；日志退成兜底（docs/DESIGN.md §5 手机）
                 HeroSection(vm)
                 ThinRule()
-                ConfigSection(vm)
+                TrackListSection(vm)
                 ThinRule()
-                LogSection(vm)
+                RunDetailSection(vm)
+                ThinRule()
+                ConfigSection(vm)
             }
         } else {
             Column(
@@ -395,39 +405,39 @@ private fun Header(vm: AppViewModel) {
     }
 }
 
-/** 主角：状态 + 当前歌曲 + 分段电平表 + 主操作。全部坐在底色上，不套卡片。 */
+/**
+ * 页头：日期（宋体 22）+ 一句状态陈述 + 一条细电平表 + 全宽主按钮。
+ *
+ * 这一行是页面的"话"，其余都是它的注脚（docs/DESIGN.md §5 手机）。
+ */
 @Composable
 private fun HeroSection(vm: AppViewModel) {
     val isCancelled = vm.resultLabel == "已取消"
 
-    val title: String
-    val titleColor: Color
-    val sub: String
+    // 进度以曲目表为准：它在整轮运行里不会因为阶段切换而回零
+    val total = vm.tracks.size
+    val done = vm.tracks.count { it.state == TrackState.DONE }
+    val notes = vm.tracks.count { it.note.isNotBlank() }
+    val tally = "今日 $done/$total · 已提交 $notes 条批注"
+
+    val statusLine: String
+    val statusColor: Color
     when {
         vm.running -> {
-            title = "正在评分"
-            titleColor = NCMP.AmberText
-            sub = vm.currentStep.ifEmpty { "准备中…" }
+            statusLine = "评分中 · $tally"
+            statusColor = NCMP.AmberText
         }
         vm.resultLabel.isNotEmpty() && vm.resultIsError -> {
-            title = "执行失败"
-            titleColor = NCMP.Red
-            sub = vm.resultHint.ifEmpty { vm.resultLabel }
+            statusLine = "这次没跑完：${vm.resultLabel.removePrefix("失败：")}"
+            statusColor = NCMP.Red
         }
         vm.resultLabel.isNotEmpty() && isCancelled -> {
-            title = "已取消"
-            titleColor = NCMP.Muted
-            sub = "随时可以重新开始"
-        }
-        vm.resultLabel.isNotEmpty() -> {
-            title = "今天完成"
-            titleColor = NCMP.Green
-            sub = vm.resultSummary.ifEmpty { "共 ${vm.progressTotal} 首已评分" }
+            statusLine = "已取消 · $tally"
+            statusColor = NCMP.Muted
         }
         else -> {
-            title = "今日评分"
-            titleColor = NCMP.Ink
-            sub = "点下方按钮开始"
+            statusLine = tally
+            statusColor = NCMP.Muted
         }
     }
 
@@ -446,37 +456,17 @@ private fun HeroSection(vm: AppViewModel) {
         else -> NCMP.Brand
     }
 
-    Column(Modifier.fillMaxWidth().padding(top = 22.dp, bottom = 20.dp)) {
-        Text(title, fontFamily = FontFamily.Serif, fontSize = 32.sp, fontWeight = FontWeight.Bold, color = titleColor)
-        Spacer(Modifier.height(4.dp))
-        Text(sub, fontSize = 13.sp, color = NCMP.Muted)
-
-        if (vm.running && vm.currentSong.isNotEmpty()) {
-            Spacer(Modifier.height(18.dp))
-            Text(
-                vm.currentSong,
-                fontFamily = FontFamily.Serif,
-                fontSize = 21.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = NCMP.Ink,
-                maxLines = 2,
-            )
-            val meta = buildString {
-                append("${vm.progressDone}/${vm.progressTotal}")
-                if (vm.percent > 0) append("  ·  ${vm.percent}%")
-                if (vm.currentScore.isNotEmpty()) append("  ·  ${vm.currentScore} 分")
-            }
-            Spacer(Modifier.height(3.dp))
-            Text(meta, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = NCMP.Muted)
-        }
-
-        Spacer(Modifier.height(18.dp))
-        SegmentedMeter(
-            progress = meterProgress,
-            color = meterColor,
-            modifier = Modifier.fillMaxWidth().height(18.dp),
+    Column(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 16.dp)) {
+        Text(
+            todayLine(),
+            fontFamily = FontFamily.Serif,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            color = NCMP.Ink,
         )
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(6.dp))
+        Text(statusLine, fontSize = 13.sp, color = statusColor)
+        Spacer(Modifier.height(16.dp))
 
         if (vm.running) {
             OutlinedButton(
@@ -494,16 +484,176 @@ private fun HeroSection(vm: AppViewModel) {
             ) {
                 Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(22.dp))
                 Spacer(Modifier.width(6.dp))
+                Text("开始评分", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        // 电平表收成一条细带，压在页头下方：它说明"进行到哪了"，但不再是主角
+        Spacer(Modifier.height(16.dp))
+        SegmentedMeter(
+            progress = meterProgress,
+            color = meterColor,
+            modifier = Modifier.fillMaxWidth().height(10.dp),
+        )
+    }
+}
+
+/** 页头日期：10月28日 周二 */
+private fun todayLine(): String {
+    val calendar = Calendar.getInstance()
+    val weekdays = arrayOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+    val monthDay = SimpleDateFormat("M月d日", Locale.CHINA).format(calendar.time)
+    val index = (calendar.get(Calendar.DAY_OF_WEEK) + 5) % 7
+    return "$monthDay ${weekdays[index]}"
+}
+
+/** 档位标 4⁄5 的颜色：和桌面端同一条规则（设计文档 §4.1）。 */
+private fun tierColor(score: String): Color = when (score.trim().toIntOrNull() ?: 0) {
+    5, 4 -> NCMP.Ink
+    3 -> NCMP.Muted
+    else -> NCMP.Red
+}
+
+/**
+ * 今日曲目表：今天评了哪几首、每首几分、留下了什么批注。
+ *
+ * 刻意不做卡片：行与行之间只有一条 1px 细线，批注是"引文"（宋体 + 左侧竖线），
+ * 不是数据。设计依据见 docs/DESIGN.md §4.1。
+ */
+@Composable
+private fun TrackListSection(vm: AppViewModel) {
+    val tracks = vm.tracks
+    // 曲目一多就把整页顶下去，所以默认展开、可手动收起；跑完想看结果时再展开
+    var expanded by remember { mutableStateOf(true) }
+    Column(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 8.dp)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (tracks.isEmpty()) "曲目" else "曲目 ${tracks.size}",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = NCMP.Ink,
+                modifier = Modifier.weight(1f),
+            )
+            if (tracks.isNotEmpty()) {
+                Text(if (expanded) "收起" else "展开", fontSize = 12.sp, color = NCMP.Muted)
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        if (tracks.isEmpty()) {
+            Text(
+                "今天还没有排到曲子。点上面的「开始评分」评一次。",
+                fontSize = 13.sp,
+                color = NCMP.Muted,
+                modifier = Modifier.padding(vertical = 20.dp),
+            )
+        } else if (expanded) {
+            tracks.forEachIndexed { index, item ->
+                if (index > 0) ThinRule()
+                TrackRow(index + 1, item)
+            }
+        } else {
+            // 收起时给一句摘要，别让标题变成孤零零一行
+            val done = tracks.count { it.state == TrackState.DONE }
+            Text(
+                "已提交 $done / ${tracks.size} 首",
+                fontSize = 12.sp,
+                color = NCMP.Muted,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+        }
+    }
+}
+
+/** 单曲状态 → 文案。用词见 docs/DESIGN.md §6，不得混用同义词。 */
+private fun trackStateWord(state: String): String = when (state) {
+    TrackState.DONE -> "已提交"
+    TrackState.RUNNING -> "评分中"
+    TrackState.SKIPPED -> "跳过"
+    TrackState.FAILED -> "失败"
+    else -> "待评"
+}
+
+/** 单曲状态 → 圆点颜色。状态不只靠颜色：文字永远在旁边。 */
+private fun trackStateColor(state: String): Color = when (state) {
+    TrackState.DONE -> NCMP.Green
+    TrackState.RUNNING -> NCMP.Amber
+    TrackState.FAILED -> NCMP.Red
+    else -> NCMP.Muted
+}
+
+/**
+ * 一行曲目：`01 │ 歌名（宋体 15） 4⁄5 ●已提交`，下一行是歌手，再下面才是批注。
+ * 序号是合法的——今日曲目本来就是一个有序队列。
+ */
+@Composable
+private fun TrackRow(index: Int, item: TrackItem) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.Top) {
+        Text(
+            "%02d".format(index),
+            fontFamily = FontFamily.Serif,
+            fontSize = 12.sp,
+            color = NCMP.Muted,
+            textAlign = TextAlign.Right,
+            modifier = Modifier.width(24.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    when {
-                        vm.resultIsError -> "重试"
-                        vm.resultLabel.isNotEmpty() && !isCancelled -> "再执行一次"
-                        isCancelled -> "重新开始"
-                        else -> "开始评分"
-                    },
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
+                    item.song,
+                    fontFamily = FontFamily.Serif,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = NCMP.Ink,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
+                if (item.score.isNotBlank()) {
+                    Spacer(Modifier.width(8.dp))
+                    // 档位标 4⁄5：全应用唯一的"分数表达"，用分数斜线不用 /
+                    Text(
+                        "${item.score}⁄5",
+                        fontFamily = FontFamily.Serif,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = tierColor(item.score),
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Box(Modifier.size(6.dp).background(trackStateColor(item.state), CircleShape))
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    trackStateWord(item.state),
+                    fontSize = 12.sp,
+                    color = if (item.state == TrackState.DONE) NCMP.Ink else NCMP.Muted,
+                )
+            }
+            if (item.artist.isNotBlank()) {
+                Spacer(Modifier.height(3.dp))
+                Text(item.artist, fontSize = 12.sp, color = NCMP.Muted)
+            }
+            if (item.note.isNotBlank()) {
+                // 批注是"引文"：宋体 13 / 行高 1.7 / 左侧一根 1px 竖线
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                    Box(Modifier.width(1.dp).fillMaxHeight().background(NCMP.Rule))
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        item.note,
+                        fontFamily = FontFamily.Serif,
+                        fontSize = 13.sp,
+                        lineHeight = 22.sp,
+                        color = NCMP.Ink,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
     }
@@ -560,6 +710,54 @@ private fun ConfigSection(vm: AppViewModel) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("完成全部额外任务", fontSize = 14.sp, color = NCMP.Ink, modifier = Modifier.weight(1f))
                     Switch(checked = vm.fullExtra, onCheckedChange = { vm.fullExtra = it })
+                }
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("启用批注", fontSize = 14.sp, color = NCMP.Ink, modifier = Modifier.weight(1f))
+                    Switch(checked = vm.noteEnabled, onCheckedChange = { vm.noteEnabled = it })
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    // 手机端没有「账本」页：批注的去处就是上面的曲目表，文案照这个事实写
+                    if (vm.noteEnabled) "批注会随评分一起提交，每一条都留在上面的曲目表里"
+                    else "只评分，不写批注。",
+                    fontSize = 11.sp,
+                    color = NCMP.Muted,
+                )
+                if (vm.noteEnabled) {
+                    Spacer(Modifier.height(10.dp))
+                    Text("语气", fontSize = 12.sp, color = NCMP.Muted)
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Notes.VOICES.forEach { value ->
+                            FilterChip(
+                                selected = vm.noteVoice == value,
+                                onClick = { vm.noteVoice = value },
+                                label = { Text(Notes.voiceLabel(value), fontSize = 12.sp) },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    // 字数上限用本地文本态：整数直绑的话退格到空就退不动了
+                    var maxCharsText by remember { mutableStateOf(vm.noteMaxChars.toString()) }
+                    OutlinedTextField(
+                        value = maxCharsText,
+                        onValueChange = { text ->
+                            val digits = text.filter { it.isDigit() }.take(3)
+                            maxCharsText = digits
+                            digits.toIntOrNull()?.let { vm.noteMaxChars = it.coerceIn(10, 200) }
+                        },
+                        label = { Text("批注字数上限") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "本地生成，不联网、不调用 AI；同一首歌每次生成同一句",
+                        fontSize = 11.sp,
+                        color = NCMP.Muted,
+                    )
                 }
                 Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -799,6 +997,56 @@ private fun weekdayOf(date: String): String = try {
     ""
 }
 
+/**
+ * 运行详情（docs/DESIGN.md §4.3）：原来的步骤与日志收进折叠区，默认收起，
+ * **只在失败时自动展开**。这是"过程可见"的兜底，不再是主视角。
+ */
+@Composable
+private fun RunDetailSection(vm: AppViewModel) {
+    var expanded by remember { mutableStateOf(false) }
+    // 新的一次执行从收起开始
+    LaunchedEffect(vm.running) {
+        if (vm.running) expanded = false
+    }
+    // 失败时自动展开：这是用户唯一需要看日志的时刻
+    LaunchedEffect(vm.resultIsError) {
+        if (vm.resultIsError) expanded = true
+    }
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 15.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "运行详情",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = NCMP.Ink,
+                modifier = Modifier.weight(1f),
+            )
+            Text(if (expanded) "收起" else "展开", fontSize = 12.sp, color = NCMP.Muted)
+        }
+        if (expanded) {
+            Column(Modifier.fillMaxWidth().padding(bottom = 14.dp)) {
+                if (vm.resultIsError) {
+                    Text(
+                        "这次没跑完：${vm.resultLabel.removePrefix("失败：")}",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = NCMP.Red,
+                    )
+                    if (vm.resultHint.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(vm.resultHint, fontSize = 12.sp, color = NCMP.Muted)
+                    }
+                    Spacer(Modifier.height(12.dp))
+                }
+                LogSection(vm)
+            }
+        }
+    }
+}
+
 @Composable
 private fun LogSection(vm: AppViewModel) {
     val listState = rememberLazyListState()
@@ -806,9 +1054,9 @@ private fun LogSection(vm: AppViewModel) {
     LaunchedEffect(vm.logLines.size) {
         if (vm.logLines.isNotEmpty()) listState.scrollToItem(vm.logLines.size - 1)
     }
-    Column(Modifier.fillMaxWidth().height(320.dp)) {
+    Column(Modifier.fillMaxWidth().height(240.dp)) {
         Row(
-            Modifier.fillMaxWidth().padding(top = 10.dp),
+            Modifier.fillMaxWidth().padding(bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("运行日志", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = NCMP.Ink)

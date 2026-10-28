@@ -72,6 +72,10 @@ class TaskService : Service() {
             waitMinSeconds = intent?.getDoubleExtra(EXTRA_WAIT_MIN, 15.0) ?: 15.0,
             waitMaxSeconds = intent?.getDoubleExtra(EXTRA_WAIT_MAX, 20.0) ?: 20.0,
             fullExtraTasks = intent?.getBooleanExtra(EXTRA_FULL_EXTRA, true) ?: true,
+            noteEnabled = store.noteEnabled,
+            noteSource = store.noteSource,
+            noteVoice = store.noteVoice,
+            noteMaxChars = store.noteMaxChars,
         )
         val api = NeteaseApi().apply {
             musicU = store.musicU
@@ -91,8 +95,12 @@ class TaskService : Service() {
                         TaskBus.total.value = total
                         TaskBus.song.value = song
                         TaskBus.score.value = sc
+                        TaskBus.addTrack(song, sc)
                     },
                     onPercent = { TaskBus.percent.value = it },
+                    onNote = { song, sc, note -> TaskBus.addTrack(song, sc, note) },
+                    onQueue = { works -> TaskBus.seedQueue(works) },
+                    onTrack = { work, state -> TaskBus.setState(work, state) },
                 )
                 runner = r
                 val result = r.run()
@@ -124,6 +132,9 @@ class TaskService : Service() {
             } finally {
                 // 先落历史再置 running=false：界面观察到结束时记录已经写好了
                 recordHistory()
+                // 收尾曲目表：本次没评到的「待评/评分中」不能一直挂着
+                // （今天已经评过时，第一首会卡在"评分中"，下面全是"待评"）
+                TaskBus.settleQueue(TaskBus.resultIsError.value)
                 TaskBus.running.value = false
                 releaseLocks()
                 val nm = getSystemService(NotificationManager::class.java)

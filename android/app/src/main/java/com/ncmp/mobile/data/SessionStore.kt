@@ -52,6 +52,25 @@ class SessionStore(context: Context) {
         get() = prefs.getBoolean(KEY_FULL_EXTRA, true)
         set(value) = prefs.edit().putBoolean(KEY_FULL_EXTRA, value).apply()
 
+    // 批注（乐评文案）：与桌面端同一套开关
+    var noteEnabled: Boolean
+        get() = prefs.getBoolean(KEY_NOTE_ENABLED, true)
+        set(value) = prefs.edit().putBoolean(KEY_NOTE_ENABLED, value).apply()
+
+    /** 语气：restrained | warm | brief。手机端不接外部 LLM，只有本地模板。 */
+    var noteVoice: String
+        get() = prefs.getString(KEY_NOTE_VOICE, Notes.DEFAULT_VOICE) ?: Notes.DEFAULT_VOICE
+        set(value) = prefs.edit().putString(KEY_NOTE_VOICE, value).apply()
+
+    /** 批注来源：template（默认）/ llm。手机端没有 LLM，传 llm 也按 template 处理。 */
+    var noteSource: String
+        get() = prefs.getString(KEY_NOTE_SOURCE, "template") ?: "template"
+        set(value) = prefs.edit().putString(KEY_NOTE_SOURCE, value).apply()
+
+    var noteMaxChars: Int
+        get() = prefs.getInt(KEY_NOTE_MAX_CHARS, NoteGenerator.DEFAULT_MAX_CHARS)
+        set(value) = prefs.edit().putInt(KEY_NOTE_MAX_CHARS, value).apply()
+
     // 定时执行
     var scheduleEnabled: Boolean
         get() = prefs.getBoolean(KEY_SCHEDULE_ENABLED, false)
@@ -86,6 +105,10 @@ class SessionStore(context: Context) {
         private const val KEY_WAIT_MIN = "wait_min"
         private const val KEY_WAIT_MAX = "wait_max"
         private const val KEY_FULL_EXTRA = "full_extra"
+        private const val KEY_NOTE_ENABLED = "note_enabled"
+        private const val KEY_NOTE_SOURCE = "note_source"
+        private const val KEY_NOTE_VOICE = "note_voice"
+        private const val KEY_NOTE_MAX_CHARS = "note_max_chars"
         private const val KEY_SCHEDULE_ENABLED = "schedule_enabled"
         private const val KEY_SCHEDULE_HOUR = "schedule_hour"
         private const val KEY_SCHEDULE_MINUTE = "schedule_minute"

@@ -54,6 +54,9 @@ SETTINGS_FIELDS = (
     "wait_time_max",
     "score",
     "full_extra_tasks",
+    "note_enabled",
+    "note_voice",
+    "note_max_chars",
     "notify_email",
     "email_password",
     "smtp_server",
@@ -81,6 +84,9 @@ DEFAULTS: Dict[str, Any] = {
     "wait_time_max": 20,
     "score": 3,
     "full_extra_tasks": True,
+    "note_enabled": True,
+    "note_voice": "restrained",
+    "note_max_chars": 80,
     "notify_email": "",
     "email_password": "",
     "smtp_server": "smtp.qq.com",
@@ -133,6 +139,19 @@ FIELD_HINTS: Dict[str, Dict[str, str]] = {
     },
     "full_extra_tasks": {
         "tooltip": "勾选后完成所有额外任务，而非只完成固定加分的 7 个。",
+    },
+    "note_enabled": {
+        "tooltip": (
+            "勾选后，评分时同时提交一条批注（乐评短句）。\n"
+            "批注会公开显示在你的账号下，可在「账本」里回看每一条。"),
+    },
+    "note_voice": {
+        "tooltip": (
+            "批注的语气。三套语料都是本地内置的，不联网、不调用 AI：\n"
+            "克制=有话但不煽情（默认）；热络=情绪更外露；简短=一句话说完。"),
+    },
+    "note_max_chars": {
+        "tooltip": "单条批注的字数上限。超出时先丢掉收尾句，再截断。",
     },
     "notify_email": {
         "placeholder": "接收任务结果通知的邮箱",
@@ -286,6 +305,7 @@ class SettingsPage(QWidget):
         self._build_general_section()
         self._build_account_section()
         self._build_task_section()
+        self._build_note_section()
         self._build_email_section()
         self._build_schedule_section()
         self._build_github_section()
@@ -439,6 +459,35 @@ class SettingsPage(QWidget):
         self._apply_hint(full_extra, "full_extra_tasks")
         form.addRow("full_extra_tasks", full_extra)
         self._controls["full_extra_tasks"] = full_extra
+
+    def _build_note_section(self) -> None:
+        """批注（乐评文案）：开关、语气、字数上限。"""
+        form = self._new_section(
+            "批注",
+            "评分时可以同时留一句话。三种语气都是本地内置的，不联网、不调用 AI，"
+            "同一首歌每次生成的都是同一句。")
+
+        note_enabled = QCheckBox("评分时同时提交批注")
+        self._apply_hint(note_enabled, "note_enabled")
+        form.addRow("note_enabled", note_enabled)
+        self._controls["note_enabled"] = note_enabled
+
+        note_voice = QComboBox()
+        note_voice.addItem("克制", "restrained")
+        note_voice.addItem("热络", "warm")
+        note_voice.addItem("简短", "brief")
+        note_voice.setCurrentIndex(0)
+        self._apply_hint(note_voice, "note_voice")
+        form.addRow("note_voice", note_voice)
+        self._controls["note_voice"] = note_voice
+
+        note_max = QSpinBox()
+        note_max.setRange(10, 200)
+        note_max.setSuffix(" 字")
+        note_max.setValue(DEFAULTS["note_max_chars"])
+        self._apply_hint(note_max, "note_max_chars")
+        form.addRow("note_max_chars", note_max)
+        self._controls["note_max_chars"] = note_max
 
     def _build_email_section(self) -> None:
         form = self._new_section("邮件通知")
@@ -935,6 +984,9 @@ class SettingsPage(QWidget):
         self._set_control("wait_time_max", int(_val("wait_time_max")))
         self._set_control("score", int(_val("score")))
         self._set_control("full_extra_tasks", bool(_val("full_extra_tasks")))
+        self._set_control("note_enabled", bool(_val("note_enabled")))
+        self._set_control("note_voice", str(_val("note_voice")))
+        self._set_control("note_max_chars", int(_val("note_max_chars")))
         self._set_control("notify_email", _val("notify_email"))
         self._set_control("email_password", _val("email_password"))
         self._set_control("smtp_server", _val("smtp_server"))
@@ -973,6 +1025,12 @@ class SettingsPage(QWidget):
                     if bool(ctrl.itemData(i)) == target:
                         ctrl.setCurrentIndex(i)
                         break
+            elif key == "note_voice":
+                # 语气下拉用 userData（restrained/warm/brief）
+                for i in range(ctrl.count()):
+                    if str(ctrl.itemData(i)) == str(value):
+                        ctrl.setCurrentIndex(i)
+                        break
             else:
                 ctrl.setCurrentText("" if value is None else str(value))
         elif isinstance(ctrl, QCheckBox):
@@ -987,8 +1045,8 @@ class SettingsPage(QWidget):
             elif isinstance(ctrl, QSpinBox):
                 data[key] = ctrl.value()
             elif isinstance(ctrl, QComboBox):
-                # score 下拉用 userData（1/2/3/4），GitHub 开关也用 userData
-                if key in ("score", "gh_disable_schedule", "gh_success_email"):
+                # score / note_voice 下拉用 userData，GitHub 开关也用 userData
+                if key in ("score", "note_voice", "gh_disable_schedule", "gh_success_email"):
                     data[key] = ctrl.currentData()
                 else:
                     data[key] = ctrl.currentText()

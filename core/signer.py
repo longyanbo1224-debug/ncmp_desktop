@@ -9,6 +9,8 @@ from typing import Callable, Optional, Tuple
 import requests
 from Crypto.Cipher import AES
 from core import CancelledError
+from core import scoring
+from core.notes import NoteGenerator
 from core.utils.config import Config
 from core.utils.logger import Logger
 class Signer:
@@ -20,7 +22,8 @@ class Signer:
                  on_progress: Optional[Callable[[int, Optional[int], str, str], None]] = None,
                  cancel_event: Optional["object"] = None,
                  total: Optional[int] = None,
-                 done_offset: int = 0):
+                 done_offset: int = 0,
+                 on_note: Optional[Callable[[dict, str, str], None]] = None):
         self.session = session
         self.task_id = task_id
         self.logger = logger
@@ -29,6 +32,10 @@ class Signer:
         self.cancel_event = cancel_event
         self.total = total
         self.done = done_offset
+        # 批注回调：callback(work, score, note)，供界面把"这首歌留下了什么话"显示出来
+        self.on_note = on_note
+        # 批注生成器：note_enabled 为假时 generate() 直接返回空串
+        self.notes = NoteGenerator(config)
         self.sign_url = "https://interface.music.163.com/weapi/music/partner/work/evaluate"
 
         # 加密相关常量
@@ -89,24 +96,13 @@ class Signer:
         rs = pow(rs, int(self.pub_key, 16), int(self.modulus, 16))
         return format(rs, 'x').zfill(256)
     def _get_score_and_tag(self, work: dict) -> Tuple[str, str]:
-        """根据作品信息获取评分和标签"""
-        # 获取评分策略，默认为4（3-4分）
-        score_strategy = int(self.config.get("score", 3))
+        """根据作品信息获取评分和标签。
 
-        # 检查名称中是否包含英文
-        has_english = bool(self.name_pattern.match(work["name"] + work["authorName"]))
-
-        # 根据策略和名称决定评分
-        if score_strategy == 1:  # 1-2分策略
-            score = "2" if has_english else "1"
-        elif score_strategy == 2:  # 2-3分策略
-            score = "3" if has_english else "2"
-        elif score_strategy == 3:  # 3-4分策略（默认）
-            score = "4" if has_english else "3"
-        else:  # 固定4分
-            score = "4"
-
-        return score, f"{score}-A-1"
+        判定规则搬到 ``core.scoring`` 了（纯函数，才能被"策略试算"和测试复用）；
+        这里只做接线，行为与旧版完全一致。
+        """
+        score = scoring.score_for(work, self.config.get("score", scoring.DEFAULT_STRATEGY))
+        return score, scoring.tag_for(score)
     def sign(self, work: dict, is_extra: bool = False, _retry: int = 0) -> None:
         """为作品评分。``_retry`` 是内部重试计数，调用方不用传。"""
         # 评分入口处响应取消
@@ -118,6 +114,8 @@ class Signer:
             self._sleep(delay)
             csrf = str(self.session.cookies["__csrf"])
             score, tag = self._get_score_and_tag(work)
+            # 批注：随评分一起提交（note_enabled 关闭时为空串，行为与旧版一致）
+            comment = self.notes.generate(work, score)
 
             data = {
                 "taskId": self.task_id,
@@ -125,7 +123,7 @@ class Signer:
                 "score": score,
                 "tags": tag,
                 "customTags": "%5B%5D",
-                "comment": "",
+                "comment": comment,
                 "syncYunCircle": "true",
                 "csrf_token": csrf
             }
@@ -157,6 +155,14 @@ class Signer:
                         self.on_progress(self.done, self.total, work["name"], score)
                     except Exception as cb_err:
                         self.logger.debug(f"on_progress 回调异常: {cb_err}")
+                # 批注单独一条日志 + 单独回调：界面靠它把"留下了什么话"落到曲目行上
+                if comment:
+                    self.logger.info(f'批注已提交：{comment}')
+                    if self.on_note:
+                        try:
+                            self.on_note(work, score, comment)
+                        except Exception as cb_err:
+                            self.logger.debug(f"on_note 回调异常: {cb_err}")
             else:
                 error_msg = response.get('message') or response.get('msg', '未知错误')
                 if "频繁" in error_msg:

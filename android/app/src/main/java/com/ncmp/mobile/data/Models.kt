@@ -10,6 +10,28 @@ data class Work(
 
 data class WorkItem(val work: Work, val completed: Boolean)
 
+/** 单曲状态（用词见 docs/DESIGN.md §6，不得混用同义词）。 */
+object TrackState {
+    const val PENDING = "pending"   // 待评
+    const val RUNNING = "running"   // 评分中
+    const val DONE = "done"         // 已提交
+    const val SKIPPED = "skipped"   // 跳过
+    const val FAILED = "failed"     // 失败
+}
+
+/**
+ * 曲目表里的一行：今天评过的某首歌，以及留在它下面的那句批注。
+ *
+ * 按歌名去重（桌面端曲目表同样按歌名索引）：一天的歌单里不会有两首同名。
+ */
+data class TrackItem(
+    val song: String,
+    val artist: String = "",
+    val score: String = "",
+    val note: String = "",
+    val state: String = TrackState.PENDING,
+)
+
 data class DailyTasks(
     val id: Any,
     val count: Int,
@@ -25,6 +47,12 @@ data class TaskConfig(
     val waitMinSeconds: Double = 15.0,
     val waitMaxSeconds: Double = 20.0,
     val fullExtraTasks: Boolean = true,
+    // 批注（乐评文案）：随评分一起提交到 comment 字段
+    val noteEnabled: Boolean = true,
+    /** template（默认）| llm。手机端没有 LLM，传 llm 也按 template 处理。 */
+    val noteSource: String = "template",
+    val noteVoice: String = Notes.DEFAULT_VOICE, // restrained | warm | brief
+    val noteMaxChars: Int = NoteGenerator.DEFAULT_MAX_CHARS,
 )
 
 sealed class TaskResult {
