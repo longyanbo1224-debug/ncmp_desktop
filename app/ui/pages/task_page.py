@@ -536,6 +536,9 @@ class TaskPage(QWidget):
         self._today_total = 0
         self._stop_wait()
         self._show_hint("")
+        # 跑起来就把「运行详情」展开：日志要能一边跑一边看，
+        # 结束后（成功时）再收起来（失败/取消保持展开，方便回看原因）。
+        self._set_detail_visible(True)
         self._set_status(status_text, "captionText")
         self._set_run_buttons_enabled(False)
         self._refresh_rail()
@@ -783,6 +786,8 @@ class TaskPage(QWidget):
             self._meter.set_progress(100)
             self._percent_label.setText("100%")
             self._show_hint("")
+            # 顺利跑完就把运行详情收起来，页面上只留结果
+            self._set_detail_visible(False)
         elif status == "cancelled":
             summary = "用户手动取消任务"
             self._set_status("这次被你取消了，已经评完的曲目都还在。", "warningText")

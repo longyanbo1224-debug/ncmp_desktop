@@ -53,6 +53,7 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(create_app_icon())
         self.resize(*theme.WINDOW_DEFAULT)
         self.setMinimumSize(*theme.WINDOW_MINIMUM)
+        self._center_on_screen()
 
         self._log_handler: Optional[GuiLogHandler] = None
         # 是否已排定一次延迟启动的定时任务。补跑要靠它判断
@@ -244,6 +245,25 @@ class MainWindow(QMainWindow):
     def show_from_second_instance(self) -> None:
         """用户又点了桌面图标：把已有窗口（可能最小化/收进托盘）拉到前台。"""
         self._show_and_raise()
+
+    def _center_on_screen(self) -> None:
+        """把窗口放到主屏可用区域的正中。
+
+        Windows 不做这件事：不给位置就落在左上角。尺寸按 DPI 缩放后也不要
+        超出可用区域，否则高 DPI 的笔记本上一个 1100×760 的窗口会顶出屏幕。
+        """
+        try:
+            screen = QApplication.primaryScreen()
+            if screen is None:
+                return
+            area = screen.availableGeometry()
+            width = min(self.width(), area.width())
+            height = min(self.height(), area.height())
+            self.resize(width, height)
+            self.move(area.x() + (area.width() - width) // 2,
+                      area.y() + (area.height() - height) // 2)
+        except Exception:
+            pass
 
     def _show_and_raise(self) -> None:
         self.showNormal()
