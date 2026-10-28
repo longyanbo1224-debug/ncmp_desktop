@@ -81,6 +81,7 @@ class MusicPartnerBot:
                 on_progress=self.on_progress,
                 cancel_event=self.cancel_event,
                 on_note=self.on_note,
+                on_works=self.on_works,
             )
             extra_task.process_extra_tasks(task_data["id"])
             self._step("额外评分任务", "success")

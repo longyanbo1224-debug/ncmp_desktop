@@ -351,10 +351,23 @@ class SettingsPage(QWidget):
         for b in (save_btn, test_btn, validate_btn, import_btn, export_btn):
             buttons.addWidget(b)
         buttons.addStretch(1)
-        content_layout.addLayout(buttons)
 
         scroll.setWidget(content)
-        outer.addWidget(scroll)
+        outer.addWidget(scroll, 1)
+
+        # 操作按钮**固定在页面底部**，不跟着内容滚动：
+        # 分页签之后内容变高，保存按钮被推到很下面，得滚半天才找得到。
+        bar = QWidget()
+        bar_lay = QVBoxLayout(bar)
+        bar_lay.setContentsMargins(theme.PAGE_MARGIN, theme.SP_2,
+                                   theme.PAGE_MARGIN, theme.PAGE_MARGIN)
+        bar_lay.setSpacing(0)
+        rule = QFrame()
+        rule.setObjectName("rule")
+        bar_lay.addWidget(rule)
+        bar_lay.addSpacing(theme.SP_2)
+        bar_lay.addLayout(buttons)
+        outer.addWidget(bar)
 
     def _new_section(self, title: str, intro: str = "") -> QFormLayout:
         """建一个分组：小标题 + 一条细线 + 字段。

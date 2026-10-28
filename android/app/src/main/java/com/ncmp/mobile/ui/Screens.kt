@@ -92,6 +92,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.ncmp.mobile.R
 import com.ncmp.mobile.data.DayRecord
 import com.ncmp.mobile.data.Notes
@@ -837,23 +839,37 @@ private fun HistoryContent(vm: AppViewModel) {
                 color = NCMP.Ink,
             )
             Spacer(Modifier.height(3.dp))
-            Text("过去一年，每格一天 · 点一下可横屏看", fontSize = 12.sp, color = NCMP.Muted)
+            Text("过去一年，每格一天 · 点一下放大看", fontSize = 12.sp, color = NCMP.Muted)
             Spacer(Modifier.height(14.dp))
-            // 一格图一年 53 列，竖屏挤成一团。点一下切横屏看，再点切回竖屏。
-            val activity = LocalContext.current as? Activity
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        val landscape = activity?.resources?.configuration?.orientation ==
-                            Configuration.ORIENTATION_LANDSCAPE
-                        activity?.requestedOrientation = if (landscape) {
-                            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                        } else {
-                            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            // 点一下：整屏浮层放大显示格子图（不旋转整个应用）。
+            // 浮层里把格子尺寸上限放宽，横过来的时候格子才会真的变大；再点一下退出。
+            var zoomed by remember { mutableStateOf(false) }
+            Box(Modifier.fillMaxWidth().clickable { zoomed = true }) { StreakGrid(cells) }
+            if (zoomed) {
+                Dialog(
+                    onDismissRequest = { zoomed = false },
+                    properties = DialogProperties(usePlatformDefaultWidth = false),
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(Color(0xEE000000))
+                            .clickable { zoomed = false }
+                            .padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            StreakGrid(cells, maxCell = 16.dp)
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                "过去一年，每格一天 · 点空白处退出",
+                                fontSize = 12.sp,
+                                color = Color(0xFFBDBDBD),
+                            )
                         }
-                    },
-            ) { StreakGrid(cells) }
+                    }
+                }
+            }
             Spacer(Modifier.height(10.dp))
             StreakLegend(streak, successDays)
             Spacer(Modifier.height(20.dp))

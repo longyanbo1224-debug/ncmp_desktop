@@ -402,15 +402,20 @@ class TaskPage(QWidget):
                 "https://interface.music.163.com/api/music/partner/daily/task/get",
                 timeout=15).json()
             tasks = (response.get("data") or {}).get("works") or []
-            works = [task.get("work") or {} for task in tasks
-                     if not task.get("completed")]
+            all_works = [task.get("work") or {} for task in tasks]
+            pending = [task.get("work") or {} for task in tasks
+                       if not task.get("completed")]
+            # 今天已经评完时 pending 是空的，但"策略会给出什么"照样能算——
+            # 用今天这份完整歌单演算，否则按钮会变成"没内容可预演"。
+            works = pending or all_works
+            all_done = not pending and bool(all_works)
         except Exception as error:
             QMessageBox.warning(self, "策略预演", f"拉取今日歌单失败：{error}")
             return
 
         if not works:
             QMessageBox.information(
-                self, "策略预演", "今天没有待评的曲子，暂时没有可预演的内容。")
+                self, "策略预演", "今天没有可评的曲子，暂时没有可预演的内容。")
             return
 
         try:
@@ -419,7 +424,8 @@ class TaskPage(QWidget):
         except Exception:
             current = scoring.DEFAULT_STRATEGY
 
-        lines = [f"今天待评 {len(works)} 首。四种策略分别会给出：", ""]
+        lines = [f"今天待评 {len(works)} 首。四种策略分别会给出：", ""] if not all_done else [
+            f"今天这 {len(works)} 首已经评完了。若换策略，同样这 {len(works)} 首会是：", ""]
         for strategy, counts in scoring.compare(works).items():
             label = scoring.STRATEGIES.get(strategy, str(strategy))
             mark = "　← 当前" if strategy == current else ""

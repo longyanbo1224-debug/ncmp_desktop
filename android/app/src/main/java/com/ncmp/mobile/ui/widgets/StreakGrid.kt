@@ -39,14 +39,14 @@ private const val WEEKS = 53
  * 格子尺寸跟着屏宽算，53 周刚好铺满一行，不用横向滚动。
  */
 @Composable
-fun StreakGrid(days: List<DayCell>, modifier: Modifier = Modifier) {
+fun StreakGrid(days: List<DayCell>, modifier: Modifier = Modifier, maxCell: androidx.compose.ui.unit.Dp = 6.dp) {
     val labelWidth = 13.dp
     val gap = 2.dp
     val monthHeight = 13.dp
 
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val cell = ((maxWidth - labelWidth - gap * (WEEKS - 1)) / WEEKS)
-            .coerceIn(2.dp, 6.dp)
+            .coerceIn(2.dp, maxCell)
         val gridHeight = cell * 7 + gap * 6
 
         val textPaint = remember {

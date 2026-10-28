@@ -6,7 +6,7 @@ from core import CancelledError
 from ..signer import Signer
 class ExtraTask:
     def __init__(self, session, logger, config, on_progress=None, cancel_event=None,
-                 on_note=None):
+                 on_note=None, on_works=None):
         self.session = session
         self.logger = logger
         self.config = config
@@ -14,6 +14,8 @@ class ExtraTask:
         self.cancel_event = cancel_event
         # callback(work, score, note)：批注提交后回调界面
         self.on_note = on_note
+        # callback(tasks)：额外任务的曲目清单，交给界面预置"待评"行
+        self.on_works = on_works
         self.api = {
             "extra_list": "https://interface.music.163.com/api/music/partner/extra/wait/evaluate/work/list",
             "report_listen": "https://interface.music.163.com/weapi/partner/resource/interact/report"
@@ -31,6 +33,7 @@ class ExtraTask:
         """
         try:
             extra_tasks, completed_count = self._get_extra_tasks()
+            self._emit_works(extra_tasks)
             full = bool(self.config.get('full_extra_tasks', False))
             target = len(extra_tasks) if full else 7 - completed_count
 
@@ -125,6 +128,26 @@ class ExtraTask:
         except Exception as e:
             self.logger.error(f"处理额外评分任务时出错: {str(e)}")
             raise
+    def _emit_works(self, extra_tasks) -> None:
+        """把额外任务的曲目清单交给界面，先摆成"待评"行。
+
+        不给的话，用户点执行只会在曲目表里看到基础任务的 5 首，
+        以为"今天只评了 5 首"，实际上额外任务还有一大批。
+        """
+        # 用 getattr：子类/测试替身可能不调用 super().__init__，没有这个属性
+        callback = getattr(self, "on_works", None)
+        if not callback:
+            return
+        try:
+            callback(list(extra_tasks or []))
+        except Exception as e:
+            # 测试替身的 logger 可能没有 debug，这里不能因为日志把任务打断
+            try:
+                getattr(self.logger, "debug", self.logger.info)(
+                    f"on_works 回调异常: {e}")
+            except Exception:
+                pass
+
     def _get_extra_tasks(self) -> Tuple[List[Dict], int]:
         """获取额外评分任务列表"""
         try:
