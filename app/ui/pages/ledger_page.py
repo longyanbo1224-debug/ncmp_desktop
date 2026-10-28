@@ -233,19 +233,36 @@ class LedgerPage(QWidget):
             return
 
         for label, value in points.items():
-            row = QWidget()
-            lay = QHBoxLayout(row)
-            lay.setContentsMargins(0, 0, 0, 0)
-            lay.setSpacing(theme.SP_3)
-            name = QLabel(str(label))
-            name.setObjectName("captionText")
-            name.setFixedWidth(88)
-            lay.addWidget(name)
-            number = QLabel(str(value))
-            number.setObjectName("dataText")
-            lay.addWidget(number)
-            lay.addStretch(1)
-            self._points_lay.addWidget(row)
+            self._points_lay.addWidget(self._points_row(label, value))
+
+        # 称号：当前档 + 距下一档还差多少 + 完整阈值表（用户提供的一手规则）
+        try:
+            from core import partner_points
+            info = partner_points.title_for(partner_points.score_of(points))
+        except Exception:
+            return
+        if info.get("label"):
+            self._points_lay.addWidget(self._points_row("当前称号", str(info["label"])))
+        if info.get("next_label") and info.get("gap") is not None:
+            self._points_lay.addWidget(self._points_row(
+                "距下一档", f"{info['next_label']}（还差 {info['gap']} 分）"))
+        for threshold, name in info.get("table") or ():
+            self._points_lay.addWidget(self._points_row(f"{threshold} 分", name))
+
+    def _points_row(self, label: str, value: str) -> QWidget:
+        row = QWidget()
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(theme.SP_3)
+        name = QLabel(str(label))
+        name.setObjectName("captionText")
+        name.setFixedWidth(88)
+        lay.addWidget(name)
+        number = QLabel(str(value))
+        number.setObjectName("dataText")
+        lay.addWidget(number)
+        lay.addStretch(1)
+        return row
 
     def _render_recent(self) -> None:
         self._recent.clear()

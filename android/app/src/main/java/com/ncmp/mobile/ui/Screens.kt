@@ -100,6 +100,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.ncmp.mobile.R
 import com.ncmp.mobile.data.DayRecord
 import com.ncmp.mobile.data.Notes
+import com.ncmp.mobile.data.PartnerTitles
 import com.ncmp.mobile.data.TrackItem
 import com.ncmp.mobile.data.TrackState
 import com.ncmp.mobile.data.gridDays
@@ -843,6 +844,20 @@ private fun StatCell(label: String, value: String, modifier: Modifier = Modifier
     }
 }
 
+/** 一行键值（合伙人积分 / 称号表共用）。 */
+@Composable
+private fun PointsRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(
+            label,
+            fontSize = 12.sp,
+            color = NCMP.Muted,
+            modifier = Modifier.width(88.dp),
+        )
+        Text(value, fontFamily = FontFamily.Serif, fontSize = 15.sp, color = NCMP.Ink)
+    }
+}
+
 /**
  * 记录页的"口味"块：累计曲目 / 档位分布 / 最近评过的曲子。
  *
@@ -979,15 +994,18 @@ private fun HistoryContent(vm: AppViewModel) {
                 Spacer(Modifier.height(16.dp))
                 Text("合伙人", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = NCMP.Ink)
                 Spacer(Modifier.height(8.dp))
-                vm.points.forEach { (label, value) ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                        Text(
-                            label,
-                            fontSize = 12.sp,
-                            color = NCMP.Muted,
-                            modifier = Modifier.width(88.dp),
-                        )
-                        Text(value, fontFamily = FontFamily.Serif, fontSize = 15.sp, color = NCMP.Ink)
+                vm.points.forEach { (label, value) -> PointsRow(label, value) }
+                // 称号：当前档 + 距下一档还差多少 + 完整阈值表
+                val title = PartnerTitles.titleFor(PartnerTitles.scoreOf(vm.points))
+                if (title.label.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    PointsRow("当前称号", title.label)
+                    if (title.nextLabel != null && title.gap != null) {
+                        PointsRow("距下一档", "${title.nextLabel}（还差 ${title.gap} 分）")
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    title.table.forEach { (threshold, name) ->
+                        PointsRow("$threshold 分", name)
                     }
                 }
             }

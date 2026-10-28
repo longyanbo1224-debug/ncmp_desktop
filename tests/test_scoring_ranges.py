@@ -67,5 +67,40 @@ class TestParsePoints(unittest.TestCase):
         self.assertEqual(parse_points({"data": {"foo": 1}}), {})
 
 
+class TestPartnerTitles(unittest.TestCase):
+    """称号换算：320 高级 / 400 资深 / 480 首席（用户提供的一手规则）。"""
+
+    def test_thresholds(self):
+        from core.partner_points import title_for
+        self.assertEqual(title_for(300)["label"], "未达保级线")
+        self.assertEqual(title_for(320)["label"], "高级音乐合伙人")
+        self.assertEqual(title_for(399)["label"], "高级音乐合伙人")
+        self.assertEqual(title_for(400)["label"], "资深音乐合伙人")
+        self.assertEqual(title_for(454)["label"], "资深音乐合伙人")
+        self.assertEqual(title_for(480)["label"], "首席音乐合伙人")
+        self.assertEqual(title_for(500)["label"], "首席音乐合伙人")
+
+    def test_next_and_gap(self):
+        from core.partner_points import title_for
+        info = title_for(454)
+        self.assertEqual(info["next_label"], "首席音乐合伙人")
+        self.assertEqual(info["gap"], 26)
+        # 已到最高档：没有下一档
+        self.assertIsNone(title_for(480)["next_label"])
+        self.assertIsNone(title_for(480)["gap"])
+
+    def test_unknown_score(self):
+        from core.partner_points import title_for
+        self.assertEqual(title_for(None)["label"], "")
+        self.assertEqual(len(title_for(None)["table"]), 3)
+
+    def test_score_of_prefers_period_points(self):
+        from core.partner_points import score_of
+        self.assertEqual(score_of({"本期积分": "454", "云贝余额": "999"}), 454)
+        self.assertEqual(score_of({"本周积分": "12"}), 12)
+        self.assertIsNone(score_of({"云贝余额": "999"}))
+        self.assertIsNone(score_of({}))
+
+
 if __name__ == "__main__":
     unittest.main()

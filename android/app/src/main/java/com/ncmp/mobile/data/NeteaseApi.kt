@@ -354,14 +354,23 @@ class NeteaseApi {
     /** 合伙人积分/等级；拿不到返回空 Map（界面"没数据就不显示"）。 */
     suspend fun getPartnerPoints(): Map<String, String> {
         val json = try {
-            weapiPost(PARTNER_HOME_URL, JSONObject())
-        } catch (_: Exception) {
+            // 合伙人接口在 mp 域下：带和额外任务列表同一个 Referer
+            weapiPost(PARTNER_HOME_URL, JSONObject(), referer = "https://mp.music.163.com/")
+        } catch (e: Exception) {
+            debugLogger?.invoke("合伙人积分查询失败：${e.message}")
             return emptyMap()
         }
-        if (json.optInt("code", -1) != 200) return emptyMap()
-        val data = json.optJSONObject("data") ?: return emptyMap()
+        val code = json.optInt("code", -1)
+        if (code != 200) {
+            debugLogger?.invoke(
+                "合伙人积分查询返回 code=$code ${json.optString("message")}",
+            )
+            return emptyMap()
+        }
         val flat = mutableMapOf<String, String>()
-        flattenJson(data, flat)
+        json.optJSONObject("data")?.let { flattenJson(it, flat) }
+        // data 不是对象（或字段直接在顶层）时兜底：整份响应摊平再找
+        if (flat.isEmpty()) flattenJson(json, flat)
         val fields = listOf(
             "云贝余额" to listOf("cloudBean", "cloudBeanCount", "cloudVillageBean", "cloud_bean"),
             "VIP 等级" to listOf("vipType", "vipLevel", "vip_type", "level"),
@@ -377,6 +386,10 @@ class NeteaseApi {
                 result[label] = value
                 break
             }
+        }
+        if (result.isEmpty()) {
+            // 日志会显示在「运行详情」里，方便按真实结构补字段名
+            debugLogger?.invoke("合伙人积分：未识别到已知字段，body=${json.toString().take(300)}")
         }
         return result
     }
