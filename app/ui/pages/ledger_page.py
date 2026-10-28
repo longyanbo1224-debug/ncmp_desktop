@@ -64,6 +64,18 @@ class LedgerPage(QWidget):
         numbers.addStretch(1)
         outer.addLayout(numbers)
 
+        # ---- 合伙人积分/等级（有数据才显示）----
+        # 数字来自任务结束后缓存的那次查询；拿不到就整块隐藏，
+        # 不填 0 假装有收益。
+        self._points_title = QLabel("合伙人")
+        self._points_title.setObjectName("sectionHeading")
+        outer.addWidget(self._points_title)
+        self._points_box = QWidget()
+        self._points_lay = QVBoxLayout(self._points_box)
+        self._points_lay.setContentsMargins(0, 0, 0, 0)
+        self._points_lay.setSpacing(theme.SP_1 + 2)
+        outer.addWidget(self._points_box)
+
         # ---- 口味曲线 ----
         curve_title = QLabel("口味曲线")
         curve_title.setObjectName("sectionHeading")
@@ -141,6 +153,8 @@ class LedgerPage(QWidget):
 
         self._render_curve(stats.get("tiers") or {}, total)
 
+        self._render_points()
+
         try:
             self._grid.set_days(days)
         except Exception:
@@ -197,6 +211,41 @@ class LedgerPage(QWidget):
             lay.addWidget(value)
 
             self._curve_lay.addWidget(row)
+
+    def _render_points(self) -> None:
+        """合伙人积分/等级：有缓存才显示，没有就整块隐藏。"""
+        while self._points_lay.count():
+            item = self._points_lay.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        try:
+            from app import partner_points_store
+            points = partner_points_store.load()
+        except Exception:
+            points = {}
+
+        has_data = bool(points)
+        self._points_title.setVisible(has_data)
+        self._points_box.setVisible(has_data)
+        if not has_data:
+            return
+
+        for label, value in points.items():
+            row = QWidget()
+            lay = QHBoxLayout(row)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.setSpacing(theme.SP_3)
+            name = QLabel(str(label))
+            name.setObjectName("captionText")
+            name.setFixedWidth(88)
+            lay.addWidget(name)
+            number = QLabel(str(value))
+            number.setObjectName("dataText")
+            lay.addWidget(number)
+            lay.addStretch(1)
+            self._points_lay.addWidget(row)
 
     def _render_recent(self) -> None:
         self._recent.clear()

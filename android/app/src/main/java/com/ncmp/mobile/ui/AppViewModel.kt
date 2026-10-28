@@ -84,6 +84,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var recentTracks by mutableStateOf<List<com.ncmp.mobile.data.TrackRecord>>(emptyList())
         private set
+    /** 合伙人积分/等级；没查到就是空 Map（界面不显示）。 */
+    var points by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
 
     init {
         loadSession()
@@ -100,6 +103,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         history.addAll(historyStore.load())
         trackStats = trackLog.stats()
         recentTracks = trackLog.recent(20)
+        if (points.isEmpty()) points = readPoints()
+    }
+
+    /** 从本地缓存恢复上次查到的积分/等级（JSON → Map）。 */
+    private fun readPoints(): Map<String, String> = try {
+        val raw = store.partnerPoints
+        if (raw.isBlank()) emptyMap() else {
+            val obj = org.json.JSONObject(raw)
+            val keys = obj.keys()
+            val result = mutableMapOf<String, String>()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                result[key] = obj.optString(key)
+            }
+            result
+        }
+    } catch (_: Exception) {
+        emptyMap()
     }
 
     private fun observeTaskBus() {
@@ -127,6 +148,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { TaskBus.resultSummary.collect { resultSummary = it } }
         viewModelScope.launch { TaskBus.resultIsError.collect { resultIsError = it } }
         viewModelScope.launch { TaskBus.tracks.collect { tracks = it } }
+        viewModelScope.launch {
+            TaskBus.points.collect { if (it.isNotEmpty()) points = it }
+        }
     }
 
     private fun loadSession() {

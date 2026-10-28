@@ -342,6 +342,61 @@ class NeteaseApi {
         return items to completedCount
     }
 
+    /** 确认某首是否已评上：**只查一次**，用于"写入结果不明"，绝不重投评分。 */
+    suspend fun isWorkRated(workId: Any): Boolean = try {
+        getDailyTasks().items.any {
+            it.completed && it.work.id.toString() == workId.toString()
+        }
+    } catch (_: Exception) {
+        false
+    }
+
+    /** 合伙人积分/等级；拿不到返回空 Map（界面"没数据就不显示"）。 */
+    suspend fun getPartnerPoints(): Map<String, String> {
+        val json = try {
+            weapiPost(PARTNER_HOME_URL, JSONObject())
+        } catch (_: Exception) {
+            return emptyMap()
+        }
+        if (json.optInt("code", -1) != 200) return emptyMap()
+        val data = json.optJSONObject("data") ?: return emptyMap()
+        val flat = mutableMapOf<String, String>()
+        flattenJson(data, flat)
+        val fields = listOf(
+            "云贝余额" to listOf("cloudBean", "cloudBeanCount", "cloudVillageBean", "cloud_bean"),
+            "VIP 等级" to listOf("vipType", "vipLevel", "vip_type", "level"),
+            "成长总值" to listOf("growthValue", "growth_value", "growth"),
+            "本期积分" to listOf("periodIntegral", "period_integral", "integral", "periodScore"),
+            "本周积分" to listOf("weekIntegral", "week_integral", "weekScore"),
+        )
+        val result = mutableMapOf<String, String>()
+        for ((label, keys) in fields) {
+            for (key in keys) {
+                val value = flat[key] ?: continue
+                if (value.isEmpty()) continue
+                result[label] = value
+                break
+            }
+        }
+        return result
+    }
+
+    /** 摊平嵌套对象；同名键外层优先（和平板/桌面端同一规则）。 */
+    private fun flattenJson(node: JSONObject, out: MutableMap<String, String>) {
+        val keys = node.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            when (val value = node.opt(key)) {
+                is JSONObject -> flattenJson(value, out)
+                is JSONArray -> for (i in 0 until value.length()) {
+                    (value.opt(i) as? JSONObject)?.let { flattenJson(it, out) }
+                }
+                null -> Unit
+                else -> if (!out.containsKey(key)) out[key] = value.toString()
+            }
+        }
+    }
+
     suspend fun reportListen(work: Work) {
         val payload = JSONObject().apply {
             put("workId", work.id)
@@ -404,5 +459,7 @@ class NeteaseApi {
         const val REPORT_LISTEN_URL =
             "https://interface.music.163.com/weapi/partner/resource/interact/report"
         const val SIGN_IN_URL = "https://music.163.com/weapi/point/dailyTask"
+        const val PARTNER_HOME_URL =
+            "https://interface.music.163.com/weapi/music/partner/home/get"
     }
 }

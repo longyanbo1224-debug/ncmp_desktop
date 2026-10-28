@@ -109,6 +109,11 @@ class TaskService : Service() {
                             trackLog.record(song, score = sc, note = note)
                         }
                     },
+                    onPoints = { points ->
+                        TaskBus.points.value = points
+                        // 存一份：记录页离线也能显示上次查到的数字
+                        store.partnerPoints = org.json.JSONObject(points).toString()
+                    },
                     onQueue = { works -> TaskBus.seedQueue(works) },
                     onTrack = { work, state -> TaskBus.setState(work, state) },
                 )

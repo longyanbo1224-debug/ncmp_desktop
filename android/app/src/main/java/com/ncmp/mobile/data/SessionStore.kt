@@ -71,6 +71,11 @@ class SessionStore(context: Context) {
         get() = prefs.getInt(KEY_NOTE_MAX_CHARS, NoteGenerator.DEFAULT_MAX_CHARS)
         set(value) = prefs.edit().putInt(KEY_NOTE_MAX_CHARS, value).apply()
 
+    /** 最近一次查到的合伙人积分/等级（JSON），记录页离线也能显示。 */
+    var partnerPoints: String
+        get() = prefs.getString(KEY_PARTNER_POINTS, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_PARTNER_POINTS, value).apply()
+
     // 定时执行
     var scheduleEnabled: Boolean
         get() = prefs.getBoolean(KEY_SCHEDULE_ENABLED, false)
@@ -109,6 +114,7 @@ class SessionStore(context: Context) {
         private const val KEY_NOTE_SOURCE = "note_source"
         private const val KEY_NOTE_VOICE = "note_voice"
         private const val KEY_NOTE_MAX_CHARS = "note_max_chars"
+        private const val KEY_PARTNER_POINTS = "partner_points"
         private const val KEY_SCHEDULE_ENABLED = "schedule_enabled"
         private const val KEY_SCHEDULE_HOUR = "schedule_hour"
         private const val KEY_SCHEDULE_MINUTE = "schedule_minute"

@@ -15,6 +15,8 @@ object TaskBus {
     val step = MutableStateFlow("")
     /** 今日曲目表：今天评了哪几首、每首几分、留下了什么批注。 */
     val tracks = MutableStateFlow<List<TrackItem>>(emptyList())
+    /** 合伙人积分/等级；没查到就是空 Map（界面"没数据就不显示"）。 */
+    val points = MutableStateFlow<Map<String, String>>(emptyMap())
     val resultLabel = MutableStateFlow("")
     val resultHint = MutableStateFlow("")
     val resultSummary = MutableStateFlow("")
@@ -29,6 +31,7 @@ object TaskBus {
         score.value = ""
         step.value = ""
         tracks.value = emptyList()
+        points.value = emptyMap()
         resultLabel.value = ""
         resultHint.value = ""
         resultSummary.value = ""
@@ -37,7 +40,23 @@ object TaskBus {
 
     fun append(line: String) {
         val cur = logs.value
-        logs.value = (cur + line).let { if (it.size > 500) it.takeLast(500) else it }
+        val safe = redact(line)
+        logs.value = (cur + safe).let { if (it.size > 500) it.takeLast(500) else it }
+    }
+
+    //: 日志里绝不能出现的东西（LLM key / Cookie / csrf / Bearer）
+    private val SECRETS = listOf(
+        Regex("sk-[A-Za-z0-9_-]{6,}") to "sk-***",
+        Regex("(MUSIC_U=)[^;,\\s\"']+") to "$1***",
+        Regex("(__csrf=)[^;,\\s\"']+") to "$1***",
+        Regex("(?i)(authorization:\\s*bearer\\s+)\\S+") to "$1***",
+    )
+
+    /** 脱敏 + 截断。所有写日志的地方都走这里，不靠"记得别打印"。 */
+    fun redact(line: String): String {
+        var text = line
+        for ((pattern, replacement) in SECRETS) text = text.replace(pattern, replacement)
+        return if (text.length > 400) text.take(400) + "…" else text
     }
 
     // ------------------------------------------------------------------

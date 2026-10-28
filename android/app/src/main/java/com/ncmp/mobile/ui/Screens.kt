@@ -975,6 +975,22 @@ private fun HistoryContent(vm: AppViewModel) {
                 StatCell("累计曲目", "${vm.trackStats.total} 首", Modifier.weight(1f))
                 StatCell("累计批注", "${vm.trackStats.notes} 条", Modifier.weight(1f))
             }
+            if (vm.points.isNotEmpty()) {
+                Spacer(Modifier.height(16.dp))
+                Text("合伙人", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = NCMP.Ink)
+                Spacer(Modifier.height(8.dp))
+                vm.points.forEach { (label, value) ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                        Text(
+                            label,
+                            fontSize = 12.sp,
+                            color = NCMP.Muted,
+                            modifier = Modifier.width(88.dp),
+                        )
+                        Text(value, fontFamily = FontFamily.Serif, fontSize = 15.sp, color = NCMP.Ink)
+                    }
+                }
+            }
             Spacer(Modifier.height(22.dp))
             // 和桌面端同一个分组骨架：小标题（15sp 半粗）+ 细线 + 内容
             Text("坚持", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = NCMP.Ink)

@@ -107,6 +107,10 @@ class TaskWorker(QThread):
             else:
                 status = "failed"
 
+            # 顺手刷新一次积分/等级缓存（记录页读它，界面线程不联网）。
+            # 放在任务之后：这时候账号状态才是最新的。
+            self._fetch_points(session)
+
             if status == "failed" and kind:
                 self._report_failure(kind)
             self.finished_sig.emit(ok, status, kind)
@@ -155,6 +159,18 @@ class TaskWorker(QThread):
                 return False
             QThread.msleep(1000)
         return not self.cancel_event.is_set()
+
+    def _fetch_points(self, session) -> None:
+        """查一次合伙人积分/等级并缓存；失败不影响任务结果。"""
+        try:
+            from app import partner_points_store
+            from core.partner_points import fetch_points
+
+            points = fetch_points(session, Logger())
+            if points:
+                partner_points_store.save(points)
+        except Exception:
+            pass
 
     def _report_failure(self, kind: str) -> None:
         """把失败原因写进步骤视图——用户不用翻日志就能看到是哪一类问题。"""

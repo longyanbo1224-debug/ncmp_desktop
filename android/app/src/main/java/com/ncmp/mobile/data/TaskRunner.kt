@@ -30,6 +30,8 @@ class TaskRunner(
     private val onQueue: (List<WorkItem>) -> Unit = {},
     // callback(work, state)：单曲状态变化（评分中 / 跳过 / 失败）
     private val onTrack: (Work, String) -> Unit = { _, _ -> },
+    // callback(points)：任务结束后查到的合伙人积分/等级（拿不到就不回调）
+    private val onPoints: (Map<String, String>) -> Unit = {},
 ) {
     @Volatile var cancelled = false
     private var currentStep = ""
@@ -84,6 +86,11 @@ class TaskRunner(
             step("额外评分任务", "running")
             processExtra(daily.id)
             step("额外评分任务", "success")
+
+            // 顺手查一次积分/等级（拿不到就什么都不发，界面不显示）
+            runCatching { api.getPartnerPoints() }.getOrNull()
+                ?.takeIf { it.isNotEmpty() }
+                ?.let(onPoints)
 
             return TaskResult.Success(baseDone, extraDone, extraAllDone)
         } catch (e: CancellationException) {
@@ -229,7 +236,25 @@ class TaskRunner(
         var attempt = 0
         while (true) {
             attempt++
-            val resp = api.weapiPost(NeteaseApi.SCORE_URL, data)
+            val resp = try {
+                api.weapiPost(NeteaseApi.SCORE_URL, data)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // 写入结果不明（超时/断连/响应不是 JSON）：只查一次服务端，
+                // 确认到了就按成功处理，确认不到再报错。**绝不重投评分**——
+                // 超时不代表服务端没收到，重投就是重复评分。
+                if (api.isWorkRated(work.id)) {
+                    log("${work.name} 提交结果不明，但服务端已记录这次评分，按成功处理")
+                    onScored(work, score)
+                    if (comment.isNotEmpty()) {
+                        log("批注已提交：$comment")
+                        onNote(work.name, score, comment)
+                    }
+                    return
+                }
+                throw e
+            }
             val code = resp.optInt("code", -1)
             if (code == 200) {
                 log("${work.name}「${work.authorName}」评分完成：${score}分")

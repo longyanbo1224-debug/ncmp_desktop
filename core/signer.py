@@ -37,6 +37,8 @@ class Signer:
         # 批注生成器：note_enabled 为假时 generate() 直接返回空串
         self.notes = NoteGenerator(config)
         self.sign_url = "https://interface.music.163.com/weapi/music/partner/work/evaluate"
+        #: 确认用：写入口失败时查一次"这首到底评没评上"
+        self.daily_url = "https://interface.music.163.com/api/music/partner/daily/task/get"
 
         # 加密相关常量
         self.random_str = self._generate_random_string(16)
@@ -188,5 +190,35 @@ class Signer:
             # 取消异常向上透传，不被下面的通用 Exception 吞掉
             raise
         except Exception as e:
+            # 写入结果不明（超时 / 断连 / 响应不是 JSON）时，**只查一次**服务端
+            # 确认这首是否已经评上；确认到了就按成功处理，确认不到才报错。
+            #
+            # 绝不重投评分：超时不代表服务端没收到，重投就是重复评分，
+            # 既污染账号，也是最容易触发风控的形态（这条来自 ncmm 的做法）。
+            if self._confirm_rated(work):
+                score = scoring.score_for(
+                    work, self.config.get("score", scoring.DEFAULT_STRATEGY))
+                self.logger.warning(
+                    f'歌曲「{work["name"]}」提交结果不明，但服务端已记录这次评分，按成功处理')
+                self.done += 1
+                if self.on_progress:
+                    try:
+                        self.on_progress(self.done, self.total, work["name"], score)
+                    except Exception as cb_err:
+                        self.logger.debug(f"on_progress 回调异常: {cb_err}")
+                return
             self.logger.error(f'歌曲「{work["name"]}」评分异常：{str(e)}')
             raise RuntimeError(f"评分过程出错: {str(e)}")
+
+    def _confirm_rated(self, work: dict) -> bool:
+        """查一次服务端：这首是不是已经评过了。查不到就当没评上。"""
+        try:
+            response = self.session.get(self.daily_url, timeout=15).json()
+            works = ((response.get("data") or {}).get("works") or [])
+            for task in works:
+                item = task.get("work") or {}
+                if str(item.get("id")) == str(work.get("id")) and task.get("completed"):
+                    return True
+        except Exception as e:
+            self.logger.debug(f"确认评分状态失败（按未评上处理）：{e}")
+        return False
