@@ -30,8 +30,13 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      # app/ui/styles/check.png 是 scripts/make_assets.py 生成的、没有进仓库，
+      # 而 spec 把它列为打包数据 —— 不先生成，PyInstaller 会直接报找不到文件。
+      - name: 生成缺失的样式资源
+        run: python scripts/make_assets.py
+
       - name: 打包（PyInstaller spec）
-        run: pyinstaller "ncmp desktop.spec" --noconfirm
+        run: pyinstaller "ncmp desktop.spec" --noconfirm --clean
 
       - name: 压缩产物
         run: Compress-Archive -Path dist/* -DestinationPath "ncmp-desktop-${{ github.ref_name }}.zip"
