@@ -368,7 +368,6 @@ class NoteGenerator(
     /** 句子收尾统一一个句号；已经有的不重复加（简短语气的判断句自带句号）。 */
     private fun sentence(text: String): String =
         if (text.endsWith("。")) text else "$text。"
-    }
 
     /** 把批注压到长度上限内：先丢收尾，再截断判断部分。 */
     private fun fit(text: String): String {
