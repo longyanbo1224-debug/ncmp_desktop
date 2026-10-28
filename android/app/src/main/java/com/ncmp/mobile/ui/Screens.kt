@@ -817,6 +817,98 @@ private fun ConfigSection(vm: AppViewModel) {
     }
 }
 
+/** 档位条的颜色：和曲目行档位标同一条规则（4-5 墨色 / 3 灰 / 1-2 红）。 */
+private fun tierBarColor(tier: String): Color = when (tier) {
+    "5", "4" -> NCMP.Ink
+    "3" -> NCMP.Muted
+    else -> NCMP.Red
+}
+
+/**
+ * 记录页的"口味"块：累计曲目 / 档位分布 / 最近评过的曲子。
+ *
+ * 对齐桌面端记录页——完成率首页已经有了，这里想看的是"我评过什么、我偏向几分"。
+ * 数据来自按曲目的本地记录（TrackLogStore），没有记录时给一句引导。
+ */
+@Composable
+private fun LedgerSection(vm: AppViewModel) {
+    val stats = vm.trackStats
+    if (stats.total == 0) {
+        Spacer(Modifier.height(18.dp))
+        Text(
+            "还没有曲目记录。跑一次评分之后，这里会长出你自己的口味曲线。",
+            fontSize = 12.sp,
+            color = NCMP.Muted,
+        )
+        return
+    }
+
+    Spacer(Modifier.height(20.dp))
+    ThinRule()
+    Spacer(Modifier.height(18.dp))
+    Text("口味", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = NCMP.Ink)
+    Spacer(Modifier.height(3.dp))
+    Text(
+        "累计 ${stats.total} 首，其中 ${stats.notes} 首留下了批注",
+        fontSize = 12.sp,
+        color = NCMP.Muted,
+    )
+    Spacer(Modifier.height(14.dp))
+
+    val peak = stats.maxTierCount().coerceAtLeast(1)
+    for (tier in listOf("5", "4", "3", "2", "1")) {
+        val count = stats.tiers[tier] ?: 0
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "$tier 分",
+                fontFamily = FontFamily.Serif,
+                fontSize = 12.sp,
+                color = NCMP.Muted,
+                modifier = Modifier.width(34.dp),
+            )
+            Box(Modifier.weight(1f).height(8.dp)) {
+                if (count > 0) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(count.toFloat() / peak)
+                            .height(8.dp)
+                            .background(tierBarColor(tier)),
+                    )
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "$count 首",
+                fontSize = 11.sp,
+                color = NCMP.Muted,
+                modifier = Modifier.width(44.dp),
+            )
+        }
+    }
+
+    Spacer(Modifier.height(18.dp))
+    ThinRule()
+    Spacer(Modifier.height(16.dp))
+    Text("最近评过的曲子", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = NCMP.Ink)
+    Spacer(Modifier.height(4.dp))
+    vm.recentTracks.forEachIndexed { index, record ->
+        if (index > 0) ThinRule()
+        TrackRow(
+            index + 1,
+            TrackItem(
+                song = record.song,
+                artist = record.artist,
+                score = record.score,
+                note = record.note,
+                state = TrackState.DONE,
+            ),
+        )
+    }
+}
+
 @Composable
 private fun HistoryContent(vm: AppViewModel) {
     // toList() 会读取快照状态：历史一更新就重组，不能直接拿可变列表当 remember 的 key
@@ -872,6 +964,7 @@ private fun HistoryContent(vm: AppViewModel) {
             }
             Spacer(Modifier.height(10.dp))
             StreakLegend(streak, successDays)
+            LedgerSection(vm)
             Spacer(Modifier.height(20.dp))
             ThinRule()
             Spacer(Modifier.height(18.dp))

@@ -67,6 +67,8 @@ class TaskService : Service() {
         acquireLocks()
 
         val store = SessionStore(applicationContext)
+        // 按曲目记账（哪首/几分/写了什么），记录页的口味曲线和最近曲目都读它
+        val trackLog = com.ncmp.mobile.data.TrackLogStore(applicationContext)
         val cfg = TaskConfig(
             scoreStrategy = intent?.getIntExtra(EXTRA_SCORE, 3) ?: 3,
             waitMinSeconds = intent?.getDoubleExtra(EXTRA_WAIT_MIN, 15.0) ?: 15.0,
@@ -96,9 +98,17 @@ class TaskService : Service() {
                         TaskBus.song.value = song
                         TaskBus.score.value = sc
                         TaskBus.addTrack(song, sc)
+                        if (song.isNotBlank() && sc.isNotBlank()) {
+                            trackLog.record(song, score = sc)
+                        }
                     },
                     onPercent = { TaskBus.percent.value = it },
-                    onNote = { song, sc, note -> TaskBus.addTrack(song, sc, note) },
+                    onNote = { song, sc, note ->
+                        TaskBus.addTrack(song, sc, note)
+                        if (song.isNotBlank()) {
+                            trackLog.record(song, score = sc, note = note)
+                        }
+                    },
                     onQueue = { works -> TaskBus.seedQueue(works) },
                     onTrack = { work, state -> TaskBus.setState(work, state) },
                 )

@@ -25,6 +25,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val store = SessionStore(app)
     private val historyStore = TaskHistoryStore(app)
+    private val trackLog = com.ncmp.mobile.data.TrackLogStore(app)
     private val api = NeteaseApi()
 
     // ---------- 登录态 ----------
@@ -78,6 +79,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     val history = mutableStateListOf<HistoryEntry>()
 
+    /** 记录页的汇总与最近曲目（来自按曲目的本地记录）。 */
+    var trackStats by mutableStateOf(com.ncmp.mobile.data.TrackStats())
+        private set
+    var recentTracks by mutableStateOf<List<com.ncmp.mobile.data.TrackRecord>>(emptyList())
+        private set
+
     init {
         loadSession()
         observeTaskBus()
@@ -91,6 +98,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshHistory() {
         history.clear()
         history.addAll(historyStore.load())
+        trackStats = trackLog.stats()
+        recentTracks = trackLog.recent(20)
     }
 
     private fun observeTaskBus() {
