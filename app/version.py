@@ -4,7 +4,7 @@
 放在页面文件里不合适。统一挪到这里。
 """
 
-__version__ = "1.2.1"
+__version__ = "1.2.2"
 
 GITHUB_REPO = "longyanbo1224-debug/ncmp_desktop"
 RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases/latest"
