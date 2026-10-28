@@ -124,7 +124,14 @@ def fetch_points(session, logger=None) -> Dict[str, str]:
             if logger is not None:
                 logger.debug(f"查询合伙人积分失败：{response.get('message', '未知错误')}")
             return {}
-        return parse_points(response.get("data") or {})
+        data = response.get("data") or {}
+        # 把原始字段打出来（debug 级）：接口字段名各版本不一致，
+        # 只有看到真实名字才能补准候选表，而不是继续猜。
+        if logger is not None:
+            flat: Dict[str, Any] = {}
+            _flatten(data, flat)
+            logger.debug(f"合伙人积分原始字段：{flat}")
+        return parse_points(data)
     except Exception as e:
         if logger is not None:
             logger.debug(f"查询合伙人积分异常：{e}")
