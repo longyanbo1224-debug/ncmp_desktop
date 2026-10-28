@@ -60,6 +60,17 @@ class TestParsePoints(unittest.TestCase):
             {"云贝余额": "12", "VIP 等级": "3", "成长总值": "480"},
         )
 
+    def test_real_payload_fields(self):
+        """真实返回（2026-10-29）：integral / currentWeekIntegral。"""
+        payload = {"data": {
+            "period": 73, "week": 3, "title": "CHIEF", "days": 1023,
+            "integral": 454, "currentWeekIntegral": 92,
+        }}
+        self.assertEqual(
+            parse_points(payload),
+            {"本期积分": "454", "本周积分": "92"},
+        )
+
     def test_zero_is_real_data_not_missing(self):
         self.assertEqual(parse_points({"data": {"cloudBean": 0}}), {"云贝余额": "0"})
 

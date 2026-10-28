@@ -375,8 +375,9 @@ class NeteaseApi {
             "云贝余额" to listOf("cloudBean", "cloudBeanCount", "cloudVillageBean", "cloud_bean"),
             "VIP 等级" to listOf("vipType", "vipLevel", "vip_type", "level"),
             "成长总值" to listOf("growthValue", "growth_value", "growth"),
-            "本期积分" to listOf("periodIntegral", "period_integral", "integral", "periodScore"),
-            "本周积分" to listOf("weekIntegral", "week_integral", "weekScore"),
+            // 实测字段名：integral / currentWeekIntegral（2026-10-29 桌面端日志）
+            "本期积分" to listOf("integral", "periodIntegral", "period_integral", "periodScore"),
+            "本周积分" to listOf("currentWeekIntegral", "weekIntegral", "week_integral", "weekScore"),
         )
         val result = mutableMapOf<String, String>()
         for ((label, keys) in fields) {

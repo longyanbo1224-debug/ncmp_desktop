@@ -13,13 +13,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 HOME_URL = "https://interface.music.163.com/weapi/music/partner/home/get"
 
-#: 展示名 → 候选字段名
+#: 展示名 → 候选字段名。第一项是实测到的真实字段名（见 2026-10-29 的日志），
+#: 后面几项是其他版本可能的名字。
 FIELDS = (
     ("云贝余额", ("cloudBean", "cloudBeanCount", "cloudVillageBean", "cloud_bean")),
     ("VIP 等级", ("vipType", "vipLevel", "vip_type", "level")),
     ("成长总值", ("growthValue", "growth_value", "growth")),
-    ("本期积分", ("periodIntegral", "period_integral", "integral", "periodScore")),
-    ("本周积分", ("weekIntegral", "week_integral", "weekScore")),
+    ("本期积分", ("integral", "periodIntegral", "period_integral", "periodScore")),
+    ("本周积分", ("currentWeekIntegral", "weekIntegral", "week_integral", "weekScore")),
 )
 
 #: 称号阈值（积分下限, 称号），按分数升序
