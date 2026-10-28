@@ -32,6 +32,8 @@ class TaskWorker(QThread):
     progress = Signal(int, int, str, str)
     # song_name, score, note —— 批注提交成功后发出，供曲目表把"留下了什么话"落到行上
     note = Signal(str, str, str)
+    # 今日曲目清单（list[dict]）：拉取任务后立刻发出，今天已评完时界面才有内容
+    works = Signal(list)
     # (ok, status, kind)，status ∈ {"success", "cancelled", "failed"}，
     # kind 是失败原因分类（见 core/utils/errors.py），成功时为空
     finished_sig = Signal(bool, str, str)
@@ -129,6 +131,7 @@ class TaskWorker(QThread):
             on_progress=self._on_progress,
             cancel_event=self.cancel_event,
             on_note=self._on_note,
+            on_works=self._on_works,
         )
         try:
             ok = bot.run()
@@ -215,6 +218,13 @@ class TaskWorker(QThread):
         # total 可能为 None
         self.progress.emit(int(done), int(total) if total is not None else 0,
                            str(song_name), str(score))
+
+    def _on_works(self, works) -> None:
+        """今日曲目清单：转成信号发给界面（core 线程 → 主线程）。"""
+        try:
+            self.works.emit(list(works))
+        except Exception:
+            pass
 
     def _on_note(self, work, score: str, note: str) -> None:
         """批注提交成功：转成信号发给界面（core 线程 → 主线程）。"""

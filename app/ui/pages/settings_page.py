@@ -29,7 +29,7 @@ from PySide6.QtCore import QSize, Qt, QThread, QTime, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QProgressBar, QPushButton, QScrollArea,
-    QSpinBox, QTimeEdit, QToolButton, QVBoxLayout, QWidget,
+    QSpinBox, QTabWidget, QTimeEdit, QToolButton, QVBoxLayout, QWidget,
 )
 
 from app.app_config import AppConfig
@@ -295,22 +295,39 @@ class SettingsPage(QWidget):
         subtitle.setWordWrap(True)
         content_layout.addWidget(subtitle)
 
-        content_layout.addSpacing(theme.SP_6)
+        content_layout.addSpacing(theme.SP_4)
 
-        # 各分组区
-        self._sections = QVBoxLayout()
-        self._sections.setSpacing(theme.GROUP_GAP)
-        content_layout.addLayout(self._sections)
+        # 设置项太多，一屏滚不完，按"你要改的是哪一类事"分页签。
+        # 每个页签自己是一个纵向布局，_new_section 往 self._sections 里追加，
+        # 所以建某一页之前先把 self._sections 指向那一页的布局。
+        self._tabs = QTabWidget()
+        self._tabs.setDocumentMode(True)
+        content_layout.addWidget(self._tabs, 1)
+        self._pages: Dict[str, QVBoxLayout] = {}
 
-        self._build_general_section()
-        self._build_account_section()
-        self._build_task_section()
-        self._build_note_section()
-        self._build_email_section()
-        self._build_schedule_section()
-        self._build_github_section()
+        for key, title in (("account", "账号"), ("task", "任务"),
+                           ("notify", "通知"), ("auto", "自动化"),
+                           ("general", "通用")):
+            page = QWidget()
+            layout = QVBoxLayout(page)
+            layout.setContentsMargins(0, theme.SP_4, 0, 0)
+            layout.setSpacing(theme.GROUP_GAP)
+            self._tabs.addTab(page, title)
+            self._pages[key] = layout
 
-        content_layout.addStretch(1)
+        def build(key: str, *builders) -> None:
+            """在某一页里建若干个分组，建完补一个弹簧把它顶到上方。"""
+            self._sections = self._pages[key]
+            for builder in builders:
+                builder()
+            self._sections.addStretch(1)
+
+        build("account", self._build_account_section)
+        build("task", self._build_task_section, self._build_note_section)
+        build("notify", self._build_email_section)
+        build("auto", self._build_schedule_section, self._build_github_section)
+        build("general", self._build_general_section)
+        self._sections = None
 
         # 操作按钮。原顶部还有一个「明文 → MD5」，和密码字段行内的那个
         # 功能完全重复（都调 hashlib.md5 写 netease_md5_password），已删。

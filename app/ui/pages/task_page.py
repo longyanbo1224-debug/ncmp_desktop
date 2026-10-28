@@ -314,6 +314,7 @@ class TaskPage(QWidget):
                 self._worker.step.disconnect()
                 self._worker.progress.disconnect()
                 self._worker.note.disconnect()
+                self._worker.works.disconnect()
                 self._worker.finished_sig.disconnect()
             except Exception:
                 pass
@@ -321,6 +322,7 @@ class TaskPage(QWidget):
         self._worker.step.connect(self._on_step)
         self._worker.progress.connect(self._on_progress)
         self._worker.note.connect(self._on_note)
+        self._worker.works.connect(self._on_works)
         self._worker.finished_sig.connect(self._on_finished)
 
     def install_log_handler(self, handler: GuiLogHandler) -> None:
@@ -704,6 +706,41 @@ class TaskPage(QWidget):
         frac = max(0.0, min(1.0, float(done) / float(total)))
         self._update_progress(int(round(lo + (hi - lo) * frac)))
         self._refresh_rail()
+
+    def _on_works(self, works) -> None:
+        """服务端返回的今日曲目清单：已评过的落进曲目表，批注从账本补。
+
+        这是"今天已经评过、再点执行也没歌可评"时曲目表还能有内容的关键——
+        分数在服务端，批注在本地账本，两边拼起来才是完整的一行。
+        """
+        notes = {}
+        try:
+            for entry in TrackLog().day():
+                name = str(entry.get("song") or "")
+                if name:
+                    notes[name] = str(entry.get("note") or "")
+        except Exception:
+            notes = {}
+        added = 0
+        for task in works or []:
+            try:
+                work = task.get("work") or {}
+                name = str(work.get("name") or "")
+            except Exception:
+                continue
+            if not name:
+                continue
+            done = bool(task.get("completed"))
+            self._track_list.add(
+                name,
+                meta=str(work.get("authorName") or ""),
+                score=str(task.get("score") or "") if done else "",
+                state="done" if done else "pending",
+                note=notes.get(name, ""),
+            )
+            added += 1
+        if added:
+            self._refresh_rail()
 
     def _on_note(self, song: str, score: str, note: str) -> None:
         """批注提交成功：填到对应曲目行上、写进账本、更新右栏计数。"""

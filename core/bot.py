@@ -12,7 +12,8 @@ class MusicPartnerBot:
                  on_step: Optional[Callable[[str, str, float], None]] = None,
                  on_progress: Optional[Callable[[int, Optional[int], str, str], None]] = None,
                  cancel_event: Optional[threading.Event] = None,
-                 on_note: Optional[Callable[[dict, str, str], None]] = None):
+                 on_note: Optional[Callable[[dict, str, str], None]] = None,
+                 on_works: Optional[Callable[[list], None]] = None):
         self.config = config
         self.logger = logger
         self.session = session
@@ -20,6 +21,7 @@ class MusicPartnerBot:
         self.on_step = on_step            # callback(name, status, elapsed)
         self.on_progress = on_progress    # callback(done, total, song_name, score)
         self.on_note = on_note            # callback(work, score, note)
+        self.on_works = on_works          # callback(tasks)：今日曲目清单（含服务端分数）
         self.cancel_event = cancel_event  # threading.Event
         self.t0 = 0.0
         self._current_step = ""
@@ -62,6 +64,9 @@ class MusicPartnerBot:
             )
             complete, task_data = daily_task._get_daily_tasks()
             self._step("拉取每日任务", "success")
+            # 今日曲目清单（含服务端已记的分数）直接交给界面：
+            # 今天已经评完时评分流程不会跑，界面否则一片空白。
+            self._emit_works(task_data)
 
             if not complete:
                 self._check_cancel()
@@ -92,6 +97,20 @@ class MusicPartnerBot:
             self.last_error = e
             self._step(self._current_step, "failed")
             return False
+
+    def _emit_works(self, task_data: dict) -> None:
+        """把今日曲目清单交给界面（work / 服务端分数 / 是否已评）。
+
+        今天已经评完时不会走评分流程，"今天评了哪几首、各几分"就只在这份
+        响应里（``works[].work`` + ``works[].score`` + ``works[].completed``），
+        不交出去，界面就只能显示空状态。
+        """
+        if not self.on_works:
+            return
+        try:
+            self.on_works(list(task_data.get("works") or []))
+        except Exception as cb_err:
+            self.logger.debug(f"on_works 回调异常: {cb_err}")
 
     def _verify_user(self) -> None:
         """验证用户信息"""

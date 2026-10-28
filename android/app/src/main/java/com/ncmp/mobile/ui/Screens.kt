@@ -1,11 +1,14 @@
 package com.ncmp.mobile.ui
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.app.AlarmManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
@@ -823,9 +826,23 @@ private fun HistoryContent(vm: AppViewModel) {
                 color = NCMP.Ink,
             )
             Spacer(Modifier.height(3.dp))
-            Text("过去一年，每格一天", fontSize = 12.sp, color = NCMP.Muted)
+            Text("过去一年，每格一天 · 点一下可横屏看", fontSize = 12.sp, color = NCMP.Muted)
             Spacer(Modifier.height(14.dp))
-            StreakGrid(cells)
+            // 一格图一年 53 列，竖屏挤成一团。点一下切横屏看，再点切回竖屏。
+            val activity = LocalContext.current as? Activity
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        val landscape = activity?.resources?.configuration?.orientation ==
+                            Configuration.ORIENTATION_LANDSCAPE
+                        activity?.requestedOrientation = if (landscape) {
+                            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                        } else {
+                            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                        }
+                    },
+            ) { StreakGrid(cells) }
             Spacer(Modifier.height(10.dp))
             StreakLegend(streak, successDays)
             Spacer(Modifier.height(20.dp))
