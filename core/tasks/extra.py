@@ -33,7 +33,6 @@ class ExtraTask:
         """
         try:
             extra_tasks, completed_count = self._get_extra_tasks()
-            self._emit_works(extra_tasks)
             full = bool(self.config.get('full_extra_tasks', False))
             target = len(extra_tasks) if full else 7 - completed_count
 
@@ -158,6 +157,9 @@ class ExtraTask:
             if response["code"] != 200:
                 raise RuntimeError(f"获取额外任务失败: {response.get('message', '未知错误')}")
             extra_tasks = response["data"]
+            # 整份清单（含已评的）交给界面：今天已经评完时，界面上至少还看得见
+            # 今天额外任务评过哪些歌，而不是只剩基础任务那 5 首。
+            self._emit_works(extra_tasks)
             completed_tasks = [t for t in extra_tasks if t['completed']]
             uncompleted_tasks = [t for t in extra_tasks if not t['completed']]
 

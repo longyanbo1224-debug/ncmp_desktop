@@ -44,14 +44,31 @@ object TaskBus {
     // 曲目表
     // ------------------------------------------------------------------
 
-    /** 预置今天的待评队列：曲目先出现，状态等评分结果回来再改。 */
-    fun seedQueue(works: List<Work>) {
-        if (works.isEmpty()) return
+    /** 预置今天的曲目：已评过的直接显示「已提交」并带上服务端分数，没评的显示「待评」。 */
+    fun seedQueue(items: List<WorkItem>) {
+        if (items.isEmpty()) return
         val cur = tracks.value.toMutableList()
-        for (work in works) {
+        for (item in items) {
+            val work = item.work
             if (work.name.isBlank()) continue
-            if (cur.any { it.song == work.name }) continue
-            cur.add(TrackItem(song = work.name, artist = work.authorName))
+            val index = cur.indexOfFirst { it.song == work.name }
+            if (index < 0) {
+                cur.add(
+                    TrackItem(
+                        song = work.name,
+                        artist = work.authorName,
+                        score = item.score,
+                        state = if (item.completed) TrackState.DONE else TrackState.PENDING,
+                    ),
+                )
+            } else if (item.completed) {
+                // 已有行（可能是上一轮摆的"待评"）升级成"已提交"
+                val old = cur[index]
+                cur[index] = old.copy(
+                    state = TrackState.DONE,
+                    score = old.score.ifBlank { item.score },
+                )
+            }
         }
         tracks.value = cur
     }

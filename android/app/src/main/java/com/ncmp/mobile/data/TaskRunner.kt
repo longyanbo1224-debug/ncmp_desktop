@@ -27,7 +27,7 @@ class TaskRunner(
     // callback(song, score, note)：批注提交成功后通知界面
     private val onNote: (String, String, String) -> Unit = { _, _, _ -> },
     // callback(works)：今日待评队列，先把曲目行"待评"地摆出来
-    private val onQueue: (List<Work>) -> Unit = {},
+    private val onQueue: (List<WorkItem>) -> Unit = {},
     // callback(work, state)：单曲状态变化（评分中 / 跳过 / 失败）
     private val onTrack: (Work, String) -> Unit = { _, _ -> },
 ) {
@@ -69,6 +69,9 @@ class TaskRunner(
             val daily = api.getDailyTasks()
             log("今日任务：${if (daily.complete) "已完成" else "未完成"}[${daily.completedCount}/${daily.count}]")
             step("拉取每日任务", "success")
+            // 整份清单都摆进曲目表（已评过的也摆），否则今天评完之后再点执行，
+            // 曲目表会一首都没有。
+            onQueue(daily.items)
 
             if (!daily.complete) {
                 checkCancel()
@@ -175,8 +178,8 @@ class TaskRunner(
         var done = 0
         val total = pending.size
         planScoring(total)
-        // 今日曲目先整体摆成「待评」，评分结果回来再逐条改状态
-        onQueue(pending)
+        // 今日曲目在 run() 拉完每日任务时已经整体摆进曲目表（含已评过的），
+        // 这里不再重复摆一遍。
         onProgress(0, total, "", "")
         phaseProgress(0, total)
         for (work in pending) {
@@ -273,7 +276,10 @@ class TaskRunner(
     }
 
     private suspend fun processExtra(taskId: Any) {
-        var (uncompleted, completedCount) = api.getExtraTasks()
+        var (allItems, completedCount) = api.getExtraTasks()
+        var uncompleted = allItems.filter { !it.completed }
+        // 整份清单都摆进曲目表（含已评的）：今天已经评完时，这里至少看得见评过哪些歌
+        onQueue(allItems)
         val full = config.fullExtraTasks
         var target = if (full) uncompleted.size else 7 - completedCount
 
@@ -287,8 +293,6 @@ class TaskRunner(
             return
         }
         log("发现 ${uncompleted.size} 个待额外评定任务")
-        // 额外任务也先摆进曲目表：只摆这一轮真正要评的那些
-        onQueue(if (target < uncompleted.size) uncompleted.take(target).map { it.work } else uncompleted.map { it.work })
 
         var success = 0
         onProgress(0, target, "", "")
@@ -306,7 +310,7 @@ class TaskRunner(
                     log("补跑检查失败，结束额外评分: ${e.message}")
                     break
                 }
-                uncompleted = refreshed.first
+                uncompleted = refreshed.first.filter { !it.completed }
                 completedCount = refreshed.second
                 target = if (full) maxOf(target, success + uncompleted.size)
                 else maxOf(target, 7 - completedCount)

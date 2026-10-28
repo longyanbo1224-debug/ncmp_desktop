@@ -308,12 +308,18 @@ class NeteaseApi {
         for (i in 0 until works.length()) {
             val item = works.optJSONObject(i) ?: continue
             val work = item.optJSONObject("work") ?: continue
-            items.add(WorkItem(parseWork(work), item.optBoolean("completed", false)))
+            items.add(
+                WorkItem(
+                    parseWork(work),
+                    item.optBoolean("completed", false),
+                    item.optString("score", ""),
+                ),
+            )
         }
         return DailyTasks(id, count, completedCount, items)
     }
 
-    /** 返回 (未完成列表, 已完成数量)。 */
+    /** 返回 (整份清单, 已完成数量)。整份都要：已评的也要显示在曲目表里。 */
     suspend fun getExtraTasks(): Pair<List<WorkItem>, Int> {
         val json = getJson(EXTRA_LIST_URL, referer = "https://mp.music.163.com/")
         if (json.optInt("code", -1) != 200) {
@@ -324,10 +330,16 @@ class NeteaseApi {
         for (i in 0 until arr.length()) {
             val item = arr.optJSONObject(i) ?: continue
             val work = item.optJSONObject("work") ?: continue
-            items.add(WorkItem(parseWork(work), item.optBoolean("completed", false)))
+            items.add(
+                WorkItem(
+                    parseWork(work),
+                    item.optBoolean("completed", false),
+                    item.optString("score", ""),
+                ),
+            )
         }
         val completedCount = items.count { it.completed }
-        return items.filter { !it.completed } to completedCount
+        return items to completedCount
     }
 
     suspend fun reportListen(work: Work) {

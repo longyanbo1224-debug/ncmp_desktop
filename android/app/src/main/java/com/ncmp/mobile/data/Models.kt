@@ -8,7 +8,11 @@ data class Work(
     val resourceId: Any,
 )
 
-data class WorkItem(val work: Work, val completed: Boolean)
+data class WorkItem(
+    val work: Work,
+    val completed: Boolean,
+    val score: String = "",
+)
 
 /** 单曲状态（用词见 docs/DESIGN.md §6，不得混用同义词）。 */
 object TrackState {

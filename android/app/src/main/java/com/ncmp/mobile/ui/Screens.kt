@@ -895,20 +895,43 @@ private fun LedgerSection(vm: AppViewModel) {
     Spacer(Modifier.height(18.dp))
     ThinRule()
     Spacer(Modifier.height(16.dp))
-    Text("最近评过的曲子", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = NCMP.Ink)
-    Spacer(Modifier.height(4.dp))
-    vm.recentTracks.forEachIndexed { index, record ->
-        if (index > 0) ThinRule()
-        TrackRow(
-            index + 1,
-            TrackItem(
-                song = record.song,
-                artist = record.artist,
-                score = record.score,
-                note = record.note,
-                state = TrackState.DONE,
-            ),
+    // 最近曲目可能几十条，默认收起，点标题展开
+    var recentExpanded by remember { mutableStateOf(false) }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { recentExpanded = !recentExpanded }
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "最近评过的曲子 ${vm.recentTracks.size}",
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = NCMP.Ink,
+            modifier = Modifier.weight(1f),
         )
+        Text(
+            if (recentExpanded) "收起" else "展开",
+            fontSize = 12.sp,
+            color = NCMP.Muted,
+        )
+    }
+    if (recentExpanded) {
+        Spacer(Modifier.height(4.dp))
+        vm.recentTracks.forEachIndexed { index, record ->
+            if (index > 0) ThinRule()
+            TrackRow(
+                index + 1,
+                TrackItem(
+                    song = record.song,
+                    artist = record.artist,
+                    score = record.score,
+                    note = record.note,
+                    state = TrackState.DONE,
+                ),
+            )
+        }
     }
 }
 
