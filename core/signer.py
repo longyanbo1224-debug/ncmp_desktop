@@ -105,8 +105,13 @@ class Signer:
         """
         score = scoring.score_for(work, self.config.get("score", scoring.DEFAULT_STRATEGY))
         return score, scoring.tag_for(score)
-    def sign(self, work: dict, is_extra: bool = False, _retry: int = 0) -> None:
-        """为作品评分。``_retry`` 是内部重试计数，调用方不用传。"""
+    def sign(self, work: dict, is_extra: bool = False, _retry: int = 0) -> bool:
+        """为作品评分。``_retry`` 是内部重试计数，调用方不用传。
+
+        :returns: 服务端确实记下了这次评分才返回 True；
+            「资源状态异常」这类跳过返回 False——调用方**不能**把它算成成功，
+            否则本地计数会比网易云上实际看到的评分多一首。
+        """
         # 评分入口处响应取消
         self._check_cancel()
         try:
@@ -165,6 +170,7 @@ class Signer:
                             self.on_note(work, score, comment)
                         except Exception as cb_err:
                             self.logger.debug(f"on_note 回调异常: {cb_err}")
+                return True
             else:
                 error_msg = response.get('message') or response.get('msg', '未知错误')
                 if "频繁" in error_msg:
@@ -180,9 +186,10 @@ class Signer:
                         f"遇到频率限制，等待 {retry_delay:.1f} 秒后重试"
                         f"（第 {_retry + 1} 次）...")
                     self._sleep(retry_delay)
-                    self.sign(work, is_extra, _retry + 1)
+                    return self.sign(work, is_extra, _retry + 1)
                 elif response["code"] == 405 and "资源状态异常" in error_msg:
-                    self.logger.warning(f'歌曲「{work["name"]}」资源状态异常，跳过')
+                    self.logger.warning(f'歌曲「{work["name"]}」资源状态异常，跳过（不计入成功）')
+                    return False
                 else:
                     raise RuntimeError(f"评分失败: {error_msg} (响应码: {response.get('code')})")
 
@@ -206,7 +213,7 @@ class Signer:
                         self.on_progress(self.done, self.total, work["name"], score)
                     except Exception as cb_err:
                         self.logger.debug(f"on_progress 回调异常: {cb_err}")
-                return
+                return True
             self.logger.error(f'歌曲「{work["name"]}」评分异常：{str(e)}')
             raise RuntimeError(f"评分过程出错: {str(e)}")
 

@@ -86,12 +86,16 @@ class ExtraTask:
                         raise CancelledError("用户取消任务，停止额外评分")
 
                     try:
-                        self._process_single_task(
+                        rated = self._process_single_task(
                             task, task_id,
                             done_offset=success_count,
                             total=target,
                         )
-                        # 只有在没有抛出异常时才增加成功计数
+                        if not rated:
+                            # 服务端返回「资源状态异常」这类跳过：不能算成功，
+                            # 否则本地计数会比网易云上实际评过的多一首。
+                            self.logger.info("本首未计入成功，补跑轮次会再核对")
+                            continue
                         success_count += 1
                         self.logger.info(f"成功完成第 {success_count}/{target} 个额外评分任务")
 
@@ -169,8 +173,8 @@ class ExtraTask:
             self.logger.error(f"获取额外任务列表失败: {str(e)}")
             raise
     def _process_single_task(self, task: Dict, task_id: str,
-                             done_offset: int = 0, total: Optional[int] = None) -> None:
-        """处理单个额外评分任务"""
+                             done_offset: int = 0, total: Optional[int] = None) -> bool:
+        """处理单个额外评分任务。返回服务端是否真的记下了这次评分。"""
         work = task['work']
         try:
             # 1. 上报听歌记录
@@ -185,7 +189,7 @@ class ExtraTask:
                 done_offset=done_offset,
                 on_note=self.on_note,
             )
-            signer.sign(work, is_extra=True)
+            return signer.sign(work, is_extra=True)
         except CancelledError:
             # 用户在评分入口处取消，直接透传，不按失败记录日志
             raise

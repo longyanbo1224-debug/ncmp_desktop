@@ -579,7 +579,7 @@ class TaskPage(QWidget):
     def _refresh_rail(self) -> None:
         """刷新右栏：今日完成数、批注数、最近一次运行。"""
         total = self._today_total
-        done = self._today_done or self._track_list.count()
+        done = self._today_done or self._track_list.done_count()
         if total:
             self._rail_done.setText(f"已完成 {done}/{total} 首")
         else:
@@ -778,7 +778,7 @@ class TaskPage(QWidget):
         if status == "success":
             summary = "任务执行完成"
             notes = self._track_list.note_count()
-            head = f"今天评完了 {self._track_list.count()} 首"
+            head = f"今天评完了 {self._track_list.done_count()} 首"
             if notes:
                 head += f"，留下 {notes} 条批注"
             self._set_status(head + "。", "successText")

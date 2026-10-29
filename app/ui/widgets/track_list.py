@@ -265,8 +265,16 @@ class TrackList(QWidget):
         return len(self._rows)
 
     def note_count(self) -> int:
-        """已提交批注的行数（账本摘要用）。"""
+        """已提交批注的行数（记录摘要用）。"""
         return sum(1 for row in self._rows.values() if row.note)
+
+    def done_count(self) -> int:
+        """真正评完的行数。
+
+        不能直接用 ``count()``：列表里还有"待评"的行（今天已评完时也会摆出来），
+        拿总行数当成绩会比网易云上实际看到的评分多。
+        """
+        return sum(1 for row in self._rows.values() if row.state == "done")
 
     # ------------------------------------------------------------------
     # 内部
