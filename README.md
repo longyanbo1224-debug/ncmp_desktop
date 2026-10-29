@@ -418,14 +418,9 @@ v1.2.1 的完整说明见 [release-notes/v1.2.1.md](release-notes/v1.2.1.md)。
 
 ## 项目热度
 
-实时数字看徽章（每次刷新都准）：
-
 [![Stars](https://img.shields.io/github/stars/longyanbo1224-debug/ncmp_desktop?style=flat-square)](https://github.com/longyanbo1224-debug/ncmp_desktop/stargazers)
 [![Forks](https://img.shields.io/github/forks/longyanbo1224-debug/ncmp_desktop?style=flat-square)](https://github.com/longyanbo1224-debug/ncmp_desktop/forks)
 [![Release](https://img.shields.io/github/v/release/longyanbo1224-debug/ncmp_desktop?style=flat-square)](https://github.com/longyanbo1224-debug/ncmp_desktop/releases)
-
-曲线图来自第三方服务，**有缓存延迟**（GitHub 还会再代理缓存一次），
-star 数是奇数增长时看着像"没动"：
 
 [![Star History Chart](https://api.star-history.com/svg?repos=longyanbo1224-debug/ncmp_desktop&type=Date)](https://star-history.com/#longyanbo1224-debug/ncmp_desktop&Date)
 
