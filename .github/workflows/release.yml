@@ -97,8 +97,10 @@ jobs:
       - name: 整理产物
         run: |
           mkdir -p release
-          find artifacts -name "*.zip" -exec cp {} release/ \;
-          find artifacts -name "*.apk" -exec cp {} release/ \;
+          # 用固定文件名：README 与用户习惯都认这两个名字，
+          # 不要暴露 app-debug.apk / 带版本号的 zip 这类构建期名字。
+          find artifacts -name "*.zip" -exec cp {} release/ncmp.desktop.zip \;
+          find artifacts -name "*.apk" -exec cp {} release/ncmp-mobile.apk \;
           ls -lh release
 
       - name: 创建 Release
