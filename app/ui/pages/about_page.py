@@ -23,8 +23,8 @@ GITHUB_URL = f"https://github.com/{GITHUB_REPO}"
 GITHUB_LABEL = GITHUB_REPO
 UPSTREAM_URL = "https://github.com/ACAne0320/ncmp"
 UPSTREAM_LABEL = "ACAne0320/ncmp"
-REFERENCE_URL = "https://github.com/Grails125/ncmm"
-REFERENCE_LABEL = "Grails125/ncmm"
+REFERENCE_URL = "https://github.com/3899/ncmm"
+REFERENCE_LABEL = "3899/ncmm"
 LICENSE = "MIT License"
 
 
