@@ -439,4 +439,4 @@ v1.2.1 的完整说明见 [release-notes/v1.2.1.md](release-notes/v1.2.1.md)。
   不做并行。取舍记录见 [docs/DESIGN.md](docs/DESIGN.md) §0。
 - 使用 [pyncm](https://github.com/sakarie9/pyncm)、[qtawesome](https://github.com/spyder-ide/qtawesome)、PySide6、OkHttp、Jetpack Compose
 - 随包字体是 Google [Noto Sans SC / Noto Serif SC](https://fonts.google.com/noto) 的改名子集化派生版，以 SIL Open Font License 1.1 分发（见 `app/ui/fonts/OFL.txt`）
-- YanboLong Non-Commercial License（基于 MIT 修改的非商业许可，详见 [LICENSE](LICENSE)）
+- MIT License（详见 [LICENSE](LICENSE)）
