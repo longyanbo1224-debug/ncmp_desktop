@@ -12,8 +12,8 @@ android {
         applicationId = "com.ncmp.mobile"
         minSdk = 24
         targetSdk = 34
-        versionCode = 8
-        versionName = "1.2.3"
+        versionCode = 9
+        versionName = "1.2.1"
     }
 
     buildTypes {
