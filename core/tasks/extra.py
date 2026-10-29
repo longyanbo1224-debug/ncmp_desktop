@@ -48,6 +48,8 @@ class ExtraTask:
 
             # 跨轮累计的成功数：进度条只前进，补跑时不会倒回 0
             success_count = 0
+            #: 服务端拒绝（资源状态异常）而被跳过的歌名，最后要告诉用户缺哪首
+            skipped: list = []
             # 先给一个 0/total，进度条在等待第一首歌时就能显示任务总量
             if self.on_progress:
                 try:
@@ -94,6 +96,7 @@ class ExtraTask:
                         if not rated:
                             # 服务端返回「资源状态异常」这类跳过：不能算成功，
                             # 否则本地计数会比网易云上实际评过的多一首。
+                            skipped.append(str((task.get("work") or {}).get("name") or ""))
                             self.logger.info("本首未计入成功，补跑轮次会再核对")
                             continue
                         success_count += 1
@@ -122,8 +125,12 @@ class ExtraTask:
             if no_more:
                 return
             if success_count < target:
+                hint = ""
+                if skipped:
+                    hint = ("：" + "、".join(n for n in skipped if n)
+                            + "（服务端拒绝的作品，重复执行也不会成功）")
                 self.logger.warning(
-                    f"检查后仍有 {target - success_count} 个额外评分任务未完成")
+                    f"检查后仍有 {target - success_count} 个额外评分任务未完成{hint}")
             else:
                 self.logger.info(f"额外评分任务处理完成，成功评分 {success_count} 首")
         except CancelledError:

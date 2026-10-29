@@ -205,7 +205,7 @@ class TaskRunner(
         }
     }
 
-    private suspend fun sign(work: Work, taskId: Any, isExtra: Boolean, onScored: (Work, String) -> Unit) {
+    private suspend fun sign(work: Work, taskId: Any, isExtra: Boolean, onScored: (Work, String) -> Unit): Boolean {
         checkCancel()
         onTrack(work, TrackState.RUNNING)
         val delaySec = randomWait()
@@ -251,7 +251,7 @@ class TaskRunner(
                         log("批注已提交：$comment")
                         onNote(work.name, score, comment)
                     }
-                    return
+                    return true
                 }
                 throw e
             }
@@ -264,7 +264,7 @@ class TaskRunner(
                     log("批注已提交：$comment")
                     onNote(work.name, score, comment)
                 }
-                return
+                return true
             }
             val msg = resp.optString("message", resp.optString("msg", "未知错误"))
             when {
@@ -274,9 +274,9 @@ class TaskRunner(
                     sleepCancellable(retry)
                 }
                 code == 405 && msg.contains("资源状态异常") -> {
-                    log("歌曲「${work.name}」资源状态异常，跳过")
+                    log("歌曲「${work.name}」资源状态异常，跳过（服务端未记下这次评分）")
                     onTrack(work, TrackState.SKIPPED)
-                    return
+                    return false
                 }
                 code == 405 && msg.contains("没有更多") -> {
                     // 今天没有可评的歌了：这是完成信号，不是额度异常
@@ -320,6 +320,8 @@ class TaskRunner(
         log("发现 ${uncompleted.size} 个待额外评定任务")
 
         var success = 0
+        // 被服务端拒绝（资源状态异常）的歌：要能告诉用户"缺的是哪首"
+        val skipped = mutableListOf<String>()
         onProgress(0, target, "", "")
         phaseProgress(0, target)
         var noMore = false
@@ -352,11 +354,17 @@ class TaskRunner(
                 try {
                     api.reportListen(work)
                     log("歌曲 ${work.name} 听歌记录上报成功")
-                    sign(work, taskId, isExtra = true) { w, score ->
+                    val rated = sign(work, taskId, isExtra = true) { w, score ->
                         success++
                         extraDone = success
                         onProgress(success, target, w.name, score)
                         phaseProgress(success, target)
+                    }
+                    if (!rated) {
+                        // 服务端没接受这首：不算成功，重试也不会成功，记下来告诉用户
+                        skipped.add(work.name)
+                        log("「${work.name}」未评上，先跳过")
+                        continue
                     }
                     log("成功完成第 $success/$target 个额外评分任务")
                     if (success < target) {
@@ -383,7 +391,11 @@ class TaskRunner(
             return
         }
         if (success < target) {
-            log("检查后仍有 ${target - success} 个额外评分任务未完成")
+            val names = if (skipped.isEmpty()) "" else "：${skipped.joinToString("、")}"
+            log(
+                "检查后仍有 ${target - success} 个额外评分任务未完成$names" +
+                    "（服务端拒绝的作品，重复执行也不会成功）",
+            )
         } else {
             log("额外评分任务处理完成，成功评分 $success 首")
         }
