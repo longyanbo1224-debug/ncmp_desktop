@@ -82,6 +82,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -116,6 +117,7 @@ import com.ncmp.mobile.ui.widgets.SegmentedMeter
 import com.ncmp.mobile.ui.widgets.StreakGrid
 import com.ncmp.mobile.ui.widgets.StreakLegend
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -336,6 +338,8 @@ fun MainScreen(vm: AppViewModel) {
     var tab by remember { mutableStateOf(0) }
     // 保存设置之类的一次性反馈走底部 Snackbar：比在表单里加一行小字显眼
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val appContext = LocalContext.current
     LaunchedEffect(vm.saveHint) {
         if (vm.saveHint.isNotEmpty()) {
             snackbarHostState.showSnackbar(
@@ -414,7 +418,16 @@ fun MainScreen(vm: AppViewModel) {
                 HistoryContent(vm)
             }
         } else {
-            AboutContent(Modifier.padding(padding))
+            AboutContent(
+                modifier = Modifier.padding(padding),
+                onCopy = { text ->
+                    runCatching {
+                        appContext.getSystemService(ClipboardManager::class.java)
+                            ?.setPrimaryClip(ClipData.newPlainText("链接", text))
+                    }
+                    scope.launch { snackbarHostState.showSnackbar("已复制") }
+                },
+            )
         }
     }
 }
@@ -999,14 +1012,20 @@ private fun LedgerSection(vm: AppViewModel) {
 
 private const val GITHUB_URL = "https://github.com/longyanbo1224-debug/ncmp_desktop"
 private const val RELEASES_URL = "$GITHUB_URL/releases"
+private const val MIRROR_URL = "https://github.akams.cn/"
+private const val UPSTREAM_URL = "https://github.com/ACAne0320/ncmp"
+private const val REFERENCE_URL = "https://github.com/3899/ncmm"
 
 /**
- * 关于页：版本、项目链接、参考来源与免责声明。
+ * 关于页：版本、项目链接、致谢、国内下载指引与免责声明。
  *
  * 手机端以前只有顶栏一行版本号，找不到项目主页、更新地址和许可信息。
  */
 @Composable
-private fun AboutContent(modifier: Modifier = Modifier) {
+private fun AboutContent(
+    modifier: Modifier = Modifier,
+    onCopy: (String) -> Unit = {},
+) {
     val context = LocalContext.current
     val versionName = remember(context) {
         runCatching {
@@ -1039,8 +1058,38 @@ private fun AboutContent(modifier: Modifier = Modifier) {
         AboutLink(context, "GitHub", GITHUB_URL)
         ThinRule()
         AboutLink(context, "更新与下载", RELEASES_URL)
-        ThinRule()
-        AboutLink(context, "参考项目 3899/ncmm", "https://github.com/3899/ncmm")
+
+        Spacer(Modifier.height(22.dp))
+        AboutHeading("致谢")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AboutInlineLink(context, "ACAne0320/ncmp", UPSTREAM_URL)
+            Text("　·　", fontSize = 13.sp, color = NCMP.Muted)
+            AboutInlineLink(context, "3899/ncmm", REFERENCE_URL)
+        }
+
+        Spacer(Modifier.height(22.dp))
+        AboutHeading("国内下载")
+        Text(
+            "GitHub 在国内下载可能很慢，可以先把仓库地址换成镜像直链：",
+            fontSize = 12.sp,
+            color = NCMP.Muted,
+            lineHeight = 18.sp,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text("1. 打开下面这个地址", fontSize = 12.sp, color = NCMP.Muted)
+        CopyLink(MIRROR_URL, onCopy)
+        Text("2. 勾选「获取 Releases 列表」", fontSize = 12.sp, color = NCMP.Muted)
+        Text("3. 把仓库地址粘贴到输入框：", fontSize = 12.sp, color = NCMP.Muted)
+        CopyLink(GITHUB_URL, onCopy)
+        Text("4. 点击「开始获取」", fontSize = 12.sp, color = NCMP.Muted)
+        Text(
+            "5. 选择对应版本下载即可（下载慢可切换节点后重新获取 Releases）",
+            fontSize = 12.sp,
+            color = NCMP.Muted,
+            lineHeight = 18.sp,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text("点上面的地址可复制", fontSize = 11.sp, color = NCMP.Muted)
 
         Spacer(Modifier.height(22.dp))
         AboutHeading("说明")
@@ -1065,6 +1114,12 @@ private fun AboutHeading(title: String) {
     ThinRule()
 }
 
+private fun openUrl(context: Context, url: String) {
+    runCatching {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }
+}
+
 @Composable
 private fun AboutLink(context: Context, label: String, url: String) {
     Text(
@@ -1073,12 +1128,35 @@ private fun AboutLink(context: Context, label: String, url: String) {
         color = NCMP.Brand,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable {
-                runCatching {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                }
-            }
+            .clickable { openUrl(context, url) }
             .padding(vertical = 12.dp),
+    )
+}
+
+/** 同一行里的链接（致谢用），和上一行的整行链接区分开。 */
+@Composable
+private fun AboutInlineLink(context: Context, label: String, url: String) {
+    Text(
+        label,
+        fontSize = 13.sp,
+        color = NCMP.Brand,
+        modifier = Modifier
+            .clickable { openUrl(context, url) }
+            .padding(vertical = 8.dp),
+    )
+}
+
+/** 点一下复制到剪贴板（国内下载指引里的地址）。 */
+@Composable
+private fun CopyLink(text: String, onCopy: (String) -> Unit) {
+    Text(
+        text,
+        fontSize = 11.sp,
+        color = NCMP.Brand,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCopy(text) }
+            .padding(vertical = 5.dp),
     )
 }
 
