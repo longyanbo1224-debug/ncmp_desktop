@@ -67,6 +67,9 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
@@ -330,8 +333,20 @@ private fun CookieLoginTab(vm: AppViewModel) {
 @Composable
 fun MainScreen(vm: AppViewModel) {
     var tab by remember { mutableStateOf(0) }
+    // 保存设置之类的一次性反馈走底部 Snackbar：比在表单里加一行小字显眼
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(vm.saveHint) {
+        if (vm.saveHint.isNotEmpty()) {
+            snackbarHostState.showSnackbar(
+                message = vm.saveHint,
+                duration = SnackbarDuration.Short,
+            )
+            vm.clearSaveHint()
+        }
+    }
     Scaffold(
         containerColor = NCMP.Ground,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = { Header(vm) },
         bottomBar = {
             NavigationBar(containerColor = NCMP.Panel) {
@@ -682,13 +697,6 @@ private fun TrackRow(index: Int, item: TrackItem) {
 @Composable
 private fun ConfigSection(vm: AppViewModel) {
     var expanded by remember { mutableStateOf(false) }
-    // 提示只停留 2.5 秒，避免一直挂在页面上
-    LaunchedEffect(vm.saveHint) {
-        if (vm.saveHint.isNotEmpty()) {
-            delay(2500)
-            vm.clearSaveHint()
-        }
-    }
     val context = LocalContext.current
     Column(Modifier.fillMaxWidth()) {
         Row(
@@ -823,10 +831,6 @@ private fun ConfigSection(vm: AppViewModel) {
                         onClick = { openBatterySettings(context) },
                         shape = RoundedCornerShape(10.dp),
                     ) { Text("后台保活设置", fontSize = 13.sp) }
-                }
-                if (vm.saveHint.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(vm.saveHint, fontSize = 12.sp, color = NCMP.Green)
                 }
             }
         }
