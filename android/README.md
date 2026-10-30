@@ -51,7 +51,7 @@ app/src/main/java/com/ncmp/mobile/
 │   ├── AlarmScheduler.kt  每日定时（AlarmManager）
 │   └── SessionStore.kt    Cookie / 配置加密存储
 └── ui/
-    ├── Screens.kt         登录 / 今日 / 记录
+    ├── Screens.kt         登录 / 今日 / 记录 / 关于
     ├── AppViewModel.kt    界面状态
     ├── Qr.kt              二维码
     ├── theme/             配色（跟随系统深浅色）
@@ -67,6 +67,8 @@ app/src/main/java/com/ncmp/mobile/
 - 「今日」页的曲目表一次列出当天全部曲目（基础 + 额外），服务端拒绝的作品标为「跳过」
 - 「记录」页：年度打卡图（点一下放大横看）、连续 / 累计曲目 / 累计批注、口味曲线、最近曲目；
   「合伙人」可手动刷新积分与称号
+- 「关于」页：版本、项目主页 / 更新下载、致谢（ACAne0320/ncmp · 3899/ncmm）、
+  国内下载指引（地址点按复制）、免责声明
 - 曲目明细里，服务端标为已评过的歌会自动补进本机记录（电脑端评过的歌也能看到）
 - 配色跟随系统深浅色（与桌面端同一套语义）
 - Cookie 存 Android Keystore 加密的 SharedPreferences
