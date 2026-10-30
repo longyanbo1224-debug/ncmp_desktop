@@ -748,6 +748,18 @@ class TaskPage(QWidget):
                 note=notes.get(name, ""),
             )
             added += 1
+            if done:
+                # 今天在手机端评过的歌，本机账本里没有；这里补记一条，
+                # 否则「记录」页的"最近评过的曲子"会是空的。拿不到批注就留空。
+                try:
+                    TrackLog().record(
+                        name,
+                        artist=str(work.get("authorName") or ""),
+                        score=str(task.get("score") or ""),
+                        note=notes.get(name, ""),
+                    )
+                except Exception:
+                    pass
         if added:
             self._refresh_rail()
 
@@ -788,8 +800,6 @@ class TaskPage(QWidget):
             self._meter.set_progress(100)
             self._percent_label.setText("100%")
             self._show_hint("")
-            # 顺利跑完就把运行详情收起来，页面上只留结果
-            self._set_detail_visible(False)
         elif status == "cancelled":
             summary = "用户手动取消任务"
             self._set_status("这次被你取消了，已经评完的曲目都还在。", "warningText")

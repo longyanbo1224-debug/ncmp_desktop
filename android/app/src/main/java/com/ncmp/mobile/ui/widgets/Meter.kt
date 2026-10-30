@@ -8,6 +8,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.ncmp.mobile.ui.theme.NCMP
 import kotlin.math.roundToInt
 
 /** 桌面端同款「分段电平表」（VU 表）进度条。 */
@@ -17,7 +18,8 @@ fun SegmentedMeter(
     color: Color,
     modifier: Modifier = Modifier,
     segments: Int = 40,
-    emptyColor: Color = Color(0xFFE5E5E5),
+    // 未点亮的格子跟随主题（深色下不能还是浅灰）
+    emptyColor: Color = NCMP.Track,
 ) {
     Canvas(modifier = modifier) {
         val gap = 3.dp.toPx()
