@@ -423,9 +423,11 @@ QPushButton:disabled {
 
 /* 键盘焦点：边框加粗到 2px 的同时把内边距各减 1px，
    控件外框尺寸完全不变，不会引起重排。 */
+/* 键盘焦点：1px 品牌色描边（与底边框同宽，不引起重排）。
+   不用 2px 粗框——按钮点完之后焦点会一直挂着，粗框看起来像"被选中"，
+   在红底按钮上尤其像贴了个黑边。 */
 QPushButton:focus {
-    border: 2px solid $BRAND;
-    padding: 6px 15px;
+    border: 1px solid $BRAND;
 }
 
 /* 主按钮：网易云品牌红实心。 */
@@ -452,10 +454,9 @@ QPushButton#primaryButton:disabled {
     color: #FFFFFF;
 }
 
-/* 红底上再用红焦点框看不见，换墨色 */
+/* 红底上再画红框看不见，用压深一档的红 */
 QPushButton#primaryButton:focus {
-    border: 2px solid $INK;
-    padding: 6px 15px;
+    border: 1px solid $BRAND_PRESSED;
 }
 
 /* 次按钮：扁平填充，和默认按钮同一套（保留 objectName 以便语义清晰） */
@@ -483,9 +484,9 @@ QPushButton#textButton:hover {
 }
 
 QPushButton#dangerButton {
-    background-color: $PANEL;
+    background-color: $CONTROL_BG;
     color: $FAILED;
-    border: 1px solid $RULE;
+    border: 1px solid transparent;
 }
 
 QPushButton#dangerButton:hover {
@@ -509,8 +510,7 @@ QToolButton:checked {
 }
 
 QToolButton:focus {
-    border: 2px solid $BRAND;
-    padding: 2px;
+    border: 1px solid $BRAND;
 }
 
 /* ---- 输入控件 ---- */
@@ -578,7 +578,8 @@ QTimeEdit::up-button, QTimeEdit::down-button {
 QComboBox QAbstractItemView {
     background-color: $PANEL;
     border: 1px solid $RULE;
-    border-radius: ${R_CONTROL}px;
+    /* 不要圆角：弹出列表按矩形裁切，圆角会在最后一行下面留出缺口，
+       看起来像"最后一项下面还空了一行" */
     selection-background-color: $BRAND_SOFT;
     selection-color: $BRAND;
     outline: none;
@@ -946,13 +947,13 @@ QCheckBox::indicator:disabled {
 }
 
 QCheckBox::indicator:focus {
-    border: 2px solid $INK;
+    border: 1px solid $BRAND;
 }
 
 /* ---- 二维码框 ---- */
 QLabel#qrFrame {
     background: $PANEL;
-    border: 1px solid $RULE;
+    border: none;
     border-radius: ${R_PANEL}px;
 }
 
