@@ -132,7 +132,8 @@ class _DownCombo(QComboBox):
             row = self.view().sizeHintForRow(0)
             if row <= 0:
                 row = 24
-            visible = max(1, (area.height() - 24) // row)
+            # 最多铺 10 行：小时/分钟这种长列表铺满一屏太吓人，能选就行
+            visible = min(10, max(1, (area.height() - 24) // row))
             visible = min(visible, self.count())
             height = row * visible + 8      # 上下各留一点边框
             y = anchor.y()
@@ -190,8 +191,8 @@ FIELD_HINTS: Dict[str, Dict[str, str]] = {
     "note_length": {
         "tooltip": (
             "批注长度。三档都会真正影响句子长度：\n"
-            "简短 ≤40 字（可能丢掉收尾句）；标准 ≤80 字；\n"
-            "详细 ≈60–120 字（多写一句判断）。"),
+            "简短 40 字以内（可能丢掉收尾句）；标准 80 字以内；\n"
+            "详细 60-120 字（多写一句判断）。"),
     },
     "notify_email": {
         "placeholder": "接收任务结果通知的邮箱",
@@ -313,7 +314,7 @@ class SettingsPage(QWidget):
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(theme.PAGE_MARGIN, theme.PAGE_MARGIN,
+        outer.setContentsMargins(theme.PAGE_MARGIN, theme.SP_4,
                                  theme.PAGE_MARGIN, theme.SP_2)
         outer.setSpacing(0)
 
@@ -328,7 +329,7 @@ class SettingsPage(QWidget):
         subtitle.setWordWrap(True)
         outer.addWidget(subtitle)
 
-        outer.addSpacing(theme.SP_4)
+        outer.addSpacing(theme.SP_3)
 
         # 设置项太多，一屏滚不完，按"你要改的是哪一类事"分页签。
         # 每个页签自己是一个纵向布局，_new_section 往 self._sections 里追加，
@@ -349,8 +350,8 @@ class SettingsPage(QWidget):
             page_lay.setSpacing(0)
             inner = QWidget()
             layout = QVBoxLayout(inner)
-            layout.setContentsMargins(0, theme.SP_4, 0, theme.SP_4)
-            layout.setSpacing(theme.GROUP_GAP)
+            layout.setContentsMargins(0, theme.SP_2, 0, theme.SP_2)
+            layout.setSpacing(theme.SP_3)
             scroller = QScrollArea()
             scroller.setWidgetResizable(True)
             scroller.setFrameShape(QScrollArea.NoFrame)
@@ -426,13 +427,13 @@ class SettingsPage(QWidget):
         heading.setObjectName("sectionHeading")
         box.addWidget(heading)
 
-        box.addSpacing(theme.SP_2)
+        box.addSpacing(theme.SP_1)
 
         rule = QFrame()
         rule.setObjectName("rule")
         box.addWidget(rule)
 
-        box.addSpacing(theme.SP_4)
+        box.addSpacing(theme.SP_3)
 
         if intro:
             caption = QLabel(intro)
@@ -440,7 +441,7 @@ class SettingsPage(QWidget):
             caption.setWordWrap(True)
             caption.setMaximumWidth(theme.CAPTION_MAX_WIDTH)
             box.addWidget(caption)
-            box.addSpacing(theme.SP_4)
+            box.addSpacing(theme.SP_3)
 
         form_host = QWidget()
         # 限宽：输入框横跨整个窗口时一行能放 60 多个汉字，眼睛要来回扫。
@@ -460,7 +461,7 @@ class SettingsPage(QWidget):
         form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
         form.setHorizontalSpacing(theme.SP_3)
-        form.setVerticalSpacing(theme.SP_2)
+        form.setVerticalSpacing(theme.SP_1 + 2)
         box.addWidget(form_host)
 
         container.setMaximumWidth(theme.FORM_MAX_WIDTH)
@@ -559,9 +560,9 @@ class SettingsPage(QWidget):
         self._controls["note_voice"] = note_voice
 
         note_length = _DownCombo()
-        note_length.addItem("简短（≤40 字）", "brief")
-        note_length.addItem("标准（≤80 字）", "standard")
-        note_length.addItem("详细（60–120 字）", "detailed")
+        note_length.addItem("简短（40 字以内）", "brief")
+        note_length.addItem("标准（80 字以内）", "standard")
+        note_length.addItem("详细（60-120 字）", "detailed")
         self._apply_hint(note_length, "note_length")
         form.addRow("note_length", note_length)
         self._controls["note_length"] = note_length
@@ -646,7 +647,7 @@ class SettingsPage(QWidget):
         log_lay.setContentsMargins(0, 0, 0, 0)
         log_lay.setSpacing(theme.SP_2)
         log_btn = QPushButton("打开日志文件夹")
-        log_btn.setObjectName("secondaryButton")
+        log_btn.setObjectName("textButton")
         log_btn.setToolTip(
             "日志按天滚动，保留最近 7 天。反馈问题时把这个文件夹里的日志附上即可。")
         log_btn.clicked.connect(self._open_log_dir)
@@ -697,10 +698,10 @@ class SettingsPage(QWidget):
 
         # 本地随机延迟。固定整点执行本身就是个风控特征，
         # 云端早有 RANDOM_DELAY_MINUTES，本地一直缺。
-        delay_spin = QSpinBox()
-        delay_spin.setRange(0, 30)
-        delay_spin.setSuffix(" 分钟")
-        delay_spin.setSpecialValueText("不启用")
+        delay_spin = _DownCombo()
+        delay_spin.addItem("不启用", 0)
+        for minutes in range(1, 31):
+            delay_spin.addItem(f"{minutes} 分钟", minutes)
         delay_spin.setToolTip(
             "0=不启用。设为 N 分钟后，本地定时任务会在到点后的 0~N 分钟内随机时刻启动，\n"
             "避免每天都在同一秒发起请求——固定整点本身就是个风控特征。\n"
@@ -1261,8 +1262,9 @@ class SettingsPage(QWidget):
                 if self._schedule_mode_combo.itemData(i) == mode:
                     self._schedule_mode_combo.setCurrentIndex(i)
                     break
-            self._schedule_delay_spin.setValue(
-                int(self._app_config.get("local_delay_minutes", 0) or 0))
+            delay = int(self._app_config.get("local_delay_minutes", 0) or 0)
+            self._schedule_delay_spin.setCurrentIndex(
+                max(0, min(30, delay)))
             self._schedule_catchup_box.setChecked(
                 bool(self._app_config.get("catchup_enabled", True)))
             self._set_time_combos(
@@ -1323,7 +1325,7 @@ class SettingsPage(QWidget):
             self._app_config.set("schedule_time", hhmm)
             self._app_config.set("schedule_mode", mode)
             self._app_config.set("local_delay_minutes",
-                                 int(self._schedule_delay_spin.value()))
+                                 int(self._schedule_delay_spin.currentData() or 0))
             self._app_config.set("catchup_enabled",
                                  bool(self._schedule_catchup_box.isChecked()))
             self._app_config.set(
