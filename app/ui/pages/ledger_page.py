@@ -10,9 +10,9 @@
 from datetime import date, timedelta
 from typing import List, Tuple
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
 )
 
 from app.task_history import TaskHistory
@@ -20,6 +20,34 @@ from app.track_log import TrackLog
 from app.ui import theme
 from app.ui.widgets.streak_grid import StreakGrid
 from app.ui.widgets.track_list import TrackList
+
+
+class _PointsWorker(QThread):
+    """在后台查一次积分/等级。
+
+    界面线程不能直接联网——查询慢的时候整页会卡住。
+    """
+
+    done = Signal(dict)
+
+    def run(self) -> None:  # noqa: D401
+        points = {}
+        try:
+            import requests
+
+            from app.cookie_store import CookieStore
+            from core.partner_points import fetch_points
+            from core.utils.logger import Logger
+
+            music_u, csrf, _ = CookieStore().load()
+            if music_u and csrf:
+                session = requests.Session()
+                session.cookies.set("MUSIC_U", music_u)
+                session.cookies.set("__csrf", csrf)
+                points = fetch_points(session, Logger()) or {}
+        except Exception:
+            points = {}
+        self.done.emit(points)
 
 #: 口味曲线里的档位，从高到低
 _TIERS = ("5", "4", "3", "2", "1")
@@ -67,14 +95,30 @@ class LedgerPage(QWidget):
         # ---- 合伙人积分/等级（有数据才显示）----
         # 数字来自任务结束后缓存的那次查询；拿不到就整块隐藏，
         # 不填 0 假装有收益。
+        # 标题行常显：即使还没数据，也能手动点「刷新」去查一次。
+        self._points_header = QWidget()
+        head = QHBoxLayout(self._points_header)
+        head.setContentsMargins(0, 0, 0, 0)
         self._points_title = QLabel("合伙人")
         self._points_title.setObjectName("sectionHeading")
-        outer.addWidget(self._points_title)
+        head.addWidget(self._points_title)
+        head.addStretch(1)
+        self._points_refresh = QPushButton("刷新")
+        self._points_refresh.setObjectName("textButton")
+        self._points_refresh.clicked.connect(self.refresh_points)
+        head.addWidget(self._points_refresh)
+        outer.addWidget(self._points_header)
+
+        self._points_empty = QLabel("点「刷新」获取积分与称号")
+        self._points_empty.setObjectName("captionText")
+        outer.addWidget(self._points_empty)
+
         self._points_box = QWidget()
         self._points_lay = QVBoxLayout(self._points_box)
         self._points_lay.setContentsMargins(0, 0, 0, 0)
         self._points_lay.setSpacing(theme.SP_1 + 2)
         outer.addWidget(self._points_box)
+        self._points_worker = None
 
         # ---- 口味曲线 ----
         curve_title = QLabel("口味曲线")
@@ -227,8 +271,8 @@ class LedgerPage(QWidget):
             points = {}
 
         has_data = bool(points)
-        self._points_title.setVisible(has_data)
         self._points_box.setVisible(has_data)
+        self._points_empty.setVisible(not has_data)
         if not has_data:
             return
 
@@ -248,6 +292,31 @@ class LedgerPage(QWidget):
                 "距下一档", f"{info['next_label']}（还差 {info['gap']} 分）"))
         for threshold, name in info.get("table") or ():
             self._points_lay.addWidget(self._points_row(f"{threshold} 分", name))
+
+    def refresh_points(self) -> None:
+        """手动查一次积分/等级。
+
+        查询走后台线程（界面线程不联网，慢的时候整页会卡住）；
+        查到就写进缓存，再重绘这一块。
+        """
+        if self._points_worker is not None and self._points_worker.isRunning():
+            return
+        self._points_refresh.setEnabled(False)
+        self._points_refresh.setText("刷新中…")
+        self._points_worker = _PointsWorker(self)
+        self._points_worker.done.connect(self._on_points_fetched)
+        self._points_worker.start()
+
+    def _on_points_fetched(self, points: dict) -> None:
+        self._points_refresh.setEnabled(True)
+        self._points_refresh.setText("刷新")
+        if points:
+            try:
+                from app import partner_points_store
+                partner_points_store.save(points)
+            except Exception:
+                pass
+        self._render_points()
 
     def _points_row(self, label: str, value: str) -> QWidget:
         row = QWidget()
