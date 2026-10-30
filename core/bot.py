@@ -68,6 +68,17 @@ class MusicPartnerBot:
             # 今天已经评完时评分流程不会跑，界面否则一片空白。
             self._emit_works(task_data)
 
+            # 额外任务清单提前拉一次：界面从第一秒就能看到今天全部曲目，
+            # 而不是先显示 5 首、等基础任务跑完才冒出额外的 15 首。
+            extra_task = ExtraTask(
+                self.session, self.logger, self.config,
+                on_progress=self.on_progress,
+                cancel_event=self.cancel_event,
+                on_note=self.on_note,
+                on_works=self.on_works,
+            )
+            extra_task.preload()
+
             if not complete:
                 self._check_cancel()
                 self._step("评分基础任务", "running")
@@ -76,13 +87,6 @@ class MusicPartnerBot:
 
             self._check_cancel()
             self._step("额外评分任务", "running")
-            extra_task = ExtraTask(
-                self.session, self.logger, self.config,
-                on_progress=self.on_progress,
-                cancel_event=self.cancel_event,
-                on_note=self.on_note,
-                on_works=self.on_works,
-            )
             extra_task.process_extra_tasks(task_data["id"])
             self._step("额外评分任务", "success")
             return True

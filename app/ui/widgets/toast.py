@@ -45,6 +45,9 @@ class Toast(QWidget):
                          | Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WA_StyledBackground, True)
+        # 无边框窗口要开半透明背景，样式表里的圆角才会真正裁出来
+        # （否则气泡是个直角方块，和界面的圆角风格对不上）
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setObjectName("toastPanel")
         self.setFixedWidth(_WIDTH)
         self.setCursor(Qt.PointingHandCursor)

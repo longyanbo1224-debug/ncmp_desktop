@@ -844,17 +844,22 @@ private fun StatCell(label: String, value: String, modifier: Modifier = Modifier
     }
 }
 
-/** 一行键值（合伙人积分 / 称号表共用）。 */
+/** 一行键值（合伙人积分 / 称号表共用）。small = 阈值表这种次要信息用。 */
 @Composable
-private fun PointsRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+private fun PointsRow(label: String, value: String, small: Boolean = false) {
+    Row(Modifier.fillMaxWidth().padding(vertical = if (small) 1.dp else 2.dp)) {
         Text(
             label,
-            fontSize = 12.sp,
+            fontSize = if (small) 11.sp else 12.sp,
             color = NCMP.Muted,
-            modifier = Modifier.width(88.dp),
+            modifier = Modifier.width(if (small) 56.dp else 88.dp),
         )
-        Text(value, fontFamily = FontFamily.Serif, fontSize = 15.sp, color = NCMP.Ink)
+        Text(
+            value,
+            fontFamily = if (small) FontFamily.Default else FontFamily.Serif,
+            fontSize = if (small) 11.sp else 15.sp,
+            color = if (small) NCMP.Muted else NCMP.Ink,
+        )
     }
 }
 
@@ -992,8 +997,19 @@ private fun HistoryContent(vm: AppViewModel) {
             }
             if (vm.points.isNotEmpty()) {
                 Spacer(Modifier.height(16.dp))
-                Text("合伙人", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = NCMP.Ink)
-                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "合伙人",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = NCMP.Ink,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { vm.refreshPoints() }) {
+                        Text("刷新", fontSize = 12.sp, color = NCMP.Brand)
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
                 vm.points.forEach { (label, value) -> PointsRow(label, value) }
                 // 称号：当前档 + 距下一档还差多少 + 完整阈值表
                 val title = PartnerTitles.titleFor(PartnerTitles.scoreOf(vm.points))
@@ -1005,7 +1021,7 @@ private fun HistoryContent(vm: AppViewModel) {
                     }
                     Spacer(Modifier.height(6.dp))
                     title.table.forEach { (threshold, name) ->
-                        PointsRow("$threshold 分", name)
+                        PointsRow("$threshold 分", name, small = true)
                     }
                 }
             }

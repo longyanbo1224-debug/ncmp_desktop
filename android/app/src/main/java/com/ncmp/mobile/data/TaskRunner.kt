@@ -74,6 +74,10 @@ class TaskRunner(
             // 整份清单都摆进曲目表（已评过的也摆），否则今天评完之后再点执行，
             // 曲目表会一首都没有。
             onQueue(daily.items)
+            // 额外清单也提前拉一次：一开始就看得到今天全部曲目，
+            // 而不是先显示 5 首、等基础任务跑完才冒出额外的 15 首。
+            val preloadedExtra = runCatching { api.getExtraTasks() }.getOrNull()
+            preloadedExtra?.let { (items, _) -> onQueue(items) }
 
             if (!daily.complete) {
                 checkCancel()
@@ -84,7 +88,7 @@ class TaskRunner(
 
             checkCancel()
             step("额外评分任务", "running")
-            processExtra(daily.id)
+            processExtra(daily.id, preloadedExtra)
             step("额外评分任务", "success")
 
             // 顺手查一次积分/等级（拿不到就什么都不发，界面不显示）
@@ -300,11 +304,15 @@ class TaskRunner(
         }
     }
 
-    private suspend fun processExtra(taskId: Any) {
-        var (allItems, completedCount) = api.getExtraTasks()
-        var uncompleted = allItems.filter { !it.completed }
+    private suspend fun processExtra(
+        taskId: Any,
+        preloaded: Pair<List<WorkItem>, Int>? = null,
+    ) {
+        val fetched = preloaded ?: api.getExtraTasks()
+        var completedCount = fetched.second
+        var uncompleted = fetched.first.filter { !it.completed }
         // 整份清单都摆进曲目表（含已评的）：今天已经评完时，这里至少看得见评过哪些歌
-        onQueue(allItems)
+        onQueue(fetched.first)
         val full = config.fullExtraTasks
         var target = if (full) uncompleted.size else 7 - completedCount
 

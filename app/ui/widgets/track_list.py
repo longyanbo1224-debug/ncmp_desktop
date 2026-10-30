@@ -276,6 +276,16 @@ class TrackList(QWidget):
         """
         return sum(1 for row in self._rows.values() if row.state == "done")
 
+    def settle_pending(self, state: str = "skipped") -> None:
+        """给还挂着"待评"的行收尾。
+
+        今天额度用完（服务端回「没有更多」）或任务结束时，那些没轮到的行会一直
+        停在"待评"，看着像程序没跑完。统一改成"跳过"，状态与事实一致。
+        """
+        for row in self._rows.values():
+            if row.state == "pending":
+                row.set_state(state)
+
     # ------------------------------------------------------------------
     # 内部
     # ------------------------------------------------------------------

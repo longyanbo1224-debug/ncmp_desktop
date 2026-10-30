@@ -21,9 +21,27 @@ class ExtraTask:
             "report_listen": "https://interface.music.163.com/weapi/partner/resource/interact/report"
         }
         self.signer = Signer(session, "", logger, config)  # task_id 为空字符串，因为上报听歌不需要
+        #: 预取结果。界面要一开始就看到今天全部曲目，评分阶段复用这份，避免重复请求。
+        self._prefetched = None
     #: 额外评分最多跑几轮：首轮 + 一次补跑。
     #: 单首失败只跳过不重试，跑完不重新核对就会"15 条只评了 12 首"却报成功。
     _MAX_PASSES = 2
+
+    def preload(self) -> None:
+        """提前拉一次额外任务清单，让界面一开始就看到全部曲目。
+
+        结果留给 :meth:`process_extra_tasks` 复用，不会重复请求；
+        失败不影响主流程——评分阶段会自己再拉一次。
+        """
+        try:
+            self._prefetched = self._get_extra_tasks()
+        except Exception as e:
+            self._prefetched = None
+            try:
+                getattr(self.logger, "debug", self.logger.info)(
+                    f"预取额外任务失败（评分阶段会重试）：{e}")
+            except Exception:
+                pass
 
     def process_extra_tasks(self, task_id: str) -> None:
         """处理额外的评分任务。
@@ -32,7 +50,13 @@ class ExtraTask:
         未完成，补跑这一轮就能把漏掉的补上，用户不必再手动点一次执行。
         """
         try:
-            extra_tasks, completed_count = self._get_extra_tasks()
+            # getattr：子类/测试替身可能不调用 super().__init__
+            prefetched = getattr(self, "_prefetched", None)
+            if prefetched is not None:
+                extra_tasks, completed_count = prefetched
+                self._prefetched = None
+            else:
+                extra_tasks, completed_count = self._get_extra_tasks()
             full = bool(self.config.get('full_extra_tasks', False))
             target = len(extra_tasks) if full else 7 - completed_count
 

@@ -774,6 +774,8 @@ class TaskPage(QWidget):
     def _on_finished(self, ok: bool, status: str, kind: str = "") -> None:
         """本地 worker 完成：按 status 显示 success/cancelled/failed。"""
         self._set_run_buttons_enabled(True)
+        # 没轮到的行不能一直挂着"待评"（今天额度用完时最明显）
+        self._track_list.settle_pending()
 
         if status == "success":
             summary = "任务执行完成"

@@ -106,6 +106,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (points.isEmpty()) points = readPoints()
     }
 
+    /** 手动刷新合伙人积分/等级（记录页的「刷新」）。拿不到就保持原值。 */
+    fun refreshPoints() {
+        viewModelScope.launch {
+            val fresh = runCatching { api.getPartnerPoints() }.getOrNull()
+            if (!fresh.isNullOrEmpty()) {
+                points = fresh
+                store.partnerPoints = org.json.JSONObject(fresh).toString()
+            }
+        }
+    }
+
     /** 从本地缓存恢复上次查到的积分/等级（JSON → Map）。 */
     private fun readPoints(): Map<String, String> = try {
         val raw = store.partnerPoints
