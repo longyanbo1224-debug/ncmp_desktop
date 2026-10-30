@@ -44,7 +44,7 @@ class TestPagesConstruct(unittest.TestCase):
     def test_settings_has_note_controls(self):
         from app.ui.pages.settings_page import SettingsPage
         page = SettingsPage()
-        for key in ("note_enabled", "note_voice", "note_max_chars"):
+        for key in ("note_enabled", "note_voice", "note_length"):
             self.assertIn(key, page._controls, f"设置页缺 {key} 控件")
 
     def test_settings_roundtrip_note_voice(self):

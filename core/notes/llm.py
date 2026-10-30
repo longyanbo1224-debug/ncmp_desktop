@@ -57,7 +57,8 @@ def _api_key(config: Optional[Any]) -> str:
 
 
 def generate_with_llm(work: Dict[str, Any], score: str,
-                      config: Optional[Any] = None) -> Optional[str]:
+                      config: Optional[Any] = None,
+                      max_chars: Optional[int] = None) -> Optional[str]:
     """调 LLM 生成一句批注；任何失败都返回 ``None``（调用方回落模板）。"""
     base_url = str(_get(config, "note_llm_base_url", "") or "").strip().rstrip("/")
     model = str(_get(config, "note_llm_model", "") or "").strip()
@@ -74,11 +75,12 @@ def generate_with_llm(work: Dict[str, Any], score: str,
         f"歌手：{work.get('authorName', '')}\n"
         f"我给这首作品的评分：{score} 分（满分 5 分）"
     )
-    try:
-        max_chars = int(_get(config, "note_max_chars", 80) or 80)
-    except (TypeError, ValueError):
-        max_chars = 80
-    max_chars = max(10, min(200, max_chars))
+    if max_chars is None:
+        try:
+            max_chars = int(_get(config, "note_max_chars", 80) or 80)
+        except (TypeError, ValueError):
+            max_chars = 80
+    max_chars = max(10, min(200, int(max_chars)))
     payload = {
         "model": model,
         "messages": [

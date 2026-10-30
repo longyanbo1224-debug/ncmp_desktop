@@ -77,6 +77,7 @@ class TaskService : Service() {
             noteEnabled = store.noteEnabled,
             noteSource = store.noteSource,
             noteVoice = store.noteVoice,
+            noteLength = store.noteLength,
             noteMaxChars = store.noteMaxChars,
         )
         val api = NeteaseApi().apply {

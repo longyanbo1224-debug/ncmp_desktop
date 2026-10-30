@@ -68,6 +68,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // 批注（乐评文案）
     var noteEnabled by mutableStateOf(store.noteEnabled)
     var noteVoice by mutableStateOf(store.noteVoice)
+    var noteLength by mutableStateOf(store.noteLength)
     var noteMaxChars by mutableStateOf(store.noteMaxChars)
 
     /** 今日曲目表：今天评了哪几首、每首几分、留下了什么批注。 */
@@ -299,6 +300,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         store.fullExtra = fullExtra
         store.noteEnabled = noteEnabled
         store.noteVoice = Notes.normalizeVoice(noteVoice)
+        store.noteLength = Notes.normalizeLength(noteLength)
         store.noteMaxChars = noteMaxChars.coerceIn(10, 200)
         noteVoice = Notes.normalizeVoice(noteVoice)
         noteMaxChars = noteMaxChars.coerceIn(10, 200)
@@ -334,6 +336,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // （note_source 不在这里改：手机端没有 LLM，生成器自己按 template 处理）
         store.noteEnabled = noteEnabled
         store.noteVoice = Notes.normalizeVoice(noteVoice)
+        store.noteLength = Notes.normalizeLength(noteLength)
         store.noteMaxChars = noteMaxChars.coerceIn(10, 200)
         val app = getApplication<Application>()
         val intent = Intent(app, TaskService::class.java).apply {

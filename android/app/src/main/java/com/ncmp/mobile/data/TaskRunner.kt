@@ -224,6 +224,7 @@ class TaskRunner(
             score = score,
             enabled = config.noteEnabled,
             voice = config.noteVoice,
+            length = config.noteLength,
             maxChars = config.noteMaxChars,
         )
         val data = JSONObject().apply {

@@ -56,6 +56,8 @@ data class TaskConfig(
     /** template（默认）| llm。手机端没有 LLM，传 llm 也按 template 处理。 */
     val noteSource: String = "template",
     val noteVoice: String = Notes.DEFAULT_VOICE, // restrained | warm | brief
+    /** 长度档：brief / standard / detailed */
+    val noteLength: String = Notes.DEFAULT_LENGTH,
     val noteMaxChars: Int = NoteGenerator.DEFAULT_MAX_CHARS,
 )
 

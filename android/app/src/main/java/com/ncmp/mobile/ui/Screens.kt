@@ -757,21 +757,22 @@ private fun ConfigSection(vm: AppViewModel) {
                             )
                         }
                     }
-                    Spacer(Modifier.height(12.dp))
-                    // 字数上限用本地文本态：整数直绑的话退格到空就退不动了
-                    var maxCharsText by remember { mutableStateOf(vm.noteMaxChars.toString()) }
-                    OutlinedTextField(
-                        value = maxCharsText,
-                        onValueChange = { text ->
-                            val digits = text.filter { it.isDigit() }.take(3)
-                            maxCharsText = digits
-                            digits.toIntOrNull()?.let { vm.noteMaxChars = it.coerceIn(10, 200) }
-                        },
-                        label = { Text("批注字数上限") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text("批注长度", fontSize = 12.sp, color = NCMP.Muted)
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(
+                            "brief" to "简短",
+                            "standard" to "标准",
+                            "detailed" to "详细",
+                        ).forEach { (value, label) ->
+                            FilterChip(
+                                selected = vm.noteLength == value,
+                                onClick = { vm.noteLength = value },
+                                label = { Text(label, fontSize = 12.sp) },
+                            )
+                        }
+                    }
                     Spacer(Modifier.height(6.dp))
                     Text(
                         "本地生成，不联网、不调用 AI；同一首歌每次生成同一句",

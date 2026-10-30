@@ -251,6 +251,8 @@ class Config:
         config.setdefault("note_enabled", True)
         config.setdefault("note_source", "template")  # template | llm
         config.setdefault("note_max_chars", 80)
+        # 长度档：brief / standard / detailed（决定实际上限与句式长度）
+        config.setdefault("note_length", "standard")
         config.setdefault("note_voice", "restrained")  # restrained | warm | brief
         # 用户点过"这一首不写批注"的歌曲（值可以是 work id 或歌名）
         config.setdefault("note_muted_songs", [])

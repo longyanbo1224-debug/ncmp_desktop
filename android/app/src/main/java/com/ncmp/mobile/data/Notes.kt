@@ -28,6 +28,13 @@ object Notes {
     /** 四种排法：三段全用 / 省收尾 / 省开场 / 只留判断。 */
     val FORMATS = listOf("full", "no_closer", "no_opener", "single")
 
+    /** 长度档 → 字数上限（与桌面端 LENGTHS 一致） */
+    val LENGTHS = mapOf("brief" to 40, "standard" to 80, "detailed" to 120)
+    const val DEFAULT_LENGTH = "standard"
+
+    fun normalizeLength(length: String?): String =
+        if (length != null && length in LENGTHS) length else DEFAULT_LENGTH
+
     fun normalizeVoice(voice: String?): String =
         if (voice != null && voice in VOICES) voice else DEFAULT_VOICE
 
@@ -53,7 +60,6 @@ object Notes {
         "睡前随手点开的，",
         "午休时放的，",
         "洗碗的时候听的，",
-        "朋友提过一嘴，今天才点开，",
         "挂着当背景音听的，",
         "从推荐位点进去的，",
         "上一首放完自动接着放的，",
@@ -241,6 +247,9 @@ object Notes {
     /** 本次运行里已经用过的批注（跨歌曲去重，任务开始时清空）。 */
     private val used = mutableSetOf<String>()
 
+    /** 本次运行里用过的开头：二十首歌里反复出现同一句开头，一眼就是模板。 */
+    private val usedOpeners = mutableSetOf<String>()
+
     /**
      * 给一首歌生成一句批注（随评分一起提交到 `comment` 字段）。
      *
@@ -253,13 +262,16 @@ object Notes {
         score: String,
         enabled: Boolean = true,
         voice: String = DEFAULT_VOICE,
+        length: String = DEFAULT_LENGTH,
         maxChars: Int = NoteGenerator.DEFAULT_MAX_CHARS,
-    ): String = NoteGenerator(enabled, voice, maxChars, used).generate(work, score)
+    ): String = NoteGenerator(enabled, voice, length, maxChars, used, usedOpeners)
+        .generate(work, score)
 
     /** 每次任务开始时清空"本次已用过的句子"，让重跑之间不互相影响。 */
     @Synchronized
     fun resetRun() {
         used.clear()
+        usedOpeners.clear()
     }
 }
 
@@ -277,13 +289,22 @@ object Notes {
 class NoteGenerator(
     private val enabled: Boolean = true,
     private val voice: String = Notes.DEFAULT_VOICE,
+    private val length: String = Notes.DEFAULT_LENGTH,
     private val maxChars: Int = DEFAULT_MAX_CHARS,
     /** 跨歌曲去重的"已用句子"集合；不传就是这一实例自己的。 */
     private val used: MutableSet<String> = mutableSetOf(),
+    private val usedOpeners: MutableSet<String> = mutableSetOf(),
 ) {
 
-    /** 长度上限：与桌面端一致，夹在 10~200 之间。 */
-    val limit: Int get() = if (maxChars in 10..200) maxChars else DEFAULT_MAX_CHARS
+    /** 上一次拼句实际用到的开头（没用到则是空串）。 */
+    private var lastOpener = ""
+
+    /** 长度上限：长度档与显式上限取小，夹在 10~200 之间。 */
+    val limit: Int
+        get() {
+            val cap = Notes.LENGTHS[Notes.normalizeLength(length)] ?: DEFAULT_MAX_CHARS
+            return if (maxChars in 10..200) minOf(cap, maxChars) else cap
+        }
 
     /** 为某首歌生成一句批注；禁用或失败时返回空字符串。 */
     fun generate(work: Work, score: String): String {
@@ -300,18 +321,20 @@ class NoteGenerator(
     fun fromTemplate(work: Work, score: String): String {
         var text = ""
         for (salt in 0 until MAX_REROLL) {
-            val candidate = compose(seed(work, score, salt), score, work)
-            if (candidate.isNotEmpty() && candidate !in used) {
+            val candidate = compose(work, score, salt)
+            val openerRepeated = lastOpener.isNotEmpty() && lastOpener in usedOpeners
+            if (candidate.isNotEmpty() && candidate !in used && !openerRepeated) {
                 text = candidate
                 break
             }
         }
         if (text.isEmpty()) {
             // 全撞车了就接受第一句，总比没有批注好
-            text = compose(seed(work, score, 0), score, work)
+            text = compose(work, score, 0)
         }
         val fitted = fit(text)
         used.add(fitted)
+        if (lastOpener.isNotEmpty()) usedOpeners.add(lastOpener)
         return fitted
     }
 
@@ -325,8 +348,8 @@ class NoteGenerator(
      * 桌面端用 `zlib.crc32`（无符号 32 位），这里用 `String.hashCode()`（有符号 32 位）；
      * 统一按 32 位无符号解释，保证后面取模、整除得到的下标非负。
      */
-    private fun seed(work: Work, score: String, salt: Int): Long {
-        val key = "${work.id}|${work.name}|${work.authorName}|$score|$salt"
+    private fun seed(work: Work, score: String, salt: Int, part: String): Long {
+        val key = "${work.id}|${work.name}|${work.authorName}|$score|$salt|$part"
         return key.hashCode().toLong() and 0xFFFFFFFFL
     }
 
@@ -341,25 +364,57 @@ class NoteGenerator(
     }
 
     /** 按种子拼一句。排法也由种子决定，四种轮着来。 */
-    private fun compose(seed: Long, score: String, work: Work): String {
+    private fun compose(work: Work, score: String, salt: Int): String {
         val tier = Notes.tierForScore(score)
-        val opener = pick(Notes.openersFor(), seed)
-        val judgement = pick(Notes.judgementsFor(voice, tier), seed / 7)
+        val openers = Notes.openersFor()
+        val judgements = Notes.judgementsFor(voice, tier)
+        lastOpener = ""
+        // 每段各自一份哈希：用同一个种子取模会让相邻歌曲的开头几乎一样
+        val opener = pick(openers, seed(work, score, salt, "o"))
+        val judgement = pick(judgements, seed(work, score, salt, "j"))
 
         val closers = Notes.closersFor(voice)
         var closer = ""
-        if (closers.isNotEmpty()) closer = fill(pick(closers, seed / 31), work)
+        if (closers.isNotEmpty()) {
+            closer = fill(pick(closers, seed(work, score, salt, "c")), work)
+        }
+
+        val tierLength = Notes.normalizeLength(length)
+
+        // 简短档：只留判断那一句，和"标准"要能看出区别
+        if (tierLength == "brief") return sentence(judgement)
+
+        // 详细档：多一句判断，句子真正变长（而不是只把上限调大）
+        if (tierLength == "detailed" && closer.isNotEmpty()) {
+            var second = pick(judgements, seed(work, score, salt, "j2"))
+            if (second == judgement) {
+                second = pick(judgements, seed(work, score, salt, "j3"))
+            }
+            if (second != judgement) {
+                lastOpener = opener
+                return "$opener${sentence(judgement)}${sentence(second)}$closer"
+            }
+        }
 
         // 简短语气只有一句；收尾缺失（拿不到歌名）时也不硬凑
         val format = if (voice == "brief" || closer.isEmpty()) {
             "single"
         } else {
-            Notes.FORMATS[(seed % Notes.FORMATS.size).toInt()]
+            val picked = Notes.FORMATS[
+                (seed(work, score, salt, "f") % Notes.FORMATS.size).toInt()]
+            // 标准档至少带开场，否则和"简短"撞成同一句
+            if (picked == "single") "no_closer" else picked
         }
 
         return when (format) {
-            "full" -> "$opener${sentence(judgement)}$closer"
-            "no_closer" -> "$opener${sentence(judgement)}"
+            "full" -> {
+                lastOpener = opener
+                "$opener${sentence(judgement)}$closer"
+            }
+            "no_closer" -> {
+                lastOpener = opener
+                "$opener${sentence(judgement)}"
+            }
             "no_opener" -> "${sentence(judgement)}$closer"
             else -> sentence(judgement)
         }
@@ -389,7 +444,7 @@ class NoteGenerator(
         private const val MAX_REROLL = 6
 
         /** 批注字数上限的默认值。 */
-        const val DEFAULT_MAX_CHARS = 80
+        const val DEFAULT_MAX_CHARS = 120
 
         private val WHITESPACE = Regex("\\s+")
     }
@@ -401,5 +456,6 @@ fun buildNote(
     score: String,
     enabled: Boolean = true,
     voice: String = Notes.DEFAULT_VOICE,
+    length: String = Notes.DEFAULT_LENGTH,
     maxChars: Int = NoteGenerator.DEFAULT_MAX_CHARS,
-): String = NoteGenerator(enabled, voice, maxChars).generate(work, score)
+): String = NoteGenerator(enabled, voice, length, maxChars).generate(work, score)

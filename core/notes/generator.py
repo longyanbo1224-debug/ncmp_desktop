@@ -24,15 +24,26 @@ from . import templates
 #: 同一次运行里为避开重复句子最多重摇几次。
 _MAX_REROLL = 6
 
+#: 批注长度档 → 字数上限。本地模板与 LLM 共用这一张表，
+#: 设置里选的就是这三档，不再让用户填一个"随便填但没效果"的数字。
+LENGTHS = {"brief": 40, "standard": 80, "detailed": 120}
+DEFAULT_LENGTH = "standard"
 
-def _seed(work: Dict[str, Any], score: str, salt: int = 0) -> int:
-    """由歌曲标识与分数算出稳定种子。salt 用于重摇。"""
+
+def _seed(work: Dict[str, Any], score: str, salt: int = 0, part: str = "") -> int:
+    """由歌曲标识与分数算出稳定种子。
+
+    ``part`` 用来给同一首歌的**不同片段**（开场/判断/收尾）取互不相关的哈希。
+    以前三段都用 ``seed``、``seed//7``、``seed//31`` 取模，相邻歌曲这几个值
+    几乎一样，结果就是"每首的开头都差不多"。
+    """
     key = "|".join((
         str(work.get("id") or ""),
         str(work.get("name") or ""),
         str(work.get("authorName") or ""),
         str(score),
         str(salt),
+        part,
     ))
     return zlib.crc32(key.encode("utf-8"))
 
@@ -55,6 +66,9 @@ class NoteGenerator:
     def __init__(self, config: Optional[Any] = None) -> None:
         self._config = config
         self._used: set[str] = set()
+        #: 本次运行用过的开头 / 上一次拼句实际用的开头（用于避开重复开头）
+        self._used_openers: set[str] = set()
+        self._last_opener: str = ""
 
     # ------------------------------------------------------------------
     # 配置读取（config 可能为 None / dict / Config）
@@ -80,12 +94,33 @@ class NoteGenerator:
         return source if source in ("template", "llm") else "template"
 
     @property
-    def max_chars(self) -> int:
+    def length(self) -> str:
+        """长度档：brief / standard / detailed。
+
+        优先读 ``note_length``；只有旧配置 ``note_max_chars`` 时按区间推断，
+        保证老用户的设置不会被无声改掉。
+        """
+        value = str(self._get("note_length", "") or "").strip().lower()
+        if value in LENGTHS:
+            return value
         try:
-            value = int(self._get("note_max_chars", 80))
+            cap = int(self._get("note_max_chars", 80))
         except (TypeError, ValueError):
-            return 80
-        return max(10, min(200, value))
+            cap = 80
+        if cap <= 40:
+            return "brief"
+        return "detailed" if cap > 80 else "standard"
+
+    @property
+    def max_chars(self) -> int:
+        cap = LENGTHS[self.length]
+        raw = self._get("note_max_chars", None)
+        if raw is not None:
+            try:
+                return max(10, min(200, min(cap, int(raw))))
+            except (TypeError, ValueError):
+                pass
+        return cap
 
     @property
     def voice(self) -> str:
@@ -115,7 +150,8 @@ class NoteGenerator:
         try:
             if self.source == "llm":
                 from .llm import generate_with_llm
-                text = generate_with_llm(work, score, self._config)
+                text = generate_with_llm(work, score, self._config,
+                                         max_chars=self.max_chars)
                 if text:
                     text = self._fit(text)
                     self._used.add(text)
@@ -128,42 +164,73 @@ class NoteGenerator:
         """纯本地模板生成，确定性且不联网。"""
         text = ""
         for salt in range(_MAX_REROLL):
-            seed = _seed(work, score, salt)
-            candidate = self._compose(seed, score, work)
-            if candidate and candidate not in self._used:
+            candidate = self._compose(work, score, salt)
+            # 整句不重复、开头也尽量不重复——二十首歌里"通勤路上点开的"出现三次，
+            # 一眼就能看出是模板
+            fresh = (candidate and candidate not in self._used
+                     and (not self._last_opener
+                          or self._last_opener not in self._used_openers))
+            if fresh:
                 text = candidate
                 break
         if not text:
             # 全撞车了就接受第一句，总比没有批注好
-            text = self._compose(_seed(work, score, 0), score, work)
+            text = self._compose(work, score, 0)
         text = self._fit(text)
         self._used.add(text)
+        if self._last_opener:
+            self._used_openers.add(self._last_opener)
         return text
 
     # ------------------------------------------------------------------
     # 内部
     # ------------------------------------------------------------------
-    def _compose(self, seed: int, score: str, work: Dict[str, Any]) -> str:
-        """按种子拼一句。排法也由种子决定，四种轮着来。"""
+    def _compose(self, work: Dict[str, Any], score: str, salt: int = 0) -> str:
+        """按"每段各自一份哈希"拼一句：开场、判断、收尾互不同步。"""
         tier = templates.tier_for_score(score)
         voice = self.voice
-        opener = _pick(templates.openers_for(voice), seed)
-        judgement = _pick(templates.judgements_for(voice, tier), seed // 7)
+        self._last_opener = ""
+        openers = templates.openers_for(voice)
+        judgements = templates.judgements_for(voice, tier)
+        opener = openers[_seed(work, score, salt, "o") % len(openers)]
+        judgement = judgements[_seed(work, score, salt, "j") % len(judgements)]
 
         closer = ""
         closers = templates.closers_for(voice)
         if closers:
-            closer = self._fill(_pick(closers, seed // 31), work)
+            closer = self._fill(
+                closers[_seed(work, score, salt, "c") % len(closers)], work)
+
+        # 简短档：只留判断那一句。三档要真的"看得出区别"，
+        # 否则用户选了简短、出来的还是标准和原来一样长。
+        if self.length == "brief":
+            return _sentence(judgement)
+
+        # 详细档：多一句判断，句子真正变长（而不是只把上限调大）
+        if self.length == "detailed" and closer:
+            pool = templates.judgements_for(voice, tier)
+            second = pool[_seed(work, score, salt, "j2") % len(pool)]
+            if second == judgement:
+                second = pool[_seed(work, score, salt, "j3") % len(pool)]
+            if second != judgement:
+                self._last_opener = opener
+                return (f"{opener}{_sentence(judgement)}"
+                        f"{_sentence(second)}{closer}")
 
         # 简短语气只有一句；收尾缺失（拿不到歌名）时也不硬凑
         if voice == "brief" or not closer:
             fmt = "single"
         else:
-            fmt = templates.FORMATS[seed % len(templates.FORMATS)]
+            fmt = templates.FORMATS[_seed(work, score, salt, "f") % len(templates.FORMATS)]
+            # 标准档至少带开场：否则会和"简短"档撞成同一句，用户看不出区别
+            if fmt == "single":
+                fmt = "no_closer"
 
         if fmt == "full":
+            self._last_opener = opener
             return f"{opener}{_sentence(judgement)}{closer}"
         if fmt == "no_closer":
+            self._last_opener = opener
             return f"{opener}{_sentence(judgement)}"
         if fmt == "no_opener":
             return f"{_sentence(judgement)}{closer}"

@@ -57,7 +57,7 @@ SETTINGS_FIELDS = (
     "full_extra_tasks",
     "note_enabled",
     "note_voice",
-    "note_max_chars",
+    "note_length",
     "notify_email",
     "email_password",
     "smtp_server",
@@ -87,7 +87,7 @@ DEFAULTS: Dict[str, Any] = {
     "full_extra_tasks": True,
     "note_enabled": True,
     "note_voice": "restrained",
-    "note_max_chars": 80,
+    "note_length": "standard",
     "notify_email": "",
     "email_password": "",
     "smtp_server": "smtp.qq.com",
@@ -187,8 +187,11 @@ FIELD_HINTS: Dict[str, Dict[str, str]] = {
             "批注的语气。三套语料都是本地内置的，不联网、不调用 AI：\n"
             "克制=有话但不煽情（默认）；热络=情绪更外露；简短=一句话说完。"),
     },
-    "note_max_chars": {
-        "tooltip": "单条批注的字数上限。超出时先丢掉收尾句，再截断。",
+    "note_length": {
+        "tooltip": (
+            "批注长度。三档都会真正影响句子长度：\n"
+            "简短 ≤40 字（可能丢掉收尾句）；标准 ≤80 字；\n"
+            "详细 ≈60–120 字（多写一句判断）。"),
     },
     "notify_email": {
         "placeholder": "接收任务结果通知的邮箱",
@@ -555,13 +558,13 @@ class SettingsPage(QWidget):
         form.addRow("note_voice", note_voice)
         self._controls["note_voice"] = note_voice
 
-        note_max = QSpinBox()
-        note_max.setRange(10, 200)
-        note_max.setSuffix(" 字")
-        note_max.setValue(DEFAULTS["note_max_chars"])
-        self._apply_hint(note_max, "note_max_chars")
-        form.addRow("note_max_chars", note_max)
-        self._controls["note_max_chars"] = note_max
+        note_length = _DownCombo()
+        note_length.addItem("简短（≤40 字）", "brief")
+        note_length.addItem("标准（≤80 字）", "standard")
+        note_length.addItem("详细（60–120 字）", "detailed")
+        self._apply_hint(note_length, "note_length")
+        form.addRow("note_length", note_length)
+        self._controls["note_length"] = note_length
 
     def _build_email_section(self) -> None:
         form = self._new_section("邮件通知")
@@ -1070,7 +1073,10 @@ class SettingsPage(QWidget):
         self._set_control("full_extra_tasks", bool(_val("full_extra_tasks")))
         self._set_control("note_enabled", bool(_val("note_enabled")))
         self._set_control("note_voice", str(_val("note_voice")))
-        self._set_control("note_max_chars", int(_val("note_max_chars")))
+        legacy_cap = int(_val("note_max_chars"))
+        legacy_length = "brief" if legacy_cap <= 40 else (
+            "detailed" if legacy_cap > 80 else "standard")
+        self._set_control("note_length", str(_val("note_length") or legacy_length))
         self._set_control("notify_email", _val("notify_email"))
         self._set_control("email_password", _val("email_password"))
         self._set_control("smtp_server", _val("smtp_server"))
@@ -1109,7 +1115,7 @@ class SettingsPage(QWidget):
                     if bool(ctrl.itemData(i)) == target:
                         ctrl.setCurrentIndex(i)
                         break
-            elif key == "note_voice":
+            elif key in ("note_voice", "note_length"):
                 # 语气下拉用 userData（restrained/warm/brief）
                 for i in range(ctrl.count()):
                     if str(ctrl.itemData(i)) == str(value):
@@ -1140,7 +1146,7 @@ class SettingsPage(QWidget):
                 data[key] = ctrl.value()
             elif isinstance(ctrl, QComboBox):
                 # score / note_voice 下拉用 userData，GitHub 开关也用 userData
-                if key in ("score", "note_voice", "gh_disable_schedule", "gh_success_email"):
+                if key in ("score", "note_voice", "note_length", "gh_disable_schedule", "gh_success_email"):
                     data[key] = ctrl.currentData()
                 else:
                     data[key] = ctrl.currentText()
@@ -1168,7 +1174,11 @@ class SettingsPage(QWidget):
             if isinstance(ctrl, QCheckBox):
                 data[key] = ctrl.isChecked()
             elif isinstance(ctrl, QComboBox):
-                data[key] = bool(ctrl.currentData())
+                # 选项类下拉存真实值；开关类（bool userData）保持布尔
+                if key in ("score", "note_voice", "note_length"):
+                    data[key] = ctrl.currentData()
+                else:
+                    data[key] = bool(ctrl.currentData())
             elif isinstance(ctrl, QSpinBox):
                 data[key] = ctrl.value()
         try:

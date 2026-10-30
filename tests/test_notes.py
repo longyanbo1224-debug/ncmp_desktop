@@ -135,5 +135,33 @@ class TestRobustness(unittest.TestCase):
         self.assertIsInstance(NoteGenerator(None).generate(_WORK, "4"), str)
 
 
+class TestLengthTiers(unittest.TestCase):
+    """三档长度必须真的不同：简短 < 标准 < 详细，且各自不超过上限。"""
+
+    _WORKS = [{"id": i, "name": f"歌{i}", "authorName": "某"} for i in range(8)]
+
+    def _note(self, work, length):
+        return NoteGenerator(_Cfg(note_length=length)).generate(work, "4")
+
+    def test_monotonic(self):
+        for work in self._WORKS:
+            brief = self._note(work, "brief")
+            standard = self._note(work, "standard")
+            detailed = self._note(work, "detailed")
+            self.assertLess(len(brief), len(standard), (work, brief, standard))
+            self.assertLess(len(standard), len(detailed), (work, standard, detailed))
+
+    def test_caps(self):
+        for work in self._WORKS:
+            self.assertLessEqual(len(self._note(work, "brief")), 40)
+            self.assertLessEqual(len(self._note(work, "standard")), 80)
+            self.assertLessEqual(len(self._note(work, "detailed")), 120)
+
+    def test_legacy_max_chars_still_works(self):
+        self.assertEqual(NoteGenerator(_Cfg(note_max_chars=30)).length, "brief")
+        self.assertEqual(NoteGenerator(_Cfg(note_max_chars=80)).length, "standard")
+        self.assertEqual(NoteGenerator(_Cfg(note_max_chars=120)).length, "detailed")
+
+
 if __name__ == "__main__":
     unittest.main()
