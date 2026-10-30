@@ -647,7 +647,7 @@ class SettingsPage(QWidget):
         log_lay.setContentsMargins(0, 0, 0, 0)
         log_lay.setSpacing(theme.SP_2)
         log_btn = QPushButton("打开日志文件夹")
-        log_btn.setObjectName("textButton")
+        log_btn.setObjectName("secondaryButton")
         log_btn.setToolTip(
             "日志按天滚动，保留最近 7 天。反馈问题时把这个文件夹里的日志附上即可。")
         log_btn.clicked.connect(self._open_log_dir)

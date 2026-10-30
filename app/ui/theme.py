@@ -459,16 +459,17 @@ QPushButton#primaryButton:focus {
     border: 1px solid $BRAND_PRESSED;
 }
 
-/* 次按钮：扁平填充，和默认按钮同一套（保留 objectName 以便语义清晰） */
+/* 次按钮：浅灰填充 + 1px 细边。
+   完全没有边框时，它和"禁用"看着一样，用户认不出这是按钮。 */
 QPushButton#secondaryButton {
     background-color: $CONTROL_BG;
     color: $INK;
-    border: 1px solid transparent;
+    border: 1px solid $RULE;
 }
 
 QPushButton#secondaryButton:hover {
     background-color: $CONTROL_HOVER;
-    border-color: transparent;
+    border-color: $HOVER_BORDER;
 }
 
 /* 文字按钮：无边框，用于次要动作 */
