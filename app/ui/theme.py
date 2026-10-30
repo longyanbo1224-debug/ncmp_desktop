@@ -96,6 +96,10 @@ def state_text(state: str) -> str:
 # ----------------------------------------------------------------------
 _HOVER_BG = "#F2F2F2"      # 白底控件悬停
 _PRESSED_BG = "#EBEBEB"    # 白底控件按下
+# 扁平控件（按钮、下拉）：用填充色代替描边，和手机端的实心按钮/chip 一致
+_CONTROL_BG = "#F2F2F2"
+_CONTROL_HOVER = "#E9E9E9"
+_CONTROL_PRESSED = "#E1E1E1"
 _DISABLED_BG = "#F0F0F0"   # 禁用底
 _DISABLED_FG = "#B0B0B0"   # 禁用文字
 _DISABLED_BORDER = "#E8E8E8"
@@ -140,6 +144,9 @@ _DARK_OVERRIDE = {
 _DARK_INTERNALS = {
     "_HOVER_BG": "#22262A",
     "_PRESSED_BG": "#2A2E32",
+    "_CONTROL_BG": "#23272A",
+    "_CONTROL_HOVER": "#2B3034",
+    "_CONTROL_PRESSED": "#32373B",
     "_DISABLED_BG": "#1E2225",
     "_DISABLED_FG": "#5E6367",
     "_DISABLED_BORDER": "#2A2E31",
@@ -390,21 +397,22 @@ QListWidget#navList::item:selected {
 
 /* ---- 按钮 ---- */
 QPushButton {
-    background-color: $PANEL;
+    background-color: $CONTROL_BG;
     color: $INK;
-    border: 1px solid $RULE;
+    /* 扁平：没有描边，只靠填充区分层级。透明边框保留 1px 是为了跟焦点态同尺寸 */
+    border: 1px solid transparent;
     border-radius: ${R_CONTROL}px;
     padding: 7px 16px;
     min-height: 20px;
 }
 
 QPushButton:hover {
-    background-color: $HOVER_BG;
-    border-color: $HOVER_BORDER;
+    background-color: $CONTROL_HOVER;
+    border-color: transparent;
 }
 
 QPushButton:pressed {
-    background-color: $PRESSED_BG;
+    background-color: $CONTROL_PRESSED;
 }
 
 QPushButton:disabled {
@@ -450,16 +458,16 @@ QPushButton#primaryButton:focus {
     padding: 6px 15px;
 }
 
-/* 次按钮：白底描边，就是默认按钮的样子（保留 objectName 以便语义清晰） */
+/* 次按钮：扁平填充，和默认按钮同一套（保留 objectName 以便语义清晰） */
 QPushButton#secondaryButton {
-    background-color: $PANEL;
+    background-color: $CONTROL_BG;
     color: $INK;
-    border: 1px solid $RULE;
+    border: 1px solid transparent;
 }
 
 QPushButton#secondaryButton:hover {
-    background-color: $HOVER_BG;
-    border-color: $HOVER_BORDER;
+    background-color: $CONTROL_HOVER;
+    border-color: transparent;
 }
 
 /* 文字按钮：无边框，用于次要动作 */
@@ -506,7 +514,7 @@ QToolButton:focus {
 }
 
 /* ---- 输入控件 ---- */
-QLineEdit, QSpinBox, QComboBox, QPlainTextEdit, QTextEdit {
+QLineEdit, QSpinBox, QPlainTextEdit, QTextEdit {
     background-color: $PANEL;
     color: $INK;
     border: 1px solid $RULE;
@@ -514,6 +522,21 @@ QLineEdit, QSpinBox, QComboBox, QPlainTextEdit, QTextEdit {
     padding: 5px 8px;
     selection-background-color: $BRAND;
     selection-color: $PANEL;
+}
+
+/* 下拉：扁平填充、无描边——它现在点一下弹的是菜单（_MenuCombo），
+   外观应当和按钮一致，而不是和输入框一致。 */
+QComboBox {
+    background-color: $CONTROL_BG;
+    color: $INK;
+    border: 1px solid transparent;
+    border-radius: ${R_CONTROL}px;
+    padding: 5px 8px;
+    min-height: 20px;
+}
+
+QComboBox:hover {
+    background-color: $CONTROL_HOVER;
 }
 
 QLineEdit:focus, QSpinBox:focus, QComboBox:focus,
@@ -534,7 +557,6 @@ QLineEdit:read-only {
 
 QComboBox::drop-down {
     border: none;
-    border-left: 1px solid $RULE;
     width: 26px;
 }
 
@@ -551,7 +573,7 @@ QComboBox QAbstractItemView {
 /* 日志：唯一的等宽面板 */
 QPlainTextEdit#logView {
     background-color: $PANEL;
-    border: 1px solid $RULE;
+    border: none;
     border-radius: ${R_PANEL}px;
     padding: ${SP_3}px;
     color: $INK;
@@ -560,7 +582,7 @@ QPlainTextEdit#logView {
 /* ---- 面板 ---- */
 QFrame#panel, QFrame#card, QFrame#cookieCard {
     background-color: $PANEL;
-    border: 1px solid $RULE;
+    border: none;
     border-radius: ${R_PANEL}px;
 }
 
@@ -736,7 +758,7 @@ QLabel#toastBody {
 /* ---- 步骤树 ---- */
 QTreeWidget {
     background-color: $PANEL;
-    border: 1px solid $RULE;
+    border: none;
     border-radius: ${R_PANEL}px;
     outline: none;
     alternate-background-color: $PANEL;
@@ -956,6 +978,8 @@ def build_qss() -> str:
         BRAND_DISABLED=BRAND_DISABLED,
         BRAND_SOFT=BRAND_SOFT, BRAND_SOFT_HOVER=BRAND_SOFT_HOVER,
         HOVER_BG=_HOVER_BG, PRESSED_BG=_PRESSED_BG,
+        CONTROL_BG=_CONTROL_BG, CONTROL_HOVER=_CONTROL_HOVER,
+        CONTROL_PRESSED=_CONTROL_PRESSED,
         DISABLED_BG=_DISABLED_BG, DISABLED_FG=_DISABLED_FG,
         DISABLED_BORDER=_DISABLED_BORDER, HOVER_BORDER=_HOVER_BORDER,
         SCROLL_HANDLE=_SCROLL_HANDLE,
