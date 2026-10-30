@@ -80,6 +80,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     val history = mutableStateListOf<HistoryEntry>()
 
+    /** 保存设置的提示语：日志在折叠区里看不见，这里给一条会自己消失的反馈。 */
+    var saveHint by mutableStateOf("")
+        private set
+
+    fun clearSaveHint() {
+        saveHint = ""
+    }
+
     /** 记录页的汇总与最近曲目（来自按曲目的本地记录）。 */
     var trackStats by mutableStateOf(com.ncmp.mobile.data.TrackStats())
         private set
@@ -316,10 +324,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         waitMin = formatNum(min)
         waitMax = formatNum(max)
         scheduleTimeText = "%02d:%02d".format(h, m)
-        TaskBus.append(
-            if (scheduleEnabled) "设置已保存，定时：%02d:%02d".format(h, m)
-            else "设置已保存",
-        )
+        val message = if (scheduleEnabled) {
+            "设置已保存，每天 %02d:%02d 执行".format(h, m)
+        } else {
+            "设置已保存"
+        }
+        saveHint = message
+        TaskBus.append(message)
     }
 
     // ================= 任务（交给前台服务在后台跑） =================

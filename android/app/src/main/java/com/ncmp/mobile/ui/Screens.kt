@@ -682,6 +682,13 @@ private fun TrackRow(index: Int, item: TrackItem) {
 @Composable
 private fun ConfigSection(vm: AppViewModel) {
     var expanded by remember { mutableStateOf(false) }
+    // 提示只停留 2.5 秒，避免一直挂在页面上
+    LaunchedEffect(vm.saveHint) {
+        if (vm.saveHint.isNotEmpty()) {
+            delay(2500)
+            vm.clearSaveHint()
+        }
+    }
     val context = LocalContext.current
     Column(Modifier.fillMaxWidth()) {
         Row(
@@ -816,6 +823,10 @@ private fun ConfigSection(vm: AppViewModel) {
                         onClick = { openBatterySettings(context) },
                         shape = RoundedCornerShape(10.dp),
                     ) { Text("后台保活设置", fontSize = 13.sp) }
+                }
+                if (vm.saveHint.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(vm.saveHint, fontSize = 12.sp, color = NCMP.Green)
                 }
             }
         }
