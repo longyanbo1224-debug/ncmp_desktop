@@ -114,7 +114,18 @@ class TaskService : Service() {
                         // 存一份：记录页离线也能显示上次查到的数字
                         store.partnerPoints = org.json.JSONObject(points).toString()
                     },
-                    onQueue = { works -> TaskBus.seedQueue(works) },
+                    onQueue = { items ->
+                        TaskBus.seedQueue(items)
+                        // 服务端说"已评过"的，补记进本机账本：今天在电脑端评的歌，
+                        // 手机端「记录」页也能看到。同一天同一首会覆盖，不会重复。
+                        items.filter { it.completed }.forEach { item ->
+                            trackLog.record(
+                                item.work.name,
+                                artist = item.work.authorName,
+                                score = item.score,
+                            )
+                        }
+                    },
                     onTrack = { work, state -> TaskBus.setState(work, state) },
                 )
                 runner = r

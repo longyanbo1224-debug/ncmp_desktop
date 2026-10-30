@@ -38,14 +38,20 @@ app/src/main/java/com/ncmp/mobile/
 ├── AlarmReceiver.kt       定时闹钟触发 / 开机重排
 ├── data/
 │   ├── NeteaseCrypto.kt   WeAPI / EAPI / AES / RSA 加密
-│   ├── NeteaseApi.kt      HTTP 客户端（登录 + 任务接口）
+│   ├── NeteaseApi.kt      HTTP 客户端（登录 + 任务 + 积分接口）
 │   ├── TaskRunner.kt      任务编排 + 失败分类 + 额外任务补跑
 │   ├── TaskBus.kt         任务状态中转（服务 → 界面）
 │   ├── TaskHistory.kt     打卡记录存储 + 按天聚合
+│   ├── TrackLog.kt        按曲目记录（歌名/分数/批注）+ 统计
+│   ├── Notes.kt           批注生成（与桌面端 core/notes 同一套语料）
+│   ├── PartnerTitles.kt   合伙人称号换算（320 / 400 / 480）
 │   ├── AlarmScheduler.kt  每日定时（AlarmManager）
 │   └── SessionStore.kt    Cookie / 配置加密存储
 └── ui/
-    ├── Screens.kt         登录 / 主界面 / 打卡记录
+    ├── Screens.kt         登录 / 今日 / 记录
+    ├── AppViewModel.kt    界面状态
+    ├── Qr.kt              二维码
+    ├── theme/             配色（跟随系统深浅色）
     └── widgets/           分段电平表、年度打卡格子图
 ```
 
@@ -53,6 +59,7 @@ app/src/main/java/com/ncmp/mobile/
 
 - 核心逻辑（加密、接口、评分策略）与桌面端 `core/` 逐行对应
 - 额外任务单首失败会跳过，整轮结束后自动补跑一轮；服务端提示「今日没有更多可评定歌曲」时按完成处理
-- 「记录」页按天合并同一天的多次执行，点开看每次结果
+- 「记录」页按天合并同一天的多次执行，点开看每次结果；曲目明细里，服务端标为已评过的歌会自动补进本机记录
+- 配色跟随系统深浅色（与桌面端同一套语义）
 - Cookie 存 Android Keystore 加密的 SharedPreferences
 - 本项目为**非官方**第三方程序，仅供个人学习、研究和技术交流，使用风险自负

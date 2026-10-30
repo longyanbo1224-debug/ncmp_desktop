@@ -12,7 +12,8 @@ from typing import List, Tuple
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QToolButton, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
 from app.task_history import TaskHistory
@@ -68,7 +69,20 @@ class LedgerPage(QWidget):
     # UI
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
-        outer = QVBoxLayout(self)
+        # 整页放进滚动区：最近曲目展开后内容会比窗口高，
+        # 不滚的话会去挤上面的打卡格子图（图例被压没）。
+        page = QVBoxLayout(self)
+        page.setContentsMargins(0, 0, 0, 0)
+        page.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        content = QWidget()
+        scroll.setWidget(content)
+        page.addWidget(scroll)
+
+        outer = QVBoxLayout(content)
         outer.setContentsMargins(theme.PAGE_MARGIN, theme.PAGE_MARGIN,
                                  theme.PAGE_MARGIN, theme.PAGE_MARGIN)
         outer.setSpacing(theme.SP_4)
@@ -168,7 +182,9 @@ class LedgerPage(QWidget):
 
         self._recent = TrackList()
         self._recent.setVisible(False)
-        outer.addWidget(self._recent, 1)
+        # 展开时给一块能看的高度（约 5~6 行），不再和上面的内容抢空间
+        self._recent.setMinimumHeight(300)
+        outer.addWidget(self._recent)
 
     def _stat_block(self, label: str, value: str) -> QWidget:
         # 不做卡片：三个数直接坐在页面底色上（手机端记录页同样处理）
