@@ -559,14 +559,35 @@ QComboBox::drop-down {
     width: 26px;
 }
 
+/* 下拉箭头必须自带图片：样式表一旦接管 ::down-arrow，默认箭头就不画了，
+   框会看起来像普通输入框。深浅色各一张，按当前主题取。 */
+QComboBox::down-arrow {
+    image: url("$CHEVRON_PNG");
+    width: 10px;
+    height: 10px;
+    margin-right: 6px;
+}
+
+/* 数字框：去掉上下小箭头（直接键入更快，箭头在小尺寸下也画得很脏） */
+QSpinBox::up-button, QSpinBox::down-button,
+QTimeEdit::up-button, QTimeEdit::down-button {
+    width: 0;
+    border: none;
+}
+
 QComboBox QAbstractItemView {
     background-color: $PANEL;
     border: 1px solid $RULE;
     border-radius: ${R_CONTROL}px;
-    padding: 4px;
     selection-background-color: $BRAND_SOFT;
     selection-color: $BRAND;
     outline: none;
+}
+
+/* 列表项自己撑高度：沿用 view 的 padding 会在首行上方留一条空白 */
+QComboBox QAbstractItemView::item {
+    min-height: 26px;
+    padding-left: ${SP_2}px;
 }
 
 /* 日志：唯一的等宽面板 */
@@ -900,10 +921,12 @@ QCheckBox::indicator {
     height: 17px;
 }
 
+/* 复选框用"圆角方块"，不是圆形：17px 的框套 8px 圆角会变成圆圈，
+   和单选按钮撞脸。 */
 QCheckBox::indicator:unchecked {
     background-color: $PANEL;
     border: 1px solid $HOVER_BORDER;
-    border-radius: ${R_CONTROL}px;
+    border-radius: 4px;
 }
 
 QCheckBox::indicator:unchecked:hover {
@@ -913,7 +936,7 @@ QCheckBox::indicator:unchecked:hover {
 QCheckBox::indicator:checked {
     background-color: $BRAND;
     border: 1px solid $BRAND;
-    border-radius: ${R_CONTROL}px;
+    border-radius: 4px;
     image: url("$CHECK_PNG");
 }
 
@@ -971,6 +994,8 @@ QToolTip {
 
 def build_qss() -> str:
     """生成完整样式表。"""
+    chevron = _qss_url(os.path.join(
+        assets_dir(), "chevron_dark.png" if _mode == "dark" else "chevron_light.png"))
     return _QSS.substitute(
         GROUND=GROUND, PANEL=PANEL, INK=INK, MUTED=MUTED, RULE=RULE,
         BRAND=BRAND, BRAND_HOVER=BRAND_HOVER, BRAND_PRESSED=BRAND_PRESSED,
@@ -991,6 +1016,7 @@ def build_qss() -> str:
         R_CONTROL=R_CONTROL, R_PANEL=R_PANEL,
         SP_1=SP_1, SP_2=SP_2, SP_3=SP_3, SP_4=SP_4, SP_5=SP_5, SP_6=SP_6,
         CHECK_PNG=_CHECK_PNG,
+        CHEVRON_PNG=chevron,
     )
 
 

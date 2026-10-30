@@ -45,12 +45,47 @@ def make_check(path: str, color: str = "#FFFFFF") -> None:
     pixmap.save(path, "PNG")
 
 
+def make_chevron(path: str, color: str) -> None:
+    """画一个朝下的箭头（下拉框右侧那个小三角）。
+
+    QSS 一旦给 ``QComboBox::down-arrow`` 指定 image，就必须自带图片，
+    否则默认箭头会被样式表覆盖掉、下拉框看起来像个纯文本框。
+    """
+    pixmap = QPixmap(_SIZE, _SIZE)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    try:
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        pen = QPen(QColor(color))
+        pen.setWidthF(_STROKE)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+        s = _SIZE / 14.0
+        painter.drawPolyline([
+            QPointF(3.6 * s, 5.6 * s),
+            QPointF(7.0 * s, 9.0 * s),
+            QPointF(10.4 * s, 5.6 * s),
+        ])
+    finally:
+        painter.end()
+    pixmap.save(path, "PNG")
+
+
 def main() -> int:
     app = QGuiApplication(sys.argv)  # QPixmap 需要 QGuiApplication
     os.makedirs(_OUT_DIR, exist_ok=True)
-    target = os.path.join(_OUT_DIR, "check.png")
-    make_check(target)
-    print(f"wrote {target}")
+    targets = [
+        (os.path.join(_OUT_DIR, "check.png"), None),
+        (os.path.join(_OUT_DIR, "chevron_light.png"), "#6B6B6B"),
+        (os.path.join(_OUT_DIR, "chevron_dark.png"), "#9AA0A4"),
+    ]
+    for path, color in targets:
+        if color is None:
+            make_check(path)
+        else:
+            make_chevron(path, color)
+        print(f"wrote {path}")
     del app
     return 0
 

@@ -25,13 +25,12 @@ import hashlib
 import json
 from typing import Any, Dict, Optional, Tuple
 
-from PySide6.QtCore import QSize, Qt, QThread, QTime, Signal
+from PySide6.QtCore import QPoint, QSize, Qt, QThread, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QProgressBar, QPushButton, QScrollArea,
-    QSizePolicy, QSpinBox, QTabWidget, QTimeEdit, QToolButton, QVBoxLayout,
-    QWidget,
+    QSizePolicy, QSpinBox, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
 from app.app_config import AppConfig
@@ -107,6 +106,22 @@ DEFAULTS: Dict[str, Any] = {
 
 # keyring 服务名（与 CookieStore / Config 对齐，gh_token 用同一服务下的独立 key）
 _KEYRING_SERVICE = "ncmp desktop"
+
+class _DownCombo(QComboBox):
+    """下拉列表固定向下展开。
+
+    QComboBox 默认按剩余空间决定方向，界面里常出现"点一下从上面弹出来"。
+    弹窗显示后把它移到控件正下方即可。
+    """
+
+    def showPopup(self) -> None:  # noqa: N802
+        super().showPopup()
+        try:
+            popup = self.view().window()
+            popup.move(self.mapToGlobal(QPoint(0, self.height())))
+        except Exception:
+            pass
+
 
 # 每个字段的提示文本（placeholder）与悬停说明（tooltip）
 FIELD_HINTS: Dict[str, Dict[str, str]] = {
@@ -275,48 +290,50 @@ class SettingsPage(QWidget):
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setContentsMargins(theme.PAGE_MARGIN, theme.PAGE_MARGIN,
+                                 theme.PAGE_MARGIN, theme.SP_2)
         outer.setSpacing(0)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
-        content = QWidget()
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(
-            theme.PAGE_MARGIN, theme.PAGE_MARGIN,
-            theme.PAGE_MARGIN, theme.PAGE_MARGIN)
-        content_layout.setSpacing(0)
 
         title = QLabel("参数配置")
         title.setObjectName("pageTitle")
-        content_layout.addWidget(title)
+        outer.addWidget(title)
 
-        content_layout.addSpacing(theme.SP_2)
+        outer.addSpacing(theme.SP_2)
 
         subtitle = QLabel("默认值已预填，按需修改后点「保存」。鼠标悬停字段可见说明。")
         subtitle.setObjectName("subtitle")
         subtitle.setWordWrap(True)
-        content_layout.addWidget(subtitle)
+        outer.addWidget(subtitle)
 
-        content_layout.addSpacing(theme.SP_4)
+        outer.addSpacing(theme.SP_4)
 
         # 设置项太多，一屏滚不完，按"你要改的是哪一类事"分页签。
         # 每个页签自己是一个纵向布局，_new_section 往 self._sections 里追加，
         # 所以建某一页之前先把 self._sections 指向那一页的布局。
         self._tabs = QTabWidget()
         self._tabs.setDocumentMode(True)
-        content_layout.addWidget(self._tabs, 1)
+        outer.addWidget(self._tabs, 1)
         self._pages: Dict[str, QVBoxLayout] = {}
 
-        for key, title in (("account", "账号"), ("task", "任务"),
+        for key, label in (("account", "账号"), ("task", "任务"),
                            ("notify", "通知"), ("auto", "自动化"),
                            ("general", "通用")):
+            # 每个页签各自滚动：以前整页共用一个滚动区，短页也会出现滚动条，
+            # 长页（自动化）还会被底部按钮栏裁掉一截。
             page = QWidget()
-            layout = QVBoxLayout(page)
-            layout.setContentsMargins(0, theme.SP_4, 0, 0)
+            page_lay = QVBoxLayout(page)
+            page_lay.setContentsMargins(0, 0, 0, 0)
+            page_lay.setSpacing(0)
+            inner = QWidget()
+            layout = QVBoxLayout(inner)
+            layout.setContentsMargins(0, theme.SP_4, 0, theme.SP_4)
             layout.setSpacing(theme.GROUP_GAP)
-            self._tabs.addTab(page, title)
+            scroller = QScrollArea()
+            scroller.setWidgetResizable(True)
+            scroller.setFrameShape(QScrollArea.NoFrame)
+            scroller.setWidget(inner)
+            page_lay.addWidget(scroller)
+            self._tabs.addTab(page, label)
             self._pages[key] = layout
 
         def build(key: str, *builders) -> None:
@@ -356,10 +373,7 @@ class SettingsPage(QWidget):
             buttons.addWidget(b)
         buttons.addStretch(1)
 
-        scroll.setWidget(content)
-        outer.addWidget(scroll, 1)
-
-        # 操作按钮**固定在页面底部**，不跟着内容滚动：
+        # 操作按钮**固定在页面底部**，不跟着内容滚动。
         # 分页签之后内容变高，保存按钮被推到很下面，得滚半天才找得到。
         bar = QWidget()
         bar_lay = QVBoxLayout(bar)
@@ -484,7 +498,7 @@ class SettingsPage(QWidget):
         self._controls["wait_time_max"] = wait_max
 
         # score
-        score = QComboBox()
+        score = _DownCombo()
         score.addItem("1-2 (策略 1)", 1)
         score.addItem("2-3 (策略 2)", 2)
         score.addItem("3-4 (策略 3，默认)", 3)
@@ -512,7 +526,7 @@ class SettingsPage(QWidget):
         form.addRow("note_enabled", note_enabled)
         self._controls["note_enabled"] = note_enabled
 
-        note_voice = QComboBox()
+        note_voice = _DownCombo()
         note_voice.addItem("克制", "restrained")
         note_voice.addItem("热络", "warm")
         note_voice.addItem("简短", "brief")
@@ -544,8 +558,8 @@ class SettingsPage(QWidget):
         self._controls["email_password"] = email_pwd_row.findChild(QLineEdit, "pwdEdit")
 
         # smtp_server（可编辑下拉，预设常用 SMTP 服务器）
-        smtp_server = QComboBox()
-        smtp_server.setEditable(True)
+        smtp_server = _DownCombo()
+        smtp_server.setEditable(False)
         smtp_server.addItem("smtp.qq.com")
         smtp_server.addItem("smtp.gmail.com")
         smtp_server.addItem("smtp.163.com")
@@ -593,7 +607,7 @@ class SettingsPage(QWidget):
         """应用自身行为配置（写入 AppConfig，不入 setting.json）。"""
         form = self._new_section("常规")
 
-        close_combo = QComboBox()
+        close_combo = _DownCombo()
         close_combo.addItem("每次询问", "ask")
         close_combo.addItem("最小化到托盘", "minimize")
         close_combo.addItem("直接退出", "close")
@@ -640,16 +654,15 @@ class SettingsPage(QWidget):
         form.addRow("启用", enable_box)
         self._schedule_enable_box = enable_box
 
-        # 触发时间（24 小时制）
-        time_edit = QTimeEdit()
-        time_edit.setDisplayFormat("HH:mm")
-        time_edit.setTime(QTime(9, 0))
-        time_edit.setToolTip("触发时间（24 小时制），默认 09:00。")
-        form.addRow("触发时间", time_edit)
-        self._schedule_time_edit = time_edit
+        # 触发时间（24 小时制）：时/分两个下拉。QTimeEdit 的上下箭头在
+        # 这个尺寸下画得很脏，而且和其他下拉框不是一套外观。
+        time_row, self._schedule_hour_combo, self._schedule_minute_combo = \
+            self._build_time_row(9, 0)
+        time_row.setToolTip("触发时间（24 小时制），默认 09:00。")
+        form.addRow("触发时间", time_row)
 
         # 模式
-        mode_combo = QComboBox()
+        mode_combo = _DownCombo()
         mode_combo.addItem("本地（启动 TaskWorker）", "local")
         mode_combo.addItem("云端（触发 GitHub Actions）", "cloud")
         mode_combo.addItem("两者（本地 + 云端都启动）", "both")
@@ -681,14 +694,12 @@ class SettingsPage(QWidget):
         form.addRow("错过补跑", catchup_box)
         self._schedule_catchup_box = catchup_box
 
-        deadline_edit = QTimeEdit()
-        deadline_edit.setDisplayFormat("HH:mm")
-        deadline_edit.setTime(QTime(23, 0))
-        deadline_edit.setToolTip(
+        deadline_row, self._schedule_deadline_hour, self._schedule_deadline_minute = \
+            self._build_time_row(23, 0)
+        deadline_row.setToolTip(
             "补跑的截止时间，默认 23:00。过了这个点就不再补——\n"
             "离第二天的定时时间太近，跑完紧接着又跑一次，同样是个风控特征。")
-        form.addRow("补跑截止", deadline_edit)
-        self._schedule_catchup_deadline = deadline_edit
+        form.addRow("补跑截止", deadline_row)
 
     def _build_github_section(self) -> None:
         intro = (
@@ -751,13 +762,12 @@ class SettingsPage(QWidget):
             "GitHub Actions schedule cron 表达式（5 段：分 时 日 月 周），如 \"0 9 * * *\" 每天 9:00 UTC。\n"
             "不保存到本地，每次点「同步 cron」直接修改 fork 仓库的 workflow 文件。")
         cron_row.addWidget(cron_label)
-        self._gh_cron_edit = QTimeEdit()
-        self._gh_cron_edit.setDisplayFormat("HH:mm")
-        self._gh_cron_edit.setTime(QTime(9, 0))
-        self._gh_cron_edit.setToolTip(
+        cron_time_row, self._gh_cron_hour_combo, self._gh_cron_minute_combo = \
+            self._build_time_row(9, 0)
+        cron_time_row.setToolTip(
             "北京时间触发时间。点「同步 cron」时自动转 UTC（北京 -8）写入 GitHub Actions cron。\n"
             "关机也会跑：GitHub 云端定时，不依赖桌面程序在线。")
-        cron_row.addWidget(self._gh_cron_edit, 1)
+        cron_row.addWidget(cron_time_row, 1)
         sync_cron_btn = QPushButton("同步 cron")
         sync_cron_btn.setObjectName("secondaryButton")
         sync_cron_btn.clicked.connect(self._sync_cron_to_workflow)
@@ -836,7 +846,7 @@ class SettingsPage(QWidget):
             "选择「关闭」后点「同步完整 workflow」，会把 workflow 的 schedule 块注释掉。\n"
             "GitHub 将不再按 cron 自动执行，但「云端执行」手动触发仍可用。")
         schedule_switch_row.addWidget(schedule_label)
-        self._gh_disable_schedule_combo = QComboBox()
+        self._gh_disable_schedule_combo = _DownCombo()
         self._gh_disable_schedule_combo.addItem("启用", False)
         self._gh_disable_schedule_combo.addItem("关闭", True)
         self._gh_disable_schedule_combo.setToolTip(schedule_label.toolTip())
@@ -855,7 +865,7 @@ class SettingsPage(QWidget):
             "选择「开启」后点「同步完整 workflow」，workflow 会在任务成功时也发送邮件到 NOTIFY_EMAIL。\n"
             "选择「关闭」则只在任务失败时发送失败邮件。")
         success_email_row.addWidget(success_email_label)
-        self._gh_success_email_combo = QComboBox()
+        self._gh_success_email_combo = _DownCombo()
         self._gh_success_email_combo.addItem("关闭", False)
         self._gh_success_email_combo.addItem("开启", True)
         self._gh_success_email_combo.setToolTip(success_email_label.toolTip())
@@ -1085,6 +1095,16 @@ class SettingsPage(QWidget):
                     if str(ctrl.itemData(i)) == str(value):
                         ctrl.setCurrentIndex(i)
                         break
+            elif key == "smtp_server":
+                # 下拉是只读的（点开选择）：配置里若是自定义服务器，
+                # 先补一个条目再选中，免得保存时被改成预设值。
+                text = "" if value is None else str(value)
+                index = ctrl.findText(text)
+                if index < 0 and text:
+                    ctrl.addItem(text)
+                    index = ctrl.count() - 1
+                if index >= 0:
+                    ctrl.setCurrentIndex(index)
             else:
                 ctrl.setCurrentText("" if value is None else str(value))
         elif isinstance(ctrl, QCheckBox):
@@ -1203,8 +1223,9 @@ class SettingsPage(QWidget):
         """从 AppConfig 读 schedule_* 到表单控件。"""
         try:
             self._schedule_enable_box.setChecked(self._app_config.schedule_enabled)
-            hh, mm = self._app_config.schedule_time.split(":")
-            self._schedule_time_edit.setTime(QTime(int(hh), int(mm)))
+            self._set_time_combos(self._schedule_hour_combo,
+                                  self._schedule_minute_combo,
+                                  self._app_config.schedule_time, (9, 0))
             mode = self._app_config.schedule_mode
             for i in range(self._schedule_mode_combo.count()):
                 if self._schedule_mode_combo.itemData(i) == mode:
@@ -1214,9 +1235,9 @@ class SettingsPage(QWidget):
                 int(self._app_config.get("local_delay_minutes", 0) or 0))
             self._schedule_catchup_box.setChecked(
                 bool(self._app_config.get("catchup_enabled", True)))
-            hh, mm = self._parse_hhmm(
+            self._set_time_combos(
+                self._schedule_deadline_hour, self._schedule_deadline_minute,
                 self._app_config.get("catchup_deadline", "23:00"), (23, 0))
-            self._schedule_catchup_deadline.setTime(QTime(hh, mm))
         except Exception:
             pass
 
@@ -1231,11 +1252,42 @@ class SettingsPage(QWidget):
             pass
         return default
 
+    def _build_time_row(self, hour: int, minute: int):
+        """「时 + 分」两个下拉。返回 ``(行控件, 时下拉, 分下拉)``。"""
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(theme.SP_2)
+        hour_combo = _DownCombo()
+        for h in range(24):
+            hour_combo.addItem(f"{h:02d} 时", h)
+        minute_combo = _DownCombo()
+        for m in range(60):
+            minute_combo.addItem(f"{m:02d} 分", m)
+        hour_combo.setCurrentIndex(max(0, min(23, hour)))
+        minute_combo.setCurrentIndex(max(0, min(59, minute)))
+        layout.addWidget(hour_combo, 1)
+        layout.addWidget(minute_combo, 1)
+        return row, hour_combo, minute_combo
+
+    @staticmethod
+    def _time_from_combos(hour_combo: QComboBox, minute_combo: QComboBox) -> str:
+        hour = int(hour_combo.currentData() or 0)
+        minute = int(minute_combo.currentData() or 0)
+        return f"{hour:02d}:{minute:02d}"
+
+    def _set_time_combos(self, hour_combo: QComboBox, minute_combo: QComboBox,
+                         text, default=(9, 0)) -> None:
+        hour, minute = self._parse_hhmm(text, default)
+        hour_combo.setCurrentIndex(hour)
+        minute_combo.setCurrentIndex(minute)
+
     def _save_schedule_config(self) -> None:
         """把表单上的 schedule_* 写回 AppConfig，并 emit signal 通知主窗口重排。"""
         try:
             enabled = self._schedule_enable_box.isChecked()
-            hhmm = self._schedule_time_edit.time().toString("HH:mm")
+            hhmm = self._time_from_combos(self._schedule_hour_combo,
+                                          self._schedule_minute_combo)
             mode = self._schedule_mode_combo.currentData() or "local"
             self._app_config.set("schedule_enabled", enabled)
             self._app_config.set("schedule_time", hhmm)
@@ -1246,7 +1298,8 @@ class SettingsPage(QWidget):
                                  bool(self._schedule_catchup_box.isChecked()))
             self._app_config.set(
                 "catchup_deadline",
-                self._schedule_catchup_deadline.time().toString("HH:mm"))
+                self._time_from_combos(self._schedule_deadline_hour,
+                                       self._schedule_deadline_minute))
             self._app_config.save()
         except Exception:
             pass
@@ -1463,9 +1516,10 @@ class SettingsPage(QWidget):
 
     def _cloud_cron_from_editor(self) -> str:
         """把「云端 cron」的北京时间 HH:MM 转成 GitHub Actions UTC cron。"""
-        _t = self._gh_cron_edit.time()
-        _utc_h = (_t.hour() - 8) % 24
-        return f"{_t.minute()} {_utc_h} * * *"
+        _t = self._time_from_combos(self._gh_cron_hour_combo, self._gh_cron_minute_combo)
+        _h, _m = (int(part) for part in _t.split(":"))
+        _utc_h = (_h - 8) % 24
+        return f"{_m} {_utc_h} * * *"
 
     @staticmethod
     def _set_workflow_cron(content: str, cron: str) -> str:
