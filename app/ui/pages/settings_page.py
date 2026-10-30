@@ -913,15 +913,15 @@ class SettingsPage(QWidget):
             "0=不启用。设为 N 分钟后，点「同步完整 workflow」会在 workflow 里写入 0–N 分钟随机延迟，\n"
             "用于错开每日固定时间，降低风控风险。")
         delay_row.addWidget(delay_label)
-        self._gh_random_delay_spin = QSpinBox()
-        self._gh_random_delay_spin.setRange(0, 30)
-        self._gh_random_delay_spin.setSuffix(" 分钟")
-        self._gh_random_delay_spin.setSpecialValueText("不启用")
+        self._gh_random_delay_spin = _DownCombo()
+        self._gh_random_delay_spin.addItem("不启用", 0)
+        for minutes in range(1, 31):
+            self._gh_random_delay_spin.addItem(f"{minutes} 分钟", minutes)
         self._gh_random_delay_spin.setToolTip(
-            "0=不启用；N=0–N 分钟随机延迟（同步 workflow 时写入）。")
+            "0=不启用；N=0-N 分钟随机延迟（同步 workflow 时写入）。")
         self._controls["gh_random_delay_minutes"] = self._gh_random_delay_spin
-        self._gh_random_delay_spin.valueChanged.connect(
-            lambda _value: self._save_gh_workflow_options())
+        self._gh_random_delay_spin.currentIndexChanged.connect(
+            lambda _index: self._save_gh_workflow_options())
         delay_row.addWidget(self._gh_random_delay_spin, 1)
         group_v.addLayout(delay_row)
 
@@ -1127,6 +1127,12 @@ class SettingsPage(QWidget):
                     if str(ctrl.itemData(i)) == str(value):
                         ctrl.setCurrentIndex(i)
                         break
+            elif key == "gh_random_delay_minutes":
+                try:
+                    minutes = int(value)
+                except (TypeError, ValueError):
+                    minutes = 0
+                ctrl.setCurrentIndex(max(0, min(30, minutes)))
             elif key == "smtp_server":
                 # 下拉是只读的（点开选择）：配置里若是自定义服务器，
                 # 先补一个条目再选中，免得保存时被改成预设值。
@@ -1152,7 +1158,8 @@ class SettingsPage(QWidget):
                 data[key] = ctrl.value()
             elif isinstance(ctrl, QComboBox):
                 # score / note_voice 下拉用 userData，GitHub 开关也用 userData
-                if key in ("score", "note_voice", "note_length", "gh_disable_schedule", "gh_success_email"):
+                if key in ("score", "note_voice", "note_length", "gh_random_delay_minutes",
+                       "gh_disable_schedule", "gh_success_email"):
                     data[key] = ctrl.currentData()
                 else:
                     data[key] = ctrl.currentText()
@@ -1181,7 +1188,8 @@ class SettingsPage(QWidget):
                 data[key] = ctrl.isChecked()
             elif isinstance(ctrl, QComboBox):
                 # 选项类下拉存真实值；开关类（bool userData）保持布尔
-                if key in ("score", "note_voice", "note_length"):
+                if key in ("score", "note_voice", "note_length",
+                           "gh_random_delay_minutes"):
                     data[key] = ctrl.currentData()
                 else:
                     data[key] = bool(ctrl.currentData())
@@ -1530,7 +1538,7 @@ class SettingsPage(QWidget):
         content = self._set_workflow_schedule(content, not disable_schedule)
         if not disable_schedule:
             content = self._set_workflow_cron(content, self._cloud_cron_from_editor())
-        random_delay = self._gh_random_delay_spin.value()
+        random_delay = int(self._gh_random_delay_spin.currentData() or 0)
         content = self._set_workflow_random_delay(content, random_delay)
         success_email = bool(self._gh_success_email_combo.currentData())
         self._save_gh_workflow_options()
