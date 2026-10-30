@@ -49,6 +49,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Logout
@@ -372,6 +373,17 @@ fun MainScreen(vm: AppViewModel) {
                         indicatorColor = NCMP.Soft,
                     ),
                 )
+                NavigationBarItem(
+                    selected = tab == 2,
+                    onClick = { tab = 2 },
+                    icon = { Icon(Icons.Filled.Info, contentDescription = null) },
+                    label = { Text("关于") },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = NCMP.Brand,
+                        selectedTextColor = NCMP.Brand,
+                        indicatorColor = NCMP.Soft,
+                    ),
+                )
             }
         },
     ) { padding ->
@@ -392,7 +404,7 @@ fun MainScreen(vm: AppViewModel) {
                 ThinRule()
                 ConfigSection(vm)
             }
-        } else {
+        } else if (tab == 1) {
             Column(
                 Modifier
                     .fillMaxSize()
@@ -401,6 +413,8 @@ fun MainScreen(vm: AppViewModel) {
             ) {
                 HistoryContent(vm)
             }
+        } else {
+            AboutContent(Modifier.padding(padding))
         }
     }
 }
@@ -981,6 +995,91 @@ private fun LedgerSection(vm: AppViewModel) {
             )
         }
     }
+}
+
+private const val GITHUB_URL = "https://github.com/longyanbo1224-debug/ncmp_desktop"
+private const val RELEASES_URL = "$GITHUB_URL/releases"
+
+/**
+ * 关于页：版本、项目链接、参考来源与免责声明。
+ *
+ * 手机端以前只有顶栏一行版本号，找不到项目主页、更新地址和许可信息。
+ */
+@Composable
+private fun AboutContent(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val versionName = remember(context) {
+        runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull().orEmpty()
+    }
+    Column(
+        modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 22.dp),
+    ) {
+        Spacer(Modifier.height(18.dp))
+        Text(
+            "关于",
+            fontFamily = FontFamily.Serif,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            color = NCMP.Ink,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            if (versionName.isEmpty()) "ncmp mobile" else "ncmp mobile · v$versionName",
+            fontSize = 13.sp,
+            color = NCMP.Muted,
+        )
+
+        Spacer(Modifier.height(22.dp))
+        AboutHeading("项目")
+        AboutLink(context, "GitHub", GITHUB_URL)
+        ThinRule()
+        AboutLink(context, "更新与下载", RELEASES_URL)
+        ThinRule()
+        AboutLink(context, "参考项目 3899/ncmm", "https://github.com/3899/ncmm")
+
+        Spacer(Modifier.height(22.dp))
+        AboutHeading("说明")
+        Text(
+            "非官方第三方程序，与网易云音乐无关联；仅供个人学习、研究使用，使用风险自负。" +
+                "评分时提交的批注会以你自己的身份公开显示在账号下。",
+            fontSize = 12.sp,
+            color = NCMP.Muted,
+            lineHeight = 20.sp,
+        )
+
+        Spacer(Modifier.height(18.dp))
+        Text("作者 Loong · MIT License", fontSize = 12.sp, color = NCMP.Muted)
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun AboutHeading(title: String) {
+    Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = NCMP.Ink)
+    Spacer(Modifier.height(8.dp))
+    ThinRule()
+}
+
+@Composable
+private fun AboutLink(context: Context, label: String, url: String) {
+    Text(
+        label,
+        fontSize = 13.sp,
+        color = NCMP.Brand,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                runCatching {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                }
+            }
+            .padding(vertical = 12.dp),
+    )
 }
 
 @Composable
