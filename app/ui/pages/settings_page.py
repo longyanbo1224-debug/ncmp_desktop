@@ -350,7 +350,7 @@ class SettingsPage(QWidget):
             page_lay.setSpacing(0)
             inner = QWidget()
             layout = QVBoxLayout(inner)
-            layout.setContentsMargins(0, theme.SP_2, 0, theme.SP_2)
+            layout.setContentsMargins(0, theme.SP_2, 0, theme.SP_4)
             layout.setSpacing(theme.SP_3)
             scroller = QScrollArea()
             scroller.setWidgetResizable(True)
@@ -402,7 +402,7 @@ class SettingsPage(QWidget):
         bar = QWidget()
         bar_lay = QVBoxLayout(bar)
         bar_lay.setContentsMargins(theme.PAGE_MARGIN, theme.SP_2,
-                                   theme.PAGE_MARGIN, theme.PAGE_MARGIN)
+                                   theme.PAGE_MARGIN, theme.SP_4)
         bar_lay.setSpacing(0)
         rule = QFrame()
         rule.setObjectName("rule")
@@ -461,7 +461,7 @@ class SettingsPage(QWidget):
         form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
         form.setHorizontalSpacing(theme.SP_3)
-        form.setVerticalSpacing(theme.SP_1 + 2)
+        form.setVerticalSpacing(theme.SP_1)
         box.addWidget(form_host)
 
         container.setMaximumWidth(theme.FORM_MAX_WIDTH)
@@ -503,23 +503,29 @@ class SettingsPage(QWidget):
     def _build_task_section(self) -> None:
         form = self._new_section("任务参数")
 
-        # wait_time_min
+        # 等待时间：下限 / 上限并排一行（两个值本来就是一对，分两行既占地也不好对照）
+        wait_row = QWidget()
+        wait_lay = QHBoxLayout(wait_row)
+        wait_lay.setContentsMargins(0, 0, 0, 0)
+        wait_lay.setSpacing(theme.SP_2)
+
         wait_min = QSpinBox()
         wait_min.setRange(0, 3600)
         wait_min.setSuffix(" 秒")
         wait_min.setValue(DEFAULTS["wait_time_min"])
         self._apply_hint(wait_min, "wait_time_min")
-        form.addRow("wait_time_min", wait_min)
         self._controls["wait_time_min"] = wait_min
+        wait_lay.addWidget(wait_min, 1)
 
-        # wait_time_max
         wait_max = QSpinBox()
         wait_max.setRange(0, 3600)
         wait_max.setSuffix(" 秒")
         wait_max.setValue(DEFAULTS["wait_time_max"])
         self._apply_hint(wait_max, "wait_time_max")
-        form.addRow("wait_time_max", wait_max)
         self._controls["wait_time_max"] = wait_max
+        wait_lay.addWidget(wait_max, 1)
+
+        form.addRow("等待时间（最小 / 最大）", wait_row)
 
         # score
         score = _DownCombo()
@@ -542,8 +548,7 @@ class SettingsPage(QWidget):
         """批注（乐评文案）：开关、语气、字数上限。"""
         form = self._new_section(
             "批注",
-            "评分时可以同时留一句话。三种语气都是本地内置的，不联网、不调用 AI，"
-            "同一首歌每次生成的都是同一句。")
+            "评分时可同时留一句话，本地生成、不联网；同一首歌每次生成同一句。")
 
         note_enabled = QCheckBox("评分时同时提交批注")
         self._apply_hint(note_enabled, "note_enabled")
