@@ -524,19 +524,18 @@ QLineEdit, QSpinBox, QPlainTextEdit, QTextEdit {
     selection-color: $PANEL;
 }
 
-/* 下拉：扁平填充、无描边——它现在点一下弹的是菜单（_MenuCombo），
-   外观应当和按钮一致，而不是和输入框一致。 */
+/* 下拉：和输入框同款（白底 + 细边），点开是系统列表 */
 QComboBox {
-    background-color: $CONTROL_BG;
+    background-color: $PANEL;
     color: $INK;
-    border: 1px solid transparent;
+    border: 1px solid $RULE;
     border-radius: ${R_CONTROL}px;
     padding: 5px 8px;
     min-height: 20px;
 }
 
 QComboBox:hover {
-    background-color: $CONTROL_HOVER;
+    border-color: $HOVER_BORDER;
 }
 
 QLineEdit:focus, QSpinBox:focus, QComboBox:focus,
