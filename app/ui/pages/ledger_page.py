@@ -12,7 +12,7 @@ from typing import List, Tuple
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QPushButton, QToolButton, QVBoxLayout, QWidget,
 )
 
 from app.task_history import TaskHistory
@@ -148,10 +148,26 @@ class LedgerPage(QWidget):
         outer.addWidget(self._grid)
 
         # ---- 最近曲目 ----
-        recent_title = QLabel("最近评过的曲子")
-        recent_title.setObjectName("sectionHeading")
-        outer.addWidget(recent_title)
+        # 最近曲目可能几十条，默认收起（与手机端一致），点标题右侧的按钮展开
+        self._recent_expanded = False
+        self._recent_header = QWidget()
+        recent_head = QHBoxLayout(self._recent_header)
+        recent_head.setContentsMargins(0, 0, 0, 0)
+        self._recent_title = QLabel("最近评过的曲子")
+        self._recent_title.setObjectName("sectionHeading")
+        recent_head.addWidget(self._recent_title)
+        recent_head.addStretch(1)
+        self._recent_toggle = QToolButton()
+        self._recent_toggle.setObjectName("textButton")
+        self._recent_toggle.setText("展开 ▸")
+        self._recent_toggle.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self._recent_toggle.setCursor(Qt.PointingHandCursor)
+        self._recent_toggle.clicked.connect(self.toggle_recent)
+        recent_head.addWidget(self._recent_toggle)
+        outer.addWidget(self._recent_header)
+
         self._recent = TrackList()
+        self._recent.setVisible(False)
         outer.addWidget(self._recent, 1)
 
     def _stat_block(self, label: str, value: str) -> QWidget:
@@ -333,12 +349,20 @@ class LedgerPage(QWidget):
         lay.addStretch(1)
         return row
 
+    def toggle_recent(self) -> None:
+        """展开/收起「最近评过的曲子」。"""
+        self._recent_expanded = not self._recent_expanded
+        self._recent.setVisible(self._recent_expanded)
+        self._recent_toggle.setText("收起 ▾" if self._recent_expanded else "展开 ▸")
+
     def _render_recent(self) -> None:
         self._recent.clear()
         try:
             items = TrackLog().recent(_RECENT_LIMIT)
         except Exception:
             items = []
+        self._recent_title.setText(
+            f"最近评过的曲子 {len(items)}" if items else "最近评过的曲子")
         for item in items:
             meta = " · ".join(part for part in (
                 str(item.get("artist") or ""),
