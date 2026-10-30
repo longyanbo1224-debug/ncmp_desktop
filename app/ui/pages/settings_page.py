@@ -25,10 +25,11 @@ import hashlib
 import json
 from typing import Any, Dict, Optional, Tuple
 
-from PySide6.QtCore import QSize, Qt, QThread, QTime, Signal
+from PySide6.QtCore import QPoint, QSize, Qt, QThread, QTime, Signal
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame, QHBoxLayout,
-    QLabel, QLineEdit, QProgressBar, QPushButton, QScrollArea,
+    QLabel, QLineEdit, QMenu, QProgressBar, QPushButton, QScrollArea,
     QSpinBox, QTabWidget, QTimeEdit, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -105,6 +106,26 @@ DEFAULTS: Dict[str, Any] = {
 
 # keyring 服务名（与 CookieStore / Config 对齐，gh_token 用同一服务下的独立 key）
 _KEYRING_SERVICE = "ncmp desktop"
+
+
+class _MenuCombo(QComboBox):
+    """点一下直接向下弹出选项菜单。
+
+    QComboBox 自己的弹出列表在 Windows 上是另一套外观（滚动条、边距都和界面不同）；
+    这里改成弹一个与全程序同款的菜单——圆角、浅红选中、和托盘右键菜单一致。
+    仍然是 QComboBox 子类，`itemData` / `currentData` / `setCurrentIndex` 都照旧可用。
+    """
+
+    def showPopup(self) -> None:  # noqa: N802
+        menu = QMenu(self)
+        theme.prepare_popup(menu)
+        for index in range(self.count()):
+            action = menu.addAction(self.itemText(index))
+            action.setCheckable(True)
+            action.setChecked(index == self.currentIndex())
+            action.triggered.connect(
+                lambda _checked=False, i=index: self.setCurrentIndex(i))
+        menu.exec(self.mapToGlobal(QPoint(0, self.height())))
 
 # 每个字段的提示文本（placeholder）与悬停说明（tooltip）
 FIELD_HINTS: Dict[str, Dict[str, str]] = {
@@ -410,7 +431,10 @@ class SettingsPage(QWidget):
         form_host.setMinimumWidth(theme.FORM_MAX_WIDTH - 60)
         form = QFormLayout(form_host)
         form.setContentsMargins(0, 0, 0, 0)
-        form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        # 标签压在字段上方（与手机端一致）。两列式"标签 | 输入框"更像后台管理系统，
+        # 堆叠更像"设置项"，也和手机端的分组骨架对得上。
+        form.setRowWrapPolicy(QFormLayout.WrapAllRows)
+        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
         form.setHorizontalSpacing(theme.SP_3)
         form.setVerticalSpacing(theme.SP_2)
@@ -474,7 +498,7 @@ class SettingsPage(QWidget):
         self._controls["wait_time_max"] = wait_max
 
         # score
-        score = QComboBox()
+        score = _MenuCombo()
         score.addItem("1-2 (策略 1)", 1)
         score.addItem("2-3 (策略 2)", 2)
         score.addItem("3-4 (策略 3，默认)", 3)
@@ -502,7 +526,7 @@ class SettingsPage(QWidget):
         form.addRow("note_enabled", note_enabled)
         self._controls["note_enabled"] = note_enabled
 
-        note_voice = QComboBox()
+        note_voice = _MenuCombo()
         note_voice.addItem("克制", "restrained")
         note_voice.addItem("热络", "warm")
         note_voice.addItem("简短", "brief")
@@ -534,7 +558,7 @@ class SettingsPage(QWidget):
         self._controls["email_password"] = email_pwd_row.findChild(QLineEdit, "pwdEdit")
 
         # smtp_server（可编辑下拉，预设常用 SMTP 服务器）
-        smtp_server = QComboBox()
+        smtp_server = _MenuCombo()
         smtp_server.setEditable(True)
         smtp_server.addItem("smtp.qq.com")
         smtp_server.addItem("smtp.gmail.com")
@@ -583,7 +607,7 @@ class SettingsPage(QWidget):
         """应用自身行为配置（写入 AppConfig，不入 setting.json）。"""
         form = self._new_section("常规")
 
-        close_combo = QComboBox()
+        close_combo = _MenuCombo()
         close_combo.addItem("每次询问", "ask")
         close_combo.addItem("最小化到托盘", "minimize")
         close_combo.addItem("直接退出", "close")
@@ -639,7 +663,7 @@ class SettingsPage(QWidget):
         self._schedule_time_edit = time_edit
 
         # 模式
-        mode_combo = QComboBox()
+        mode_combo = _MenuCombo()
         mode_combo.addItem("本地（启动 TaskWorker）", "local")
         mode_combo.addItem("云端（触发 GitHub Actions）", "cloud")
         mode_combo.addItem("两者（本地 + 云端都启动）", "both")
@@ -825,7 +849,7 @@ class SettingsPage(QWidget):
             "选择「关闭」后点「同步完整 workflow」，会把 workflow 的 schedule 块注释掉。\n"
             "GitHub 将不再按 cron 自动执行，但「云端执行」手动触发仍可用。")
         schedule_switch_row.addWidget(schedule_label)
-        self._gh_disable_schedule_combo = QComboBox()
+        self._gh_disable_schedule_combo = _MenuCombo()
         self._gh_disable_schedule_combo.addItem("启用", False)
         self._gh_disable_schedule_combo.addItem("关闭", True)
         self._gh_disable_schedule_combo.setToolTip(schedule_label.toolTip())
@@ -843,7 +867,7 @@ class SettingsPage(QWidget):
             "选择「开启」后点「同步完整 workflow」，workflow 会在任务成功时也发送邮件到 NOTIFY_EMAIL。\n"
             "选择「关闭」则只在任务失败时发送失败邮件。")
         success_email_row.addWidget(success_email_label)
-        self._gh_success_email_combo = QComboBox()
+        self._gh_success_email_combo = _MenuCombo()
         self._gh_success_email_combo.addItem("关闭", False)
         self._gh_success_email_combo.addItem("开启", True)
         self._gh_success_email_combo.setToolTip(success_email_label.toolTip())
@@ -921,8 +945,15 @@ class SettingsPage(QWidget):
         edit = QLineEdit()
         edit.setObjectName("pwdEdit")
         edit.setEchoMode(QLineEdit.Password)
+        # 密钥/令牌可能很长：限定显示宽度，超出部分在框内横向滚动，
+        # 免得一串圆点把这一行撑得比别的字段长一截。
+        edit.setMaximumWidth(320)
         if read_only:
             edit.setReadOnly(True)
+            # Cookie 只读值用等宽小字：点眼睛展开后也能看清结构、方便复制
+            mono = QFont("Consolas")
+            mono.setPixelSize(theme.FS_CAPTION)
+            edit.setFont(mono)
         self._apply_hint(edit, field_key)
         layout.addWidget(edit, 1)
 

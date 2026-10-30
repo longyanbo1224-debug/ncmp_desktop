@@ -534,7 +534,8 @@ QLineEdit:read-only {
 
 QComboBox::drop-down {
     border: none;
-    width: 24px;
+    border-left: 1px solid $RULE;
+    width: 26px;
 }
 
 QComboBox QAbstractItemView {
@@ -920,12 +921,14 @@ QDialog {
    背景、文字、按钮全部拉齐到本程序的尺寸和配色。 */
 QMessageBox {
     background-color: $PANEL;
+    min-width: 380px;
 }
 
 QMessageBox QLabel {
     background: transparent;
     color: $INK;
     font-size: ${FS_BODY}px;
+    min-width: 300px;
 }
 
 QMessageBox QPushButton {
