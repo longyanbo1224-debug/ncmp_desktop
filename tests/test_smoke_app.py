@@ -55,6 +55,19 @@ class TestPagesConstruct(unittest.TestCase):
         self.assertEqual(page._controls["note_voice"].currentData(), "brief")
         self.assertEqual(page._collect_form()["note_voice"], "brief")
 
+    def test_toast_paints_opaque_background(self):
+        """通知气泡必须真的画出面板（曾因半透明窗口导致"透明、像没加载完"）。"""
+        from app.ui.widgets.toast import Toast
+
+        toast = Toast("任务完成", "今天评完了 20 首")
+        pixmap = toast.grab()
+        self.assertFalse(pixmap.isNull())
+        self.assertGreater(pixmap.width(), 0)
+        # 中心像素应是面板色（不透出背景）
+        image = pixmap.toImage()
+        center = image.pixelColor(image.width() // 2, image.height() // 2)
+        self.assertEqual(center.alpha(), 255, f"中心像素透明: {center.name()}")
+
 
 class TestTrackLog(unittest.TestCase):
     def _log(self):

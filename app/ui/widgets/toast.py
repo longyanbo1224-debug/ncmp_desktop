@@ -15,9 +15,9 @@ from __future__ import annotations
 from typing import List, Optional
 
 from PySide6.QtCore import (
-    QEasingCurve, QPoint, QPropertyAnimation, Qt, QTimer,
+    QEasingCurve, QPoint, QPropertyAnimation, QRectF, Qt, QTimer,
 )
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
@@ -85,6 +85,22 @@ class Toast(QWidget):
         row.addLayout(text_col, 1)
 
     # ------------------------------------------------------------------
+    def paintEvent(self, event) -> None:  # noqa: N802
+        """自己画圆角面板。
+
+        半透明窗口下，样式表的背景色有时画不出来（表现为"透明、像没加载完"），
+        这里直接绘制，不依赖样式表。
+        """
+        painter = QPainter(self)
+        try:
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+            painter.setPen(QPen(QColor(theme.RULE), 1))
+            painter.setBrush(QColor(theme.PANEL))
+            painter.drawRoundedRect(rect, theme.R_PANEL, theme.R_PANEL)
+        finally:
+            painter.end()
+
     def show_at_corner(self) -> None:
         """放到屏幕右下角，已存在的通知依次往上叠。"""
         self.adjustSize()
@@ -118,6 +134,9 @@ class Toast(QWidget):
             anim.setStartValue(0.0)
             anim.setEndValue(1.0)
             anim.setEasingCurve(QEasingCurve.OutCubic)
+            # 动画被打断（例如同时最小化窗口）时可能停在半透明，
+            # 结束后强制把不透明度拉满
+            anim.finished.connect(lambda: self.setWindowOpacity(1.0))
             anim.start()
             self._fade = anim
         except Exception:

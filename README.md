@@ -417,7 +417,7 @@ v1.2.2 的完整说明见 [release-notes/v1.2.2.md](release-notes/v1.2.2.md)。
 4. 项目中的「网易云音乐」等名称仅用于标识服务来源，相关商标权利归其权利人所有。
 5. 如权利人认为本项目侵犯其合法权益，请通过 GitHub Issue 联系作者，作者将及时下架处理。
 6. 本项目仅用于技术学习与研究，**请在下载后 24 小时内删除**本程序及其相关文件。超过该期限仍继续使用时，一切后果由使用者本人承担，作者不承担任何责任。
-7. 允许基于本项目二次开发，但对外发布时**必须保留原作者署名**（Galvin，GitHub：`longyanbo1224-debug`）与**原项目链接**（https://github.com/longyanbo1224-debug/ncmp_desktop ），并在说明中注明「基于 ncmp_desktop 修改」。**不得删除或隐藏原署名，不得声称原创。**
+7. 允许基于本项目二次开发，但对外发布时**必须保留原作者署名**（Loong，GitHub：`longyanbo1224-debug`）与**原项目链接**（https://github.com/longyanbo1224-debug/ncmp_desktop ），并在说明中注明「基于 ncmp_desktop 修改」。**不得删除或隐藏原署名，不得声称原创。**
 
 ---
 

@@ -18,7 +18,7 @@ APP_DESCRIPTION = (
     "支持扫码/密码登录、任务可视化、GitHub Actions 云端触发；"
     "评分时可同时留下一条批注，今天的曲目与批注会记在「记录」里。"
 )
-AUTHOR = "Galvin"
+AUTHOR = "Loong"
 GITHUB_URL = f"https://github.com/{GITHUB_REPO}"
 GITHUB_LABEL = GITHUB_REPO
 UPSTREAM_URL = "https://github.com/ACAne0320/ncmp"
