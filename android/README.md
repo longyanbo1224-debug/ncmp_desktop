@@ -29,6 +29,8 @@ build_android.bat
 
 当前为 **debug 签名**，可直接安装测试，但不能上架应用商店。正式发布需要在 `app/build.gradle.kts` 配置 `signingConfigs` 生成 release 包。
 
+发布产物（GitHub Releases 里的 `ncmp-mobile.apk`）即由本目录构建，版本号见 `app/build.gradle.kts` 的 `versionName`。
+
 ## 目录结构
 
 ```
@@ -45,6 +47,7 @@ app/src/main/java/com/ncmp/mobile/
 │   ├── TrackLog.kt        按曲目记录（歌名/分数/批注）+ 统计
 │   ├── Notes.kt           批注生成（与桌面端 core/notes 同一套语料）
 │   ├── PartnerTitles.kt   合伙人称号换算（320 / 400 / 480）
+│   ├── Models.kt          数据模型（Work / TrackItem / TaskConfig）
 │   ├── AlarmScheduler.kt  每日定时（AlarmManager）
 │   └── SessionStore.kt    Cookie / 配置加密存储
 └── ui/
@@ -58,8 +61,13 @@ app/src/main/java/com/ncmp/mobile/
 ## 说明
 
 - 核心逻辑（加密、接口、评分策略）与桌面端 `core/` 逐行对应
+- 评分时可同时提交一条批注：本地模板生成，三套语气（克制 / 热络 / 简短），字数上限可调
 - 额外任务单首失败会跳过，整轮结束后自动补跑一轮；服务端提示「今日没有更多可评定歌曲」时按完成处理
-- 「记录」页按天合并同一天的多次执行，点开看每次结果；曲目明细里，服务端标为已评过的歌会自动补进本机记录
+- 结果不明的评分只查一次服务端确认，**不重复提交**；日志中的 key / Cookie 会被遮蔽
+- 「今日」页的曲目表一次列出当天全部曲目（基础 + 额外），服务端拒绝的作品标为「跳过」
+- 「记录」页：年度打卡图（点一下放大横看）、连续 / 累计曲目 / 累计批注、口味曲线、最近曲目；
+  「合伙人」可手动刷新积分与称号
+- 曲目明细里，服务端标为已评过的歌会自动补进本机记录（电脑端评过的歌也能看到）
 - 配色跟随系统深浅色（与桌面端同一套语义）
 - Cookie 存 Android Keystore 加密的 SharedPreferences
 - 本项目为**非官方**第三方程序，仅供个人学习、研究和技术交流，使用风险自负
