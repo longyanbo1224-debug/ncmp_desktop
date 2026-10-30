@@ -116,20 +116,25 @@ class _DownCombo(QComboBox):
 
     def showPopup(self) -> None:  # noqa: N802
         # 短列表一次全部展开（不留滚动条）；长列表按屏幕高度截断后滚动。
-        # 只改方向不控高度的话，24 个"时"、60 个"分"会顶出屏幕，后面的项选不到。
+        # 高度必须自己按行高算：QComboBox 弹层在设置 maxVisibleItems 之后
+        # sizeHint 不可靠，直接用它会把列表压成一条缝，选项看不见。
         self.setMaxVisibleItems(max(1, self.count()))
         super().showPopup()
         try:
             popup = self.view().window()
             anchor = self.mapToGlobal(QPoint(0, self.height()))
             width = max(popup.width(), self.width())
-            height = popup.sizeHint().height()
             screen = self.screen()
-            if screen is None:
+            area = screen.availableGeometry() if screen is not None else None
+            if area is None:
                 popup.move(anchor)
                 return
-            area = screen.availableGeometry()
-            height = min(height, area.height() - 24)
+            row = self.view().sizeHintForRow(0)
+            if row <= 0:
+                row = 24
+            visible = max(1, (area.height() - 24) // row)
+            visible = min(visible, self.count())
+            height = row * visible + 8      # 上下各留一点边框
             y = anchor.y()
             if y + height > area.bottom():
                 y = max(area.top() + 12, area.bottom() - height)

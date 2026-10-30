@@ -19,16 +19,20 @@ import json
 from typing import Any, Dict, Optional
 
 #: 提示词：三段式骨架 + 明确禁止编造听觉细节（模型同样没有听过这首歌）。
-_SYSTEM_PROMPT = (
-    "你在替用户给网易云音乐「音乐合伙人」的作品写一句中文短评，"
-    "这句话会公开显示在用户账号下。要求："
-    "1) 40~60 个汉字，一到两句，最多三段；"
-    "2) 你并没有听过这首歌，禁止描述具体的旋律、编曲、乐器、段落实排，"
-    "只允许谈听歌场景、整体完成度的判断和处置方式；"
-    "3) 不用感叹号堆砌，不用 emoji，不用话题标签，不写「强烈推荐」这类刷屏语；"
-    "4) 语气克制、像唱片内页上的一句手写批注；"
-    "5) 只输出这句话本身，不要加引号、不要解释。"
-)
+def _system_prompt(max_chars: int) -> str:
+    """按设置里的字数上限生成提示词：上限是 120，就让模型写到 72–120 字。"""
+    upper = max(20, int(max_chars))
+    lower = max(12, int(upper * 0.6))
+    return (
+        "你在替用户给网易云音乐「音乐合伙人」的作品写一句中文短评，"
+        "这句话会公开显示在用户账号下。要求："
+        f"1) {lower}~{upper} 个汉字，一到三句；"
+        "2) 你并没有听过这首歌，禁止描述具体的旋律、编曲、乐器、段落实排，"
+        "只允许谈听歌场景、整体完成度的判断和处置方式；"
+        "3) 不用感叹号堆砌，不用 emoji，不用话题标签，不写「强烈推荐」这类刷屏语；"
+        "4) 语气克制、像唱片内页上的一句手写批注；"
+        "5) 只输出这句话本身，不要加引号、不要解释。"
+    )
 
 
 def _get(config: Optional[Any], key: str, default: Any = None) -> Any:
@@ -70,14 +74,20 @@ def generate_with_llm(work: Dict[str, Any], score: str,
         f"歌手：{work.get('authorName', '')}\n"
         f"我给这首作品的评分：{score} 分（满分 5 分）"
     )
+    try:
+        max_chars = int(_get(config, "note_max_chars", 80) or 80)
+    except (TypeError, ValueError):
+        max_chars = 80
+    max_chars = max(10, min(200, max_chars))
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": _system_prompt(max_chars)},
             {"role": "user", "content": user_prompt},
         ],
         "temperature": 0.8,
-        "max_tokens": 200,
+        # 中文按 ~2.5 token/字估算，留足余量
+        "max_tokens": max(200, max_chars * 4),
     }
     try:
         import requests
