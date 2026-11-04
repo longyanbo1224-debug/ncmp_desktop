@@ -27,6 +27,12 @@ REFERENCE_URL = "https://github.com/3899/ncmm"
 REFERENCE_LABEL = "3899/ncmm"
 LICENSE = "MIT License"
 
+#: 「更新与下载」直达国内镜像的 releases 取链页（少一步手动粘贴仓库地址）
+MIRROR_RELEASES_URL = (
+    "https://github.akams.cn/?url=https%3A%2F%2Fgithub.com%2F"
+    "longyanbo1224-debug%2Fncmp_desktop%2Freleases"
+)
+
 
 def _link(url: str, label: str) -> str:
     """内联样式的富文本链接。
@@ -60,7 +66,7 @@ class AboutPage(QWidget):
 
         layout.addSpacing(theme.SP_2)
 
-        version = QLabel(f"版本 {__version__}　·　{_link(RELEASES_URL, '更新说明')}")
+        version = QLabel(f"版本 {__version__}　·　{_link(MIRROR_RELEASES_URL, '更新与下载')}")
         version.setObjectName("captionText")
         version.setOpenExternalLinks(True)
         version.setTextInteractionFlags(Qt.TextBrowserInteraction)
