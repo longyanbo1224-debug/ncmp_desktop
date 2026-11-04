@@ -38,7 +38,9 @@ class TestTodayPage(unittest.TestCase):
         page._on_progress(1, 5, "夜航西飞", "4")
         page._on_progress(2, 5, "另一首", "3")
         self.assertEqual(page._track_list.count(), 2)
-        self.assertIn("2/5", page._today_label.text())
+        # 页头分母是曲目表行数（不是阶段目标 5），所以两首评完就是 2/2
+        self.assertEqual(page._track_list.done_count(), 2)
+        self.assertIn("2/2", page._today_label.text())
 
     def test_note_lands_on_track_row(self):
         page = self._page()

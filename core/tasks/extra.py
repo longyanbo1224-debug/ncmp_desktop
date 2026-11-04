@@ -34,7 +34,8 @@ class ExtraTask:
         失败不影响主流程——评分阶段会自己再拉一次。
         """
         try:
-            self._prefetched = self._get_extra_tasks()
+            self.last_all = []
+            self._prefetched = self._get_extra_tasks(emit=False)
         except Exception as e:
             self._prefetched = None
             try:
@@ -182,7 +183,7 @@ class ExtraTask:
             except Exception:
                 pass
 
-    def _get_extra_tasks(self) -> Tuple[List[Dict], int]:
+    def _get_extra_tasks(self, emit: bool = True) -> Tuple[List[Dict], int]:
         """获取额外评分任务列表"""
         try:
             response = self.session.get(
@@ -192,9 +193,10 @@ class ExtraTask:
             if response["code"] != 200:
                 raise RuntimeError(f"获取额外任务失败: {response.get('message', '未知错误')}")
             extra_tasks = response["data"]
-            # 整份清单（含已评的）交给界面：今天已经评完时，界面上至少还看得见
-            # 今天额外任务评过哪些歌，而不是只剩基础任务那 5 首。
-            self._emit_works(extra_tasks)
+            #: 最近一次拉到的整份清单，供上层与基础任务合并后一次性交给界面
+            self.last_all = extra_tasks
+            if emit:
+                self._emit_works(extra_tasks)
             completed_tasks = [t for t in extra_tasks if t['completed']]
             uncompleted_tasks = [t for t in extra_tasks if not t['completed']]
 

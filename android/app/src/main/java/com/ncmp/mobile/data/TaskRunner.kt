@@ -71,13 +71,10 @@ class TaskRunner(
             val daily = api.getDailyTasks()
             log("今日任务：${if (daily.complete) "已完成" else "未完成"}[${daily.completedCount}/${daily.count}]")
             step("拉取每日任务", "success")
-            // 整份清单都摆进曲目表（已评过的也摆），否则今天评完之后再点执行，
-            // 曲目表会一首都没有。
-            onQueue(daily.items)
-            // 额外清单也提前拉一次：一开始就看得到今天全部曲目，
-            // 而不是先显示 5 首、等基础任务跑完才冒出额外的 15 首。
+            // 额外清单先拉好，再和基础任务一起**一次性**摆进曲目表：
+            // 分两次 onQueue 会让界面先闪 5 首再跳到 15 首。
             val preloadedExtra = runCatching { api.getExtraTasks() }.getOrNull()
-            preloadedExtra?.let { (items, _) -> onQueue(items) }
+            onQueue(daily.items + (preloadedExtra?.first ?: emptyList()))
 
             if (!daily.complete) {
                 checkCancel()

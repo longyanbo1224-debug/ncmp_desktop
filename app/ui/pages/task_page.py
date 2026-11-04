@@ -93,8 +93,6 @@ class TaskPage(QWidget):
         self._current_phase: str = ""   # 当前阶段名，供歌曲进度在阶段区间内插值
         # 阶段区间。开局是兜底值，拿到条目数后由 _plan_scoring 重算。
         self._phase_span: dict = dict(_PHASE_SPAN)
-        self._today_done = 0
-        self._today_total = 0
         self._build_ui()
         # 打开程序时把今天已经评过的曲目从账本读回来：
         # 今天跑过之后再开程序，曲目表不该显示"还没排到曲子"。
@@ -532,8 +530,6 @@ class TaskPage(QWidget):
         self._percent_label.setText("0%")
         self._current_phase = ""
         self._phase_span = dict(_PHASE_SPAN)
-        self._today_done = 0
-        self._today_total = 0
         self._stop_wait()
         self._show_hint("")
         # 跑起来就把「运行详情」展开：日志要能一边跑一边看，
@@ -573,21 +569,21 @@ class TaskPage(QWidget):
                 state=state,
                 note=str(entry.get("note") or ""),
             )
-        self._today_done = len(entries)
         self._refresh_rail()
 
     def _refresh_rail(self) -> None:
-        """刷新右栏：今日完成数、批注数、最近一次运行。"""
-        total = self._today_total
-        done = self._today_done or self._track_list.done_count()
-        if total:
-            self._rail_done.setText(f"已完成 {done}/{total} 首")
-        else:
-            self._rail_done.setText(f"已完成 {done} 首")
+        """刷新右栏：今日完成数、批注数、最近一次运行。
+
+        分母用**曲目表行数**（基础 + 额外，含待评），不是当前阶段的进度目标——
+        否则基础阶段显示 0/5、额外阶段又跳到 x/15，和列表里的行数对不上。
+        """
+        total = self._track_list.count()
+        done = self._track_list.done_count()
+        self._rail_done.setText(f"已完成 {done}/{total} 首" if total else "已完成 0 首")
         notes = self._track_list.note_count()
         self._rail_notes.setText(
             f"已提交 {notes} 条批注" if notes else "本次还没有提交批注")
-        self._today_label.setText(f"今日 {done}/{total}" if total else f"今日 {done}")
+        self._today_label.setText(f"今日 {done}/{total}" if total else "今日 0")
         self._refresh_history_summary()
 
     # ------------------------------------------------------------------
@@ -694,10 +690,6 @@ class TaskPage(QWidget):
                 self._current_phase = ""
 
     def _on_progress(self, done: int, total: int, song: str, score: str) -> None:
-        if total and total > 0:
-            self._today_total = int(total)
-        if done and done > 0:
-            self._today_done = int(done)
         # 一首歌评完：在曲目表里落下这一行
         if song and score:
             self._track_list.add(song, score=str(score), state="done")

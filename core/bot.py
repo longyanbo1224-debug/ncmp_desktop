@@ -66,10 +66,8 @@ class MusicPartnerBot:
             self._step("拉取每日任务", "success")
             # 今日曲目清单（含服务端已记的分数）直接交给界面：
             # 今天已经评完时评分流程不会跑，界面否则一片空白。
-            self._emit_works(task_data)
-
-            # 额外任务清单提前拉一次：界面从第一秒就能看到今天全部曲目，
-            # 而不是先显示 5 首、等基础任务跑完才冒出额外的 15 首。
+            # 额外任务清单先预取，再和基础任务**合并成一次**交给界面：
+            # 分两次上报会让曲目表先闪 5 首再跳到 15 首。
             extra_task = ExtraTask(
                 self.session, self.logger, self.config,
                 on_progress=self.on_progress,
@@ -78,6 +76,11 @@ class MusicPartnerBot:
                 on_works=self.on_works,
             )
             extra_task.preload()
+            try:
+                extra_works = list(getattr(extra_task, "last_all", []) or [])
+            except Exception:
+                extra_works = []
+            self._emit_works(list(task_data.get("works") or []) + extra_works)
 
             if not complete:
                 self._check_cancel()
