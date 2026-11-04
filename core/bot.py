@@ -106,17 +106,17 @@ class MusicPartnerBot:
             self._step(self._current_step, "failed")
             return False
 
-    def _emit_works(self, task_data: dict) -> None:
-        """把今日曲目清单交给界面（work / 服务端分数 / 是否已评）。
+    def _emit_works(self, works) -> None:
+        """把今日曲目清单交给界面（每项含 work / score / completed）。
 
-        今天已经评完时不会走评分流程，"今天评了哪几首、各几分"就只在这份
-        响应里（``works[].work`` + ``works[].score`` + ``works[].completed``），
-        不交出去，界面就只能显示空状态。
+        参数是**已合并好的列表**（基础 + 额外），不是原始响应 dict——
+        早先这里按 ``task_data["works"]`` 取值，改成合并列表后直接抛
+        ``'list' object has no attribute 'get'``，界面一行都收不到。
         """
         if not self.on_works:
             return
         try:
-            self.on_works(list(task_data.get("works") or []))
+            self.on_works(list(works or []))
         except Exception as cb_err:
             self.logger.debug(f"on_works 回调异常: {cb_err}")
 
