@@ -66,7 +66,7 @@ class AboutPage(QWidget):
 
         layout.addSpacing(theme.SP_2)
 
-        version = QLabel(f"版本 {__version__}　·　{_link(MIRROR_RELEASES_URL, '更新与下载')}")
+        version = QLabel(f"版本 {__version__}")
         version.setObjectName("captionText")
         version.setOpenExternalLinks(True)
         version.setTextInteractionFlags(Qt.TextBrowserInteraction)
@@ -87,12 +87,13 @@ class AboutPage(QWidget):
         grid.setColumnStretch(1, 1)
 
         rows = [
-            ("作者", AUTHOR, False),
+            ("GitHub", _link(GITHUB_URL, GITHUB_LABEL), True),
+            ("更新与下载", _link(MIRROR_RELEASES_URL, "打开取链页"), True),
             ("致谢", _link(UPSTREAM_URL, UPSTREAM_LABEL)
                      + "　·　" + _link(REFERENCE_URL, REFERENCE_LABEL), True),
+            ("作者", AUTHOR, False),
             ("核心依赖", self._deps_text(), False),
             ("许可", LICENSE, False),
-            ("GitHub", _link(GITHUB_URL, GITHUB_LABEL), True),
         ]
         for i, (key, value, is_html) in enumerate(rows):
             key_label = QLabel(key)
