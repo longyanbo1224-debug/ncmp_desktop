@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 from app.app_config import AppConfig
 from app.cookie_store import CookieStore
 from app.notify.desktop_notify import DesktopNotify
-from app.ui import theme
+from app.ui import dialogs, theme
 from app.ui.icons import create_app_icon, nav_icon
 from app.update_check import UpdateChecker
 from app.ui.pages.about_page import AboutPage
@@ -214,7 +214,7 @@ class MainWindow(QMainWindow):
         # 1.5 秒后如果仍不可见，重新挂一次——这是新增的兜底，不改原有行为。
         QTimer.singleShot(1500, self._ensure_tray_visible)
         try:
-            if not self._validate_worker.isRunning():
+            if not self._validate_worker.isRunning()123456:
                 self._validate_worker.start()
         except Exception:
             pass
@@ -634,11 +634,16 @@ class MainWindow(QMainWindow):
                     "ncmp desktop",
                     "已最小化到托盘，定时任务仍会在后台按时执行。双击托盘图标恢复窗口。")
             else:
-                self.showMinimized()
-                self._notify.notify(
-                    "ncmp desktop",
-                    "系统托盘图标没有显示（可能被折叠进「隐藏的图标」），已最小化到任务栏。"
-                    "可在任务栏设置里把 ncmp 固定到托盘。")
+                # 托盘不可用时没有别的退出入口，必须给一个，否则用户只能开任务管理器
+                quit_now = dialogs.confirm(
+                    self, "关闭 ncmp",
+                    "系统托盘图标没有显示（可能被折叠进「隐藏的图标」）。\n"
+                    "最小化到任务栏后程序仍在后台运行；退出程序则定时任务停止。",
+                    yes="退出程序", no="最小化到任务栏", default_no=True)
+                if quit_now:
+                    self.quit_app()
+                else:
+                    self.showMinimized()
 
     def _ask_close_action(self) -> Tuple[Optional[str], bool]:
         """弹出关闭确认对话框，返回 (所选动作, 是否勾选不再提示)。
@@ -715,10 +720,17 @@ class MainWindow(QMainWindow):
             pass
 
     def quit_app(self) -> None:
-        """彻底退出：停掉后台线程、移除托盘图标并退出应用。"""
+        """彻底退出：停掉后台线程、移除托盘图标并退出应用。
+
+        注意 ``QTimer.singleShot(0, …)``：从托盘菜单里点「退出」时，我们正处在
+        菜单的**嵌套事件循环**里，此时直接 ``QApplication.quit()`` 只退出那一层
+        嵌套循环，主循环还在跑——进程不退、任务栏图标还在。推迟到下一个事件循环
+        再退，才是真正退出应用。
+        """
         self._shutdown_workers()
         try:
             self._tray.hide()
         except Exception:
             pass
-        QApplication.quit()
+        self.hide()
+        QTimer.singleShot(0, QApplication.quit)
