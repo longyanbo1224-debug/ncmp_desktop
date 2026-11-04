@@ -180,6 +180,21 @@ class MainWindow(QMainWindow):
         self._log_handler = handler
         self._task.install_log_handler(handler)
 
+    def _ensure_tray_visible(self) -> None:
+        """托盘图标没显示时重新挂一次。
+
+        典型场景：程序随开机启动，Explorer 的托盘区还没就绪就调了 ``show()``，
+        Windows 会直接忽略，图标就一直不出现。重新 hide/show 一次即可恢复。
+        """
+        try:
+            if self._tray is None or self._tray.isVisible():
+                return
+            self._tray.hide()
+            self._tray.show()
+            Logger().info(f"托盘图标重新挂载：visible={self._tray.isVisible()}")
+        except Exception:
+            pass
+
     def start_background_workers(self) -> None:
         """启动后台线程：Cookie 定期验证 + 托盘显示 + 更新检查。"""
         try:
@@ -194,6 +209,10 @@ class MainWindow(QMainWindow):
                 Logger().warning(f"托盘图标显示失败：{e}")
             except Exception:
                 pass
+
+        # 托盘图标偶尔会在系统托盘尚未就绪时注册失败（开机自启最常见）。
+        # 1.5 秒后如果仍不可见，重新挂一次——这是新增的兜底，不改原有行为。
+        QTimer.singleShot(1500, self._ensure_tray_visible)
         try:
             if not self._validate_worker.isRunning():
                 self._validate_worker.start()
