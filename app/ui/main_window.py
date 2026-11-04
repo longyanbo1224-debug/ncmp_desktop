@@ -20,7 +20,7 @@ from PySide6.QtGui import QCloseEvent, QIcon
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem, QMainWindow, QMessageBox, QPushButton,
-    QStackedWidget, QVBoxLayout, QWidget,
+    QStackedWidget, QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
 from app.app_config import AppConfig
@@ -38,6 +38,7 @@ from app.ui.pages.task_page import TaskPage
 from app.ui.widgets.log_view import GuiLogHandler
 from app.ui.widgets.tray_icon import TrayIcon
 from app.ui.widgets.wheel_guard import WheelGuard
+from core.utils.logger import Logger
 from app.workers.task_worker import TaskWorker
 from app.workers.validate_worker import ValidateWorker
 
@@ -183,8 +184,16 @@ class MainWindow(QMainWindow):
         """启动后台线程：Cookie 定期验证 + 托盘显示 + 更新检查。"""
         try:
             self._tray.show()
-        except Exception:
-            pass
+            # 诊断：Windows 11 默认把新托盘图标收进"隐藏的图标"区，
+            # 出问题时从这里能看出是"没显示"还是"被折叠"
+            Logger().info(
+                f"系统托盘：visible={self._tray.isVisible()}, "
+                f"available={QSystemTrayIcon.isSystemTrayAvailable()}")
+        except Exception as e:
+            try:
+                Logger().warning(f"托盘图标显示失败：{e}")
+            except Exception:
+                pass
         try:
             if not self._validate_worker.isRunning():
                 self._validate_worker.start()
@@ -595,10 +604,22 @@ class MainWindow(QMainWindow):
             event.accept()
         else:  # "minimize"
             event.ignore()
-            self.hide()
-            self._notify.notify(
-                "ncmp desktop",
-                "已最小化到托盘，定时任务仍会在后台按时执行。双击托盘图标恢复窗口。")
+            # 托盘图标没真正显示时不能直接隐藏窗口，否则窗口凭空消失、用户找不到入口
+            try:
+                tray_ok = self._tray is not None and self._tray.isVisible()
+            except Exception:
+                tray_ok = False
+            if tray_ok:
+                self.hide()
+                self._notify.notify(
+                    "ncmp desktop",
+                    "已最小化到托盘，定时任务仍会在后台按时执行。双击托盘图标恢复窗口。")
+            else:
+                self.showMinimized()
+                self._notify.notify(
+                    "ncmp desktop",
+                    "系统托盘图标没有显示（可能被折叠进「隐藏的图标」），已最小化到任务栏。"
+                    "可在任务栏设置里把 ncmp 固定到托盘。")
 
     def _ask_close_action(self) -> Tuple[Optional[str], bool]:
         """弹出关闭确认对话框，返回 (所选动作, 是否勾选不再提示)。
