@@ -49,11 +49,18 @@ REM       The fonts are binaries; if a clone drops them the build
 REM       still "succeeds" but the app ships without CJK fonts.
 REM ---------------------------------------------------------------
 echo [2/6] Checking resource files ...
+REM 样式资源（勾选图标、下拉箭头）是生成物，不进仓库：先跑一次生成脚本
+if not exist "app\ui\styles\chevron_light.png" (
+    echo   Generating style assets ...
+    python scripts\make_assets.py
+)
 set MISSING=
 if not exist "app\ui\fonts\NCMPSansSC-Regular.ttf"  set MISSING=%MISSING% app\ui\fonts\NCMPSansSC-Regular.ttf
 if not exist "app\ui\fonts\NCMPSansSC-SemiBold.ttf" set MISSING=%MISSING% app\ui\fonts\NCMPSansSC-SemiBold.ttf
 if not exist "app\ui\fonts\NCMPSerifSC-Bold.ttf"     set MISSING=%MISSING% app\ui\fonts\NCMPSerifSC-Bold.ttf
 if not exist "app\ui\styles\check.png"              set MISSING=%MISSING% app\ui\styles\check.png
+if not exist "app\ui\styles\chevron_light.png"      set MISSING=%MISSING% app\ui\styles\chevron_light.png
+if not exist "app\ui\styles\chevron_dark.png"       set MISSING=%MISSING% app\ui\styles\chevron_dark.png
 if not exist "resources\app.ico"                    set MISSING=%MISSING% resources\app.ico
 if not exist "resources\workflow_example.yml"       set MISSING=%MISSING% resources\workflow_example.yml
 if defined MISSING (
@@ -127,10 +134,13 @@ pyinstaller --noconsole --windowed --clean -y ^
   --collect-all pyncm ^
   --add-data "app\ui\fonts;ui\fonts" ^
   --add-data "app\ui\styles\check.png;ui\styles" ^
+  --add-data "app\ui\styles\chevron_light.png;ui\styles" ^
+  --add-data "app\ui\styles\chevron_dark.png;ui\styles" ^
   --add-data "resources\workflow_example.yml;resources" ^
   --add-data "resources\app.ico;resources" ^
   --hidden-import keyring.backends ^
   --hidden-import keyring.backends.Windows ^
+  --collect-submodules app ^
   --exclude-module PySide6.QtWebEngineWidgets ^
   --exclude-module PySide6.QtWebEngineCore ^
   --exclude-module PySide6.QtWebEngineQuick ^
@@ -181,6 +191,8 @@ if not exist "%EXE%" (
 set PROBLEM=
 if not exist "dist\ncmp desktop\_internal\ui\fonts\NCMPSansSC-Regular.ttf" set PROBLEM=%PROBLEM% fonts
 if not exist "dist\ncmp desktop\_internal\ui\styles\check.png"              set PROBLEM=%PROBLEM% checkbox-icon
+if not exist "dist\ncmp desktop\_internal\ui\styles\chevron_light.png"      set PROBLEM=%PROBLEM% chevron-light
+if not exist "dist\ncmp desktop\_internal\ui\styles\chevron_dark.png"       set PROBLEM=%PROBLEM% chevron-dark
 if not exist "dist\ncmp desktop\_internal\resources\workflow_example.yml"   set PROBLEM=%PROBLEM% workflow-template
 if not exist "dist\ncmp desktop\_internal\resources\app.ico"                set PROBLEM=%PROBLEM% app-icon
 if defined PROBLEM (
