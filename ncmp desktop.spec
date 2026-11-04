@@ -1,14 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all, collect_submodules
+from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_all
 
-datas = [('app/ui/fonts', 'ui/fonts'), ('app/ui/styles/check.png', 'ui/styles'),
-         ('app/ui/styles/chevron_light.png', 'ui/styles'),
-         ('app/ui/styles/chevron_dark.png', 'ui/styles'),
-         ('resources/workflow_example.yml', 'resources'), ('resources/app.ico', 'resources')]
+datas = [('app/ui/fonts', 'ui/fonts'), ('app/ui/styles/check.png', 'ui/styles'), ('app/ui/styles/chevron_light.png', 'ui/styles'), ('app/ui/styles/chevron_dark.png', 'ui/styles'), ('resources/workflow_example.yml', 'resources'), ('resources/app.ico', 'resources')]
 binaries = []
 hiddenimports = ['keyring.backends', 'keyring.backends.Windows']
-# 显式收集全部 app 子模块：静态分析偶尔会漏，漏掉就是启动时
-# ModuleNotFoundError: No module named 'app.ui.xxx'
 hiddenimports += collect_submodules('app')
 tmp_ret = collect_all('qtawesome')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]

@@ -214,7 +214,7 @@ class MainWindow(QMainWindow):
         # 1.5 秒后如果仍不可见，重新挂一次——这是新增的兜底，不改原有行为。
         QTimer.singleShot(1500, self._ensure_tray_visible)
         try:
-            if not self._validate_worker.isRunning()123456:
+            if not self._validate_worker.isRunning():
                 self._validate_worker.start()
         except Exception:
             pass

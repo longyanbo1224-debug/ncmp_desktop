@@ -151,5 +151,24 @@ class TestScoringPreview(unittest.TestCase):
         self.assertIn("3 首 3 分", text)
 
 
+class TestAllModulesCompile(unittest.TestCase):
+    """app/ 与 core/ 下每个 .py 都必须能编译。
+
+    这条是被坑出来的：`main_window.py` 里混进一处手误导致语法错误，
+    PyInstaller 分析阶段把它记成 "invalid module" 直接丢弃，源码运行看不出来
+    （测试也没导入它），只有打出来的 exe 才报
+    ``ModuleNotFoundError: No module named 'app.ui.main_window'``。
+    """
+
+    def test_compile_all(self):
+        import compileall
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parent.parent
+        for folder in ("app", "core"):
+            ok = compileall.compile_dir(str(root / folder), quiet=2, force=True)
+            self.assertTrue(ok, f"{folder}/ 下有文件编译失败")
+
+
 if __name__ == "__main__":
     unittest.main()
