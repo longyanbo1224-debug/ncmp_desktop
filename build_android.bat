@@ -54,7 +54,30 @@ REM ---------------------------------------------------------------
 echo [3/4] Building APK ...
 pushd android
 call .\gradlew.bat --console=plain assembleDebug
-set GRADLE_EXIT=%errorlevel%
+set "GRADLE_EXIT=%errorlevel%"
+if "%GRADLE_EXIT%"=="0" goto build_ok
+REM A broken Gradle script cache ("Could not read workspace metadata") is a
+REM local-cache problem: clear it and retry once. If the failure is real,
+REM 'help' fails too and the error below is shown as usual.
+call .\gradlew.bat --console=plain -q help >nul 2>&1
+if not errorlevel 1 goto build_ok
+echo     Gradle script cache looks broken, clearing it and retrying ...
+call .\gradlew.bat --stop >nul 2>&1
+set /a CACHE_TRY=0
+:clear_cache
+REM daemons can hold cache files for a moment after --stop, so retry
+ping -n 2 127.0.0.1 >nul
+set "CACHE_LEFT=0"
+for /d %%d in ("%USERPROFILE%\.gradle\caches\*") do if exist "%%~d\kotlin-dsl" set "CACHE_LEFT=1"
+if "%CACHE_LEFT%"=="0" goto build_retry
+for /d %%d in ("%USERPROFILE%\.gradle\caches\*") do if exist "%%~d\kotlin-dsl" rd /s /q "%%~d\kotlin-dsl" 2>nul
+set /a CACHE_TRY+=1
+if %CACHE_TRY% lss 5 goto clear_cache
+echo     Could not clear the Gradle cache; close Gradle/IDE windows and run again.
+:build_retry
+call .\gradlew.bat --console=plain assembleDebug
+set "GRADLE_EXIT=%errorlevel%"
+:build_ok
 popd
 if not "%GRADLE_EXIT%"=="0" (
     echo.
