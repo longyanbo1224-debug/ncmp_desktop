@@ -253,8 +253,6 @@ build_android.bat                                            # 打包到 dist/an
 
 [![Star History Chart](https://api.star-history.com/svg?repos=longyanbo1224-debug/ncmp_desktop&type=date)](https://www.star-history.com/?type=date&repos=longyanbo1224-debug%2Fncmp_desktop)
 
-如果折线图没有显示，可以直接打开 [Star History 页面](https://www.star-history.com/?type=date&repos=longyanbo1224-debug%2Fncmp_desktop) 查看。
-
 ---
 
 ## 致谢与许可
