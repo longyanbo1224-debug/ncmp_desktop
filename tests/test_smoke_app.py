@@ -113,9 +113,20 @@ class TestTrackLog(unittest.TestCase):
         self.assertEqual(stats["total"], 3)
         self.assertEqual(stats["notes"], 2)
         self.assertEqual(stats["tiers"], {"4": 2, "3": 1})
+        self.assertEqual(stats["unscored"], 0)
         markdown = log.export_markdown()
         self.assertIn("甲", markdown)
         self.assertIn("> 一。", markdown)
+
+    def test_submitted_without_score_is_reported_as_unscored(self):
+        """服务端只给 completed 不给分数时，记录仍在，但不能凭空少一截。"""
+        log = self._log()
+        log.record("有分数", score="4")
+        log.record("无分数")
+        stats = log.stats()
+        self.assertEqual(stats["total"], 2)
+        self.assertEqual(stats["tiers"], {"4": 1})
+        self.assertEqual(stats["unscored"], 1)
 
     def test_empty_export_is_graceful(self):
         log = self._log()

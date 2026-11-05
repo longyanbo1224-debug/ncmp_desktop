@@ -84,9 +84,18 @@ class TaskRunner(
             step("拉取每日任务", "success")
             // 额外清单先拉好，再和基础任务一起**一次性**摆进曲目表：
             // 分两次 onQueue 会让界面先闪 5 首再跳到 15 首。
+            // 额外清单接口会把当天基础任务也列在等待评分的作品里。
+            // 基础 5 首由基础阶段负责，先按 id / 歌名剔除，避免：
+            // 1) 曲目表被额外的 15 首上限裁成 15 行（本应基础 5 + 额外 15 = 20 行）
+            // 2) 基础曲目占掉额外的每日额度
+            val (baseIds, baseNames) = baseKeys(daily.items)
             val preloadedExtra = runCatching { api.getExtraTasks() }.getOrNull()
-            preloadedExtra?.let { rememberCompleted(daily.id, it.first) }
-            onQueue(daily.items + (preloadedExtra?.first ?: emptyList()))
+            val extraItems = preloadedExtra?.let {
+                filterExtraItems(it.first, baseIds, baseNames)
+            }
+            val extraCompleted = extraItems?.count { it.completed } ?: 0
+            extraItems?.let { rememberCompleted(daily.id, it) }
+            onQueue(daily.items + extraItems.orEmpty())
 
             if (!daily.complete) {
                 checkCancel()
@@ -97,7 +106,12 @@ class TaskRunner(
 
             checkCancel()
             step("额外评分任务", "running")
-            processExtra(daily.id, preloadedExtra)
+            processExtra(
+                daily.id,
+                extraItems?.let { it to extraCompleted },
+                baseIds,
+                baseNames,
+            )
             step("额外评分任务", "success")
 
             // 顺手查一次积分/等级（拿不到就什么都不发，界面不显示）
@@ -342,8 +356,13 @@ class TaskRunner(
     private suspend fun processExtra(
         taskId: Any,
         preloaded: Pair<List<WorkItem>, Int>? = null,
+        baseIds: Set<String> = emptySet(),
+        baseNames: Set<String> = emptySet(),
     ) {
-        val fetched = preloaded ?: api.getExtraTasks()
+        val fetched = preloaded ?: api.getExtraTasks().let { (items, _) ->
+            val kept = filterExtraItems(items, baseIds, baseNames)
+            kept to kept.count { it.completed }
+        }
         var completedCount = fetched.second
         // 本轮开始前服务端已完成的额外曲目：计入今日结果，也补进本地账本
         val extraBefore = completedCount
@@ -388,12 +407,15 @@ class TaskRunner(
                     log("补跑检查失败，结束额外评分: ${e.message}")
                     break
                 }
-                uncompleted = refreshed.first.filter { !it.completed }
-                completedCount = refreshed.second
-                rememberCompleted(taskId, refreshed.first)
+                val refreshedItems = filterExtraItems(
+                    refreshed.first, baseIds, baseNames,
+                )
+                uncompleted = refreshedItems.filter { !it.completed }
+                completedCount = refreshedItems.count { it.completed }
+                rememberCompleted(taskId, refreshedItems)
                 // 服务端分批返回：先把新一批整份摆进曲目表，再去评分，
                 // 不要等评到哪首才冒出一行
-                onQueue(refreshed.first)
+                onQueue(refreshedItems)
                 target = minOf(maxNew, maxOf(target, success + uncompleted.size))
                 if (uncompleted.isEmpty() || success >= target) {
                     log("补跑检查：没有剩余额外任务")

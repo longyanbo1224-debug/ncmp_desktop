@@ -46,6 +46,36 @@ class RatingLedgerTest(unittest.TestCase):
         data = json.loads(self.path.read_text(encoding="utf-8"))
         self.assertEqual(len(data["user"]["task"]), 1)
 
+    def test_invalid_scores_are_ignored(self):
+        """空 / "null" / 0 不是分数，不能写进账本去跳过评分。"""
+        ledger = RatingLedger(self.path)
+        for bad in ("", "null", "NULL", "0", "  "):
+            ledger.mark("user", "task", 1, bad)
+        self.assertIsNone(ledger.score("user", "task", 1))
+        self.assertFalse(self.path.exists())
+
+    def test_legacy_null_score_entry_is_not_matched(self):
+        """旧版本可能把服务端的 null 写成 "null"：这种历史条目不能再跳过评分。"""
+        self.path.write_text(json.dumps({
+            "user": {"task": {
+                "1": {"score": "null", "ts": "2026-11-06T09:00:00"},
+                "2": {"score": "4", "ts": "2026-11-06T09:00:00"},
+            }}
+        }), encoding="utf-8")
+        ledger = RatingLedger(self.path)
+
+        self.assertIsNone(ledger.score("user", "task", 1))
+        self.assertEqual(ledger.score("user", "task", 2), "4")
+
+    def test_blank_work_id_is_never_marked(self):
+        """缺 id 的作品共用一个空键，会让所有歌都被误判成已评过。"""
+        ledger = RatingLedger(self.path)
+        ledger.mark("user", "task", "", "4")
+        ledger.mark("user", "task", "None", "4")
+
+        self.assertIsNone(ledger.score("user", "task", ""))
+        self.assertIsNone(ledger.score("user", "task", "None"))
+
 
 if __name__ == "__main__":
     unittest.main()

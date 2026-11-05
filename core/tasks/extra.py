@@ -27,11 +27,47 @@ class ExtraTask:
         self.signer = Signer(session, "", logger, config)  # task_id 为空字符串，因为上报听歌不需要
         #: 预取结果。界面要一开始就看到今天全部曲目，评分阶段复用这份，避免重复请求。
         self._prefetched = None
+        #: 当天基础任务的 work id / 歌名。额外清单接口会把等待评分的作品都列出来，
+        #: 其中包括基础任务那 5 首——它们由基础阶段负责，不能再计入额外的 15 首额度。
+        self.base_ids = set()
+        self.base_names = set()
     #: 额外评分最多跑几轮：首轮 + 一次补跑。
     #: 单首失败只跳过不重试，跑完不重新核对就会"15 条只评了 12 首"却报成功。
     _MAX_PASSES = 2
     #: 每天额外任务上限（基础 5 + 额外 15 = 20 首）
     _DAILY_MAX = 15
+
+    def set_base_works(self, works) -> None:
+        """告诉额外阶段哪些作品属于当天的基础任务，取清单时要把它们剔除。
+
+        不做这一步时，基础 5 首会被当成额外任务：曲目表被上限裁成 15 行
+        （本该 20 行），评分阶段也会把基础曲目占掉的额度算进额外 15 首里。
+        """
+        ids, names = set(), set()
+        for task in works or []:
+            try:
+                work = (task or {}).get("work") or {}
+            except Exception:
+                continue
+            work_id = str(work.get("id") or "").strip()
+            name = str(work.get("name") or "").strip()
+            if work_id and work_id.lower() != "none":
+                ids.add(work_id)
+            if name:
+                names.add(name)
+        self.base_ids = ids
+        self.base_names = names
+
+    def _is_base_work(self, task) -> bool:
+        try:
+            work = (task or {}).get("work") or {}
+        except Exception:
+            return False
+        work_id = str(work.get("id") or "").strip()
+        name = str(work.get("name") or "").strip()
+        if work_id and work_id.lower() != "none" and work_id in self.base_ids:
+            return True
+        return bool(name and name in self.base_names)
 
     def preload(self) -> None:
         """提前拉一次额外任务清单，让界面一开始就看到全部曲目。
@@ -227,7 +263,10 @@ class ExtraTask:
             ).json()
             if response["code"] != 200:
                 raise RuntimeError(f"获取额外任务失败: {response.get('message', '未知错误')}")
-            extra_tasks = response["data"]
+            # 接口会把当天基础任务也列在待评清单里；基础阶段已经负责它们，
+            # 这里剔除，确保「基础 5 + 额外 15 = 20」的额度和曲目表都不重复计数
+            extra_tasks = [t for t in (response["data"] or [])
+                           if not self._is_base_work(t)]
             #: 最近一次拉到的整份清单，供上层与基础任务合并后一次性交给界面
             self.last_all = extra_tasks
             if emit:

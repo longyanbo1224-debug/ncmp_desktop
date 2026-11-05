@@ -30,16 +30,39 @@ const val STATE_SUBMITTED = "submitted"
 const val STATE_SKIPPED = "skipped"
 const val STATE_FAILED = "failed"
 
+/**
+ * 归一化服务端 / 本机记录里的分数：空串、JSON `null` 被读成的 `"null"`、
+ * 数字 0 都代表「还没有分数」，统一成 `""`；有效档位（1–5）保留原样。
+ *
+ * 不能只判断 `isNotBlank()`：Android 的 `optString` 会把 `"score": null`
+ * 读成字符串 `"null"`，把它当成「已评过」会让整天一首都不评。
+ */
+fun normalizeScore(raw: String?): String {
+    val text = raw?.trim().orEmpty()
+    if (text.isEmpty() || text.equals("null", ignoreCase = true)) return ""
+    val value = text.toIntOrNull() ?: return ""
+    return if (value in 1..5) value.toString() else ""
+}
+
 /** 记录页顶部的三个数 + 口味曲线要的档位分布。 */
 data class TrackStats(
     val total: Int = 0,
     val notes: Int = 0,
     val tiers: Map<String, Int> = emptyMap(),  // "5" -> 3
+    /**
+     * 已提交、但没有分数记录的曲目数。
+     *
+     * 服务端对已完成的作品偶尔只给 `completed` 而不返回 `score`（比如在另一台设备
+     * 上评过、或换过接口批次），这类记录无法归进任何档位——必须单独说明，
+     * 否则用户会看到「累计 20 首，曲线只有 10 首」却不知道另外 10 首去哪了。
+     */
+    val unscored: Int = 0,
 ) {
     /** 某一档占多少（0~100），给曲线条用。 */
     fun share(tier: String): Int {
-        if (total <= 0) return 0
-        return ((tiers[tier] ?: 0) * 100) / total
+        val scored = tiers.values.sum()
+        if (scored <= 0) return 0
+        return ((tiers[tier] ?: 0) * 100) / scored
     }
 
     fun maxTierCount(): Int = tiers.values.maxOrNull() ?: 0
@@ -70,7 +93,8 @@ class TrackLogStore(context: Context) {
             day = day,
             song = song,
             artist = artist.ifBlank { old?.artist ?: "" },
-            score = score.ifBlank { old?.score ?: "" },
+            // 只有有效档位才算分数：旧版本可能把服务端的 null 写成 "null"
+            score = normalizeScore(score).ifBlank { normalizeScore(old?.score) },
             // 后一次没写批注，不等于要抹掉前一次写的
             note = note.ifBlank { old?.note ?: "" },
             // 已经提交过的，不能被后来的「跳过」覆盖
@@ -93,7 +117,7 @@ class TrackLogStore(context: Context) {
                     day = obj.optString("day", today()),
                     song = song,
                     artist = obj.optString("artist"),
-                    score = obj.optString("score"),
+                    score = normalizeScore(obj.optString("score")),
                     note = obj.optString("note"),
                     state = obj.optString("state", STATE_SUBMITTED),
                     group = obj.optString("group"),
@@ -118,11 +142,16 @@ class TrackLogStore(context: Context) {
         var notes = 0
         for (item in all) {
             if (item.note.isNotBlank()) notes++
-            val value = item.score.trim().toIntOrNull() ?: continue
+            val value = item.score.trim().toIntOrNull()?.takeIf { it in 1..5 } ?: continue
             val key = value.toString()
             tiers[key] = (tiers[key] ?: 0) + 1
         }
-        return TrackStats(total = all.size, notes = notes, tiers = tiers)
+        return TrackStats(
+            total = all.size,
+            notes = notes,
+            tiers = tiers,
+            unscored = (all.size - tiers.values.sum()).coerceAtLeast(0),
+        )
     }
 
     private fun save(list: List<TrackRecord>) {

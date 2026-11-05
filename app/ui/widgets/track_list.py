@@ -232,7 +232,9 @@ class TrackList(QWidget):
             row = self._row_for(song, meta)
         if meta:
             row.set_meta(meta)
-        if group:
+        # 分组只在第一次确定：基础任务如果也被额外清单列出来，不能让「extra」
+        # 覆盖已有的「base」，否则基础行会被算进额外 15 首上限里裁掉
+        if group and not row.group:
             row.group = group
         if score:
             row.set_score(score, scale)

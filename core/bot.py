@@ -91,6 +91,12 @@ class MusicPartnerBot:
                 account=self.account_id,
                 pacer=self.pacer,
             )
+            base_works = list(task_data.get("works") or [])
+            for item in base_works:
+                item["_group"] = "base"
+            # 额外清单接口会把等待评分的基础任务也列出来：先告诉 ExtraTask
+            # 哪些是基础任务，取清单时剔除，避免 20 首被裁成 15 首、额度重复计算
+            extra_task.set_base_works(base_works)
             extra_task.preload()
             self._remember_completed(
                 task_data.get("id"), getattr(extra_task, "last_all", []) or [])
@@ -98,9 +104,6 @@ class MusicPartnerBot:
                 extra_works = list(getattr(extra_task, "last_all", []) or [])
             except Exception:
                 extra_works = []
-            base_works = list(task_data.get("works") or [])
-            for item in base_works:
-                item["_group"] = "base"
             for item in extra_works:
                 item["_group"] = "extra"
             self._emit_works(base_works + extra_works)

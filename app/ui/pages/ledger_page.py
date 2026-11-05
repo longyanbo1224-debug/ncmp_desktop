@@ -263,10 +263,22 @@ class LedgerPage(QWidget):
             if widget is not None:
                 widget.deleteLater()
 
-        has_data = any(int(tiers.get(tier, 0) or 0) > 0 for tier in _TIERS)
+        scored = sum(int(tiers.get(tier, 0) or 0) for tier in _TIERS)
+        unscored = max(0, int(total or 0) - scored)
+        has_data = scored > 0
         self._curve_box.setVisible(has_data)
         self._curve_empty.setVisible(not has_data)
+        # 档位百分比的分母只算「有分数」的曲目，否则会出现「3 分 7 首 · 35%」这种
+        # 加起来不到 100% 的读数
+        self._curve_hint.setText(
+            f"每一档你给过多少首。另有 {unscored} 首已提交但没有分数记录"
+            f"（跨设备评分或服务端未返回分数），未计入档位。"
+            if unscored else "每一档你给过多少首。")
         if not has_data:
+            # 有提交记录但一条分数都没有：别显示「还没有评分记录」，那句话是错的
+            self._curve_empty.setText(
+                f"有 {total} 首已提交记录，但服务端没有返回分数，暂时画不出档位分布。"
+                if total else "还没有评分记录。跑一次之后，这里会长出你的口味曲线。")
             return
 
         peak = max(int(tiers.get(tier, 0) or 0) for tier in _TIERS) or 1
@@ -291,7 +303,7 @@ class LedgerPage(QWidget):
             lay.addWidget(bar, max(share, 1) if count else 0)
             lay.addStretch(100 - share if count else 100)
 
-            percent = int(round(count / total * 100)) if total else 0
+            percent = int(round(count / scored * 100)) if scored else 0
             value = QLabel(f"{count} 首 · {percent}%")
             value.setObjectName("dataTextMuted")
             value.setFixedWidth(88)

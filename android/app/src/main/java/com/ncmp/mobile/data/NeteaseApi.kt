@@ -276,9 +276,9 @@ class NeteaseApi {
         val json = getJson(VERIFY_URL)
         val profile = json.optJSONObject("profile")
             ?: throw IOException("验证用户信息失败：获取用户信息失败")
-        val nickname = profile.optString("nickname", "")
+        val nickname = optText(profile, "nickname")
         if (nickname.isEmpty()) throw IOException("验证用户信息失败：获取用户信息失败")
-        userId = profile.opt("userId")?.toString() ?: ""
+        userId = optText(profile, "userId")
         return nickname
     }
 
@@ -313,7 +313,7 @@ class NeteaseApi {
         for (i in 0 until works.length()) {
             val item = works.optJSONObject(i) ?: continue
             val work = item.optJSONObject("work") ?: continue
-            val score = item.optString("score", "")
+            val score = optScore(item)
             items.add(
                 WorkItem(
                     parseWork(work),
@@ -336,7 +336,7 @@ class NeteaseApi {
         for (i in 0 until arr.length()) {
             val item = arr.optJSONObject(i) ?: continue
             val work = item.optJSONObject("work") ?: continue
-            val score = item.optString("score", "")
+            val score = optScore(item)
             items.add(
                 WorkItem(
                     parseWork(work),
@@ -354,13 +354,16 @@ class NeteaseApi {
      * 确认某首是否已评上：**只查一次**，用于"写入结果不明"，绝不重投评分。
      * 额外曲目不在每日任务列表里，要查它自己的清单。
      */
-    suspend fun isWorkRated(workId: Any, isExtra: Boolean = false): Boolean = try {
-        val items = if (isExtra) getExtraTasks().first else getDailyTasks().items
-        items.any {
-            it.completed && it.work.id.toString() == workId.toString()
+    suspend fun isWorkRated(workId: Any, isExtra: Boolean = false): Boolean {
+        val key = workId.toString()
+        // id 缺失时不能用空键去比对，否则任意一首已评的歌都会“确认”到这一首
+        if (key.isBlank() || key.equals("null", ignoreCase = true)) return false
+        return try {
+            val items = if (isExtra) getExtraTasks().first else getDailyTasks().items
+            items.any { it.completed && it.work.id.toString() == key }
+        } catch (_: Exception) {
+            false
         }
-    } catch (_: Exception) {
-        false
     }
 
     /** 合伙人积分/等级；拿不到返回空 Map（界面"没数据就不显示"）。 */
@@ -441,11 +444,45 @@ class NeteaseApi {
     // ------------------------------------------------------------------
 
     private fun parseWork(w: JSONObject): Work = Work(
-        id = w.opt("id") ?: "",
-        name = w.optString("name", ""),
-        authorName = w.optString("authorName", ""),
-        resourceId = w.opt("resourceId") ?: "",
+        id = optValue(w, "id"),
+        name = optText(w, "name"),
+        authorName = optText(w, "authorName"),
+        resourceId = optValue(w, "resourceId"),
     )
+
+    /**
+     * 取字符串字段。Android 的 `org.json` 会把 JSON `null` 读成字符串 `"null"`
+     * （`optString` 对 `JSONObject.NULL` 返回它的 toString），必须自己挡掉，
+     * 否则歌名、昵称都会变成字面量 "null"。
+     */
+    private fun optText(obj: JSONObject, key: String): String {
+        val value = obj.opt(key)
+        return if (value == null || value == JSONObject.NULL) "" else value.toString()
+    }
+
+    /** 取原始类型字段（id / resourceId），JSON null 统一成空串。 */
+    private fun optValue(obj: JSONObject, key: String): Any {
+        val value = obj.opt(key)
+        return if (value == null || value == JSONObject.NULL) "" else value
+    }
+
+    /**
+     * 取评分字段。**必须区分「没有分数」和「有分数」**：
+     * Android 的 `optString("score", "")` 遇到 `"score": null` 会返回 `"null"`，
+     * 非空字符串会被 [isCompleted] 当成「已评过」——手机端因此把整天的歌
+     * 全判成已提交、一首都不评就直接报任务完成。数字 0 同理按「没有分数」处理
+     * （与桌面端 `task.get("score") or ""` 的语义一致）。
+     */
+    private fun optScore(item: JSONObject): String {
+        val value = item.opt("score")
+        return when (value) {
+            null, JSONObject.NULL -> ""
+            is String -> if (value.equals("null", ignoreCase = true)) "" else value.trim()
+            is Number -> if (value.toDouble() == 0.0) "" else value.toString()
+            // 其他形状（对象 / 数组）不可能是分数，按「没有分数」处理
+            else -> ""
+        }
+    }
 
     /**
      * 是否已评过。`completed` 可能是 Boolean / 0-1 / "true"，各接口不一致；

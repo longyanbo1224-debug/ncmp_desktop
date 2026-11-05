@@ -16,6 +16,34 @@ data class WorkItem(
     val group: String = "base",
 )
 
+/**
+ * 额外清单接口会把当天基础任务也列在等待评分的作品里。
+ * 基础 5 首由基础阶段负责，不能算进额外的 15 首额度——否则曲目表会被裁成 15 首。
+ */
+fun isBaseWork(work: Work, baseIds: Set<String>, baseNames: Set<String>): Boolean {
+    val id = work.id.toString()
+    if (id.isNotBlank() && !id.equals("null", ignoreCase = true) && id in baseIds) {
+        return true
+    }
+    return work.name.isNotBlank() && work.name in baseNames
+}
+
+/** 从每日基础任务里取出用于剔除重复的 id / 歌名集合。 */
+fun baseKeys(items: List<WorkItem>): Pair<Set<String>, Set<String>> {
+    val ids = items.map { it.work.id.toString() }
+        .filter { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
+        .toSet()
+    val names = items.map { it.work.name }.filter { it.isNotBlank() }.toSet()
+    return ids to names
+}
+
+/** 去掉额外清单里与基础任务重复的作品，并把完成数按剔除后的清单重新统计。 */
+fun filterExtraItems(
+    items: List<WorkItem>,
+    baseIds: Set<String>,
+    baseNames: Set<String>,
+): List<WorkItem> = items.filterNot { isBaseWork(it.work, baseIds, baseNames) }
+
 /** 单曲状态（用词见 docs/DESIGN.md §6，不得混用同义词）。 */
 object TrackState {
     const val PENDING = "pending"   // 待评

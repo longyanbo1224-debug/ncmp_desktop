@@ -21,6 +21,21 @@ def _default_path() -> Path:
     return Path(os.path.expanduser("~")) / ".ncmp_desktop" / "rated_works.json"
 
 
+def _clean_score(score) -> str:
+    """只接受 1–5 的有效档位；空、``None``、字符串 "null"、0 都算「没有分数」。
+
+    账本用来跳过重复提交，宁可漏记也不能错记：一条假记录会让整首歌不再评分。
+    """
+    text = str(score or "").strip()
+    if not text or text.lower() == "null":
+        return ""
+    try:
+        value = int(text)
+    except (TypeError, ValueError):
+        return ""
+    return str(value) if 1 <= value <= 5 else ""
+
+
 class RatingLedger:
     def __init__(self, path: Optional[Path] = None) -> None:
         self._path = Path(path) if path is not None else _default_path()
@@ -28,14 +43,24 @@ class RatingLedger:
     def score(self, account: str, task_id: str, work_id) -> Optional[str]:
         """这本作品在本任务里是否已评过；评过返回当时的分数，否则 None。"""
         works = self._task_entries(self._read(), account, task_id)
-        item = works.get(str(work_id))
+        work_key = str(work_id).strip()
+        if not work_key or work_key.lower() == "none":
+            return None
+        item = works.get(work_key)
         if not isinstance(item, dict):
             return None
-        score = str(item.get("score") or "").strip()
+        score = _clean_score(item.get("score"))
         return score or None
 
     def mark(self, account: str, task_id: str, work_id, score: str) -> None:
         """记一次服务端确认收下的评分。写失败静默忽略。"""
+        score = _clean_score(score)
+        if not score:
+            return
+        work_key = str(work_id).strip()
+        # 缺 id 的作品不能共用一个空键，否则一条记录会让所有歌都「已评过」
+        if not work_key or work_key.lower() == "none":
+            return
         data = self._read()
         account_key = str(account or "")
         tasks = data.get(account_key)
@@ -47,8 +72,8 @@ class RatingLedger:
         if not isinstance(works, dict):
             works = {}
             tasks[task_key] = works
-        works[str(work_id)] = {
-            "score": str(score or ""),
+        works[work_key] = {
+            "score": score,
             "ts": datetime.now().isoformat(timespec="seconds"),
         }
         self._prune(tasks)

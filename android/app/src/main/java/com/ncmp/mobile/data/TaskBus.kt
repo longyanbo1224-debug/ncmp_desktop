@@ -115,7 +115,15 @@ object TaskBus {
         for (item in items) {
             val work = item.work
             if (work.name.isBlank()) continue
-            if (item.group.isNotBlank()) knownGroups[work.name] = item.group
+            // 基础任务即使也被额外清单列出来，也不能被改成 extra：
+            // 否则会被算进额外 15 首上限，曲目表从 20 行被裁成 15 行
+            val incomingGroup = item.group
+            val knownGroup = knownGroups[work.name]
+            if (incomingGroup.isNotBlank() &&
+                !(knownGroup == "base" && incomingGroup == "extra")
+            ) {
+                knownGroups[work.name] = incomingGroup
+            }
             val index = cur.indexOfFirst { it.song == work.name }
             if (index < 0) {
                 cur.add(
@@ -124,16 +132,21 @@ object TaskBus {
                         artist = work.authorName,
                         score = item.score,
                         state = if (item.completed) TrackState.DONE else TrackState.PENDING,
-                        group = item.group,
+                        group = incomingGroup,
                     ),
                 )
             } else if (item.completed) {
                 // 已有行（可能是上一轮摆的"待评"）升级成"已提交"
                 val old = cur[index]
+                val group = when {
+                    old.group == "base" -> "base"
+                    incomingGroup.isNotBlank() -> incomingGroup
+                    else -> old.group
+                }
                 cur[index] = old.copy(
                     state = TrackState.DONE,
                     score = old.score.ifBlank { item.score },
-                    group = if (item.group.isNotBlank()) item.group else old.group,
+                    group = group,
                 )
             }
         }
@@ -142,7 +155,11 @@ object TaskBus {
     private fun addRecords(cur: MutableList<TrackItem>, records: List<TrackRecord>) {
         for (record in records) {
             if (record.song.isBlank()) continue
-            if (record.group.isNotBlank()) knownGroups[record.song] = record.group
+            if (record.group.isNotBlank() &&
+                !(knownGroups[record.song] == "base" && record.group == "extra")
+            ) {
+                knownGroups[record.song] = record.group
+            }
             val state = when (record.state) {
                 STATE_SUBMITTED -> TrackState.DONE
                 STATE_SKIPPED -> TrackState.SKIPPED
@@ -162,15 +179,23 @@ object TaskBus {
                     ),
                 )
             } else if (record.state == STATE_SUBMITTED) {
-                // 本机已提交、服务端还没标完成的，保留「已提交」；不反向降级
+                // 本机已提交、服务端还没标完成的，保留「已提交」；不反向降级。
+                // 但只有**有效分数**才说明这次评分真的提交过：旧版本可能把服务端的
+                // null 分数写成本地记录，那种行不能把服务端的「待评」升级成「已提交」。
                 val old = cur[index]
-                if (old.state == TrackState.PENDING) {
+                val recordScore = normalizeScore(record.score)
+                if (old.state == TrackState.PENDING && recordScore.isNotBlank()) {
+                    val group = when {
+                        old.group == "base" -> "base"
+                        record.group.isNotBlank() -> record.group
+                        else -> old.group
+                    }
                     cur[index] = old.copy(
                         state = TrackState.DONE,
-                        score = old.score.ifBlank { record.score },
+                        score = old.score.ifBlank { recordScore },
                         note = old.note.ifBlank { record.note },
                         artist = old.artist.ifBlank { record.artist },
-                        group = if (record.group.isNotBlank()) record.group else old.group,
+                        group = group,
                     )
                 }
             }
@@ -182,8 +207,9 @@ object TaskBus {
                           baseNames: Set<String>): List<TrackItem> =
         cur.map { item ->
             val group = when {
-                item.group.isNotBlank() -> item.group
+                // 清单里明确属于基础任务的，始终留在 base 组
                 item.song in baseNames -> "base"
+                item.group.isNotBlank() -> item.group
                 else -> "extra"
             }
             knownGroups[item.song] = group
@@ -262,11 +288,20 @@ object TaskBus {
      *
      * 之前的问题：今天已经评过歌了，点执行只跑完第一首就结束，但曲目表里
      * 第一首一直显示"评分中"、下面全挂着"待评"——看着像卡死。
-     * 规则：正在评的按结果记「失败」或「跳过」；没轮到的记「跳过」。
+     *
+     * 规则按本次结果区分：
+     * - 成功：额外任务没轮到的行按「已提交」算——额外曲目通常是服务端早就
+     *   评过、只是待评清单没同步，这样今日计数才对得上 20 首
+     * - 取消 / 失败：**绝不能**把没评到的行算成「已提交」。用户评到第 4 首
+     *   点取消，第 5 首及以后都应该是「跳过」，否则界面会谎报评了 20 首
+     *
+     * @param outcome "success" / "cancelled" / "failed"
      */
-    fun settleQueue(failed: Boolean) {
+    fun settleQueue(outcome: String) {
+        val success = outcome == "success"
+        val failed = outcome == "failed"
         tracks.value = tracks.value.map { item ->
-            val extraDone = !failed && item.group == "extra"
+            val extraDone = success && item.group == "extra"
             when (item.state) {
                 TrackState.RUNNING ->
                     item.copy(state = when {

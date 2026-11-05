@@ -121,6 +121,7 @@ import com.ncmp.mobile.ui.widgets.StreakLegend
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
 import java.util.Locale
 
 @Composable
@@ -481,39 +482,78 @@ private fun HeroSection(vm: AppViewModel) {
     val notes = vm.tracks.count { it.note.isNotBlank() }
     val tally = "今日 $done/$total · 已提交 $notes 条批注"
 
-    val statusLine: String
+    // 和桌面端首页同一套「今天跑没跑」：先看本机落盘的执行记录，
+    // 重开 App 之后仍然能回答今天跑过没有、结果和摘要是什么。
+    val todayKey = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) }
+    // toList() 读一次快照：历史更新时页头会跟着重组
+    val runs = vm.history.toList()
+    val todayRun = runs.firstOrNull { it.date == todayKey }
+    val lastRun = runs.firstOrNull()
+
+    val statement: String
+    val detail: String
     val statusColor: Color
     when {
         vm.running -> {
-            statusLine = "评分中 · $tally"
+            statement = "评分中"
+            detail = tally
             statusColor = NCMP.AmberText
         }
-        vm.resultLabel.isNotEmpty() && vm.resultIsError -> {
-            statusLine = "这次没跑完：${vm.resultLabel.removePrefix("失败：")}"
+        todayRun != null -> {
+            val cancelled = todayRun.message.contains("取消")
+            statement = when {
+                cancelled -> "今天手动取消了"
+                todayRun.status == "success" -> "今天已跑"
+                else -> "今天跑失败了"
+            }
+            statusColor = when {
+                cancelled -> NCMP.AmberText
+                todayRun.status == "success" -> NCMP.Green
+                else -> NCMP.Red
+            }
+            detail = withClock(todayRun.message, todayRun.time)
+        }
+        // 历史刷新前的极短窗口：用本次内存里的结果兜底
+        vm.resultLabel == "任务完成" -> {
+            statement = "今天已跑"
+            detail = vm.resultSummary
+            statusColor = NCMP.Green
+        }
+        isCancelled -> {
+            statement = "今天手动取消了"
+            detail = vm.resultSummary.ifBlank { tally }
+            statusColor = NCMP.AmberText
+        }
+        vm.resultIsError -> {
+            statement = "今天跑失败了"
+            detail = vm.resultLabel.removePrefix("失败：")
             statusColor = NCMP.Red
         }
-        vm.resultLabel.isNotEmpty() && isCancelled -> {
-            statusLine = "已取消 · $tally"
-            statusColor = NCMP.Muted
-        }
         else -> {
-            statusLine = tally
-            statusColor = NCMP.Muted
+            statement = "今天还没跑"
+            detail = lastRun?.let { run ->
+                val word = if (run.status == "success") "成功" else "失败"
+                val clock = if (run.time.isNotBlank()) " ${run.time}" else ""
+                "上次$word ${shortDay(run.date)}$clock"
+            } ?: "还没有执行记录"
+            statusColor = NCMP.Ink
         }
     }
 
+    val successToday = todayRun?.status == "success" ||
+        (todayRun == null && vm.resultLabel == "任务完成")
     // 用跨阶段的全局进度：基础 5 首跑完不会先顶到 100%，额外任务也不会从 0 重新开始
     val meterProgress = when {
         vm.running -> vm.percent / 100f
-        vm.resultLabel.isNotEmpty() && !vm.resultIsError && !isCancelled -> 1f
+        successToday -> 1f
         vm.percent > 0 -> vm.percent / 100f
         else -> 0f
     }
     val meterColor = when {
-        vm.resultIsError -> NCMP.Red
         vm.running -> NCMP.Amber
+        successToday -> NCMP.Green
         isCancelled -> NCMP.Muted
-        vm.resultLabel.isNotEmpty() -> NCMP.Green
+        vm.resultIsError -> NCMP.Red
         else -> NCMP.Brand
     }
 
@@ -526,7 +566,17 @@ private fun HeroSection(vm: AppViewModel) {
             color = NCMP.Ink,
         )
         Spacer(Modifier.height(6.dp))
-        Text(statusLine, fontSize = 13.sp, color = statusColor)
+        Text(statement, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = statusColor)
+        if (detail.isNotBlank()) {
+            Spacer(Modifier.height(3.dp))
+            Text(
+                detail,
+                fontSize = 12.sp,
+                color = NCMP.Muted,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         Spacer(Modifier.height(16.dp))
 
         if (vm.running) {
@@ -559,11 +609,29 @@ private fun HeroSection(vm: AppViewModel) {
     }
 }
 
-/** 页头日期：10月28日 周二 */
+/** 摘要 + 执行时间：`成功，今日已完成 20 首…… 00:53`。 */
+private fun withClock(message: String, time: String): String {
+    val text = message.trim()
+    if (time.isBlank()) return text
+    return if (text.isEmpty()) time else "$text $time"
+}
+
+/** yyyy-MM-dd → M月d日；解析不了就原样返回。 */
+private fun shortDay(day: String): String {
+    return try {
+        SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(day)?.let {
+            SimpleDateFormat("M月d日", Locale.CHINA).format(it)
+        } ?: day
+    } catch (_: Exception) {
+        day
+    }
+}
+
+/** 页头日期：2026年11月6日 周五 */
 private fun todayLine(): String {
     val calendar = Calendar.getInstance()
     val weekdays = arrayOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
-    val monthDay = SimpleDateFormat("M月d日", Locale.CHINA).format(calendar.time)
+    val monthDay = SimpleDateFormat("yyyy年M月d日", Locale.CHINA).format(calendar.time)
     val index = (calendar.get(Calendar.DAY_OF_WEEK) + 5) % 7
     return "$monthDay ${weekdays[index]}"
 }
@@ -964,6 +1032,17 @@ private fun LedgerSection(vm: AppViewModel) {
                 modifier = Modifier.width(44.dp),
             )
         }
+    }
+
+    // 已提交但服务端没给分数的曲目：不归进任何档位，但要说明它们还在，
+    // 否则用户会看到「累计 20 首、曲线只有 10 首」却不知道另外 10 首去哪了
+    if (stats.unscored > 0) {
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "另有 ${stats.unscored} 首已提交，但没有分数记录（跨设备评分或服务端未返回分数），未计入档位分布。",
+            fontSize = 11.sp,
+            color = NCMP.Muted,
+        )
     }
 
     Spacer(Modifier.height(18.dp))

@@ -357,6 +357,12 @@ class MainWindow(QMainWindow):
             msg = f"任务执行失败：{label}" if label else "任务执行失败"
         self._notify.notify("ncmp 任务", msg)
         self._dashboard.set_last_task_summary(msg)
+        # 记录页可能正开着：任务结束后立刻重读曲目账本，口味曲线/最近曲目
+        # 不用等用户切页才更新
+        try:
+            self._ledger.refresh()
+        except Exception:
+            pass
         # 成功一次就记下日期，错过补跑靠它判断"今天跑过没有"
         if status == "success":
             self._mark_success_today()
@@ -613,6 +619,10 @@ class MainWindow(QMainWindow):
             text = f"云端任务完成：失败（{msg}）"
         self._notify.notify("ncmp 定时任务", text)
         self._dashboard.set_last_task_summary(text)
+        try:
+            self._ledger.refresh()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # 关闭事件

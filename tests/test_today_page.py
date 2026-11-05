@@ -329,6 +329,103 @@ class TestTodayPage(unittest.TestCase):
         self.assertFalse(page._track_list.contains("昨天的歌"))
         self.assertTrue(page._track_list.contains("今天的歌"))
 
+    def test_rated_extra_beyond_cap_does_not_grow_total(self):
+        """被每日上限裁掉的额外曲目评完后，总行数不能越评越多。
+
+        用户报过「15 首 → 评完一首变 1/16」：评分回调新建行时没带分组，
+        这一行绕过了额外上限，于是每评一首就多一行。
+        """
+        from app.track_log import TrackLog
+        import app.ui.pages.task_page as task_page_module
+
+        works = [
+            {"work": {"name": f"基础{i}", "authorName": "某"},
+             "completed": False, "_group": "base"}
+            for i in range(5)
+        ]
+        works += [
+            {"work": {"name": f"额外{i}", "authorName": "某"},
+             "completed": False, "_group": "extra"}
+            for i in range(20)
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            log = TrackLog(path=Path(tmp) / "track_log.json")
+            original = task_page_module.TrackLog
+            task_page_module.TrackLog = lambda: log
+            try:
+                page = self._page()
+                page._begin_run("执行中…", "running")
+                page._on_step("额外评分任务", "running", 0.0)
+                page._on_works(works)
+                self.assertEqual(page._track_list.count(), 20)
+                # 额外18 在摆表时已被裁掉；评分回调又把它带回来
+                page._on_progress(1, 15, "额外18", "4")
+            finally:
+                task_page_module.TrackLog = original
+
+        # 新增的已提交行占掉一个额外名额，另一首待评行被裁掉：总数仍是 20
+        self.assertEqual(page._track_list.count(), 20)
+        self.assertEqual(page._track_list.done_count(), 1)
+        self.assertEqual(page._track_list.count_by_group("extra", state=None), 15)
+
+    def test_duplicate_base_rows_are_not_counted_as_extra(self):
+        """额外清单里混入基础任务时，曲目表仍是 20 行（5 基础 + 15 额外）。"""
+        from app.track_log import TrackLog
+        import app.ui.pages.task_page as task_page_module
+
+        base = [
+            {"work": {"name": f"基础{i}", "authorName": "某"},
+             "completed": False, "_group": "base"}
+            for i in range(5)
+        ]
+        extras = [
+            {"work": {"name": f"额外{i}", "authorName": "某"},
+             "completed": False, "_group": "extra"}
+            for i in range(15)
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            log = TrackLog(path=Path(tmp) / "track_log.json")
+            original = task_page_module.TrackLog
+            task_page_module.TrackLog = lambda: log
+            try:
+                page = self._page()
+                page._begin_run("执行中…", "running")
+                # 额外清单把基础 5 首也列了进来
+                page._on_works(base + extras + base)
+            finally:
+                task_page_module.TrackLog = original
+
+        self.assertEqual(page._track_list.count(), 20)
+        self.assertEqual(page._track_list.count_by_group("base", state=None), 5)
+        self.assertEqual(page._track_list.count_by_group("extra", state=None), 15)
+
+    def test_stale_refresh_does_not_wipe_running_list(self):
+        """点执行前发起的同步晚到时，不能拿旧快照重建正在跑的曲目表。"""
+        from app.track_log import TrackLog
+        import app.ui.pages.task_page as task_page_module
+
+        works = [
+            {"work": {"name": f"歌{i}", "authorName": "某"},
+             "completed": False,
+             "_group": "base" if i < 5 else "extra"}
+            for i in range(20)
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            log = TrackLog(path=Path(tmp) / "track_log.json")
+            original = task_page_module.TrackLog
+            task_page_module.TrackLog = lambda: log
+            try:
+                page = self._page()
+                page._begin_run("执行中…", "running")
+                page._on_works(works)
+                page._refresh_started_at = 1.0
+                page._run_started_at = 2.0
+                page._on_refresh_works(works[:1])  # 执行前的旧快照
+            finally:
+                task_page_module.TrackLog = original
+
+        self.assertEqual(page._track_list.count(), 20)
+
 
 @unittest.skipUnless(_HAS_QT, "PySide6 不可用")
 class TestThemeModes(unittest.TestCase):

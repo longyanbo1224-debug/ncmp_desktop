@@ -137,7 +137,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (api.userId.isBlank()) runCatching { api.verifyUser() }
                 val daily = api.getDailyTasks()
                 val extra = runCatching { api.getExtraTasks() }.getOrNull()
-                val items = daily.items + (extra?.first ?: emptyList())
+                // 额外清单接口会把当天基础任务也列进来：剔除后再合并，
+                // 否则基础 5 首会被算进额外的 15 首上限，曲目表只剩 15 行
+                val (baseIds, baseNames) = com.ncmp.mobile.data.baseKeys(daily.items)
+                val extraItems = extra?.let {
+                    com.ncmp.mobile.data.filterExtraItems(it.first, baseIds, baseNames)
+                }.orEmpty()
+                val items = daily.items + extraItems
                 // 跨天了先清空；同一天也重建一次，别把旧批次/旧运行的行越堆越多
                 if (trackDay != today) {
                     TaskBus.clearDay()
@@ -147,10 +153,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val limit = if (fullExtra) 15 else 7
                 val serverNames = items.map { it.work.name }.toSet()
-                val baseNames = items
-                    .filter { it.group != "extra" }
-                    .map { it.work.name }
-                    .toSet()
                 TaskBus.seedQueue(items, limit, baseNames)
                 // 本机记录只补两类：已提交的（清单缩水也要留），以及仍在服务端清单里的
                 TaskBus.seedRecords(

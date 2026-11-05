@@ -42,7 +42,7 @@ class TrackLog:
     # ------------------------------------------------------------------
     def record(self, song: str, artist: str = "", score: str = "",
                note: str = "", state: str = STATE_SUBMITTED,
-               day: Optional[str] = None) -> None:
+               day: Optional[str] = None, group: str = "") -> None:
         """记一首歌。同一天同名曲目**覆盖**，不追加。"""
         song = str(song or "").strip()
         if not song:
@@ -57,6 +57,8 @@ class TrackLog:
             "score": str(score or "").strip(),
             "note": str(note or "").strip(),
             "state": state if state in STATE_LABEL else STATE_SUBMITTED,
+            # base / extra：额外清单可能重复列出基础任务，靠它避免把基础行算进额外上限
+            "group": str(group or "").strip(),
             "ts": now,
         }
         for index, existing in enumerate(entries):
@@ -68,6 +70,8 @@ class TrackLog:
                     entry["score"] = str(existing.get("score") or "")
                 if not entry["artist"]:
                     entry["artist"] = str(existing.get("artist") or "")
+                if not entry["group"]:
+                    entry["group"] = str(existing.get("group") or "")
                 # 已经提交过的，不能被后来的「跳过」覆盖
                 if (existing.get("state", STATE_SUBMITTED) == STATE_SUBMITTED
                         and entry["state"] != STATE_SUBMITTED):
@@ -131,6 +135,8 @@ class TrackLog:
                     value = int(str(entry.get("score") or "").strip())
                 except (TypeError, ValueError):
                     continue
+                if not 1 <= value <= 5:
+                    continue
                 tiers[str(value)] = tiers.get(str(value), 0) + 1
                 monthly.setdefault(month, []).append(value)
         medians = {month: _median(values) for month, values in monthly.items()}
@@ -139,6 +145,9 @@ class TrackLog:
             "notes": notes,
             "tiers": tiers,
             "medians": medians,
+            # 已提交但没有分数记录（另一台设备评过 / 服务端没返回分数）：
+            # 不能归进任何档位，界面要单独说明，否则总数和曲线对不上
+            "unscored": total - sum(tiers.values()),
         }
 
     # ------------------------------------------------------------------

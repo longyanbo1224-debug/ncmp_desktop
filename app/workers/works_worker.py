@@ -28,8 +28,17 @@ class WorksRefreshWorker(QThread):
 
             daily = session.get(_DAILY_URL, timeout=15).json()
             base = ((daily.get("data") or {}).get("works") or [])
+            base_ids = set()
+            base_names = set()
             for item in base:
                 item["_group"] = "base"
+                work = item.get("work") or {}
+                work_id = str(work.get("id") or "").strip()
+                name = str(work.get("name") or "").strip()
+                if work_id:
+                    base_ids.add(work_id)
+                if name:
+                    base_names.add(name)
 
             extra = []
             try:
@@ -37,9 +46,15 @@ class WorksRefreshWorker(QThread):
                     _EXTRA_URL, timeout=15,
                     headers={"Referer": "https://mp.music.163.com/"}).json()
                 if response.get("code") == 200:
-                    extra = response.get("data") or []
-                    for item in extra:
+                    # 额外清单接口会把当天基础任务也列出来：剔除，避免 20 首被裁成 15 首
+                    for item in response.get("data") or []:
+                        work = item.get("work") or {}
+                        work_id = str(work.get("id") or "").strip()
+                        name = str(work.get("name") or "").strip()
+                        if (work_id and work_id in base_ids) or (name and name in base_names):
+                            continue
                         item["_group"] = "extra"
+                        extra.append(item)
             except Exception:
                 extra = []
 

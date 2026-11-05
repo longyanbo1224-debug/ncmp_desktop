@@ -97,8 +97,14 @@ class TaskPage(QWidget):
         self._cloud_worker: Optional[CloudWorker] = None
         self._refresh_worker: Optional[WorksRefreshWorker] = None
         self._last_sync = 0.0
+        #: 本次执行 / 本次同步的起始时刻：同步比执行早发起的，结果一律作废
+        self._run_started_at = 0.0
+        self._refresh_started_at = 0.0
         self._history_records = None
         self._track_day = date.today().isoformat()
+        #: 歌名 → base/extra。曲目被每日上限裁掉后仍保留，
+        #: 评分回调才能把新出现的一行归回额外组、继续受上限约束。
+        self._track_groups: dict = {}
         self._current_phase: str = ""   # 当前阶段名，供歌曲进度在阶段区间内插值
         # 阶段区间。开局是兜底值，拿到条目数后由 _plan_scoring 重算。
         self._phase_span: dict = dict(_PHASE_SPAN)
@@ -365,11 +371,25 @@ class TaskPage(QWidget):
         if not (music_u and csrf):
             return
         self._last_sync = time.monotonic()
+        self._refresh_started_at = self._last_sync
         self._refresh_worker = WorksRefreshWorker(self)
-        self._refresh_worker.works.connect(
-            lambda works: self._on_works(works, replace=True))
+        self._refresh_worker.works.connect(self._on_refresh_works)
         self._refresh_worker.finished.connect(self._on_refresh_finished)
         self._refresh_worker.start()
+
+    def _on_refresh_works(self, works) -> None:
+        """打开 / 切回页面时的服务端同步结果。
+
+        同步请求可能在用户点「立即执行」之后才返回：这时它手里是启动那一刻
+        的旧快照，拿它重建曲目表会把本次执行刚摆好的行（和随后评完的行）冲掉，
+        用户就会看到「先 15 首、评一首多一行」。执行中一律以 worker 的清单为准。
+        """
+        if self._is_any_worker_running():
+            return
+        # 同步请求比这次执行发起得还早 → 它拿的是执行前的旧快照，作废
+        if self._refresh_started_at <= self._run_started_at:
+            return
+        self._on_works(works, replace=True)
 
     def _on_refresh_finished(self) -> None:
         worker = self.sender()
@@ -580,6 +600,8 @@ class TaskPage(QWidget):
         """一次执行开始时的统一收尾：清空曲目表、归零电平表、锁按钮。"""
         self._track_day = date.today().isoformat()
         self._track_list.clear()
+        self._track_groups.clear()
+        self._run_started_at = time.monotonic()
         self._meter.reset()
         self._meter.set_state(meter_state)
         self._percent_label.setText("0%")
@@ -628,6 +650,7 @@ class TaskPage(QWidget):
                 score=str(entry.get("score") or ""),
                 state=state,
                 note=str(entry.get("note") or ""),
+                group=str(entry.get("group") or ""),
             )
         self._refresh_rail()
 
@@ -793,13 +816,17 @@ class TaskPage(QWidget):
                 self._current_phase = ""
 
     def _on_progress(self, done: int, total: int, song: str, score: str) -> None:
-        # 一首歌评完：在曲目表里落下这一行
+        # 一首歌评完：在曲目表里落下这一行。
+        # 必须带上分组：被每日上限裁掉的额外曲目重新出现时，还要继续受上限约束，
+        # 否则每评一首就多一行（15 → 16 → …），计数越跑越大。
         if song and score:
-            self._track_list.add(song, score=str(score), state="done")
+            self._track_list.add(song, score=str(score), state="done",
+                                 group=self._group_for(song))
             self._cap_tracks()
             # 同时写进账本（AppConfig 同目录的 track_log.json）
             try:
-                TrackLog().record(song, score=str(score))
+                TrackLog().record(song, score=str(score),
+                                  group=self._group_for(song))
             except Exception:
                 pass
         if not total or total <= 0:
@@ -811,6 +838,24 @@ class TaskPage(QWidget):
         frac = max(0.0, min(1.0, float(done) / float(total)))
         self._update_progress(int(round(lo + (hi - lo) * frac)))
         self._refresh_rail()
+
+    def _group_for(self, song: str) -> str:
+        """某首歌的 base/extra 分组；清单里没摆过的按当前评分阶段补。
+
+        评分回调只带歌名，不带分组。正常路径下曲目表早已摆好、映射也有；
+        万一某首歌没出现在预置清单里（服务端分批、同步竞态），按「正在跑哪个
+        阶段」也能归对组，避免它绕过额外的每日上限、每评一首多一行。
+        """
+        group = self._track_groups.get(song, "")
+        if group:
+            return group
+        if self._current_phase == "评分基础任务":
+            group = "base"
+        elif self._current_phase == "额外评分任务":
+            group = "extra"
+        if group:
+            self._track_groups[song] = group
+        return group
 
     def _cap_tracks(self) -> None:
         """额外任务每天最多 15 首（基础 5 + 额外 15 = 20），多出来的不展示。"""
@@ -832,6 +877,7 @@ class TaskPage(QWidget):
         today = date.today().isoformat()
         if today != self._track_day:
             self._track_list.clear()
+            self._track_groups.clear()
             self._track_day = today
         elif replace:
             # 同一页重复同步时重建，避免旧批次/旧运行的行越堆越多
@@ -850,6 +896,37 @@ class TaskPage(QWidget):
                 server_names.add(str((task.get("work") or {}).get("name") or ""))
             except Exception:
                 pass
+        # 基础曲目的歌名：用来给没有显式分组的行补分组
+        base_names = {
+            str((task.get("work") or {}).get("name") or "")
+            for task in (works or [])
+            if task.get("_group") == "base"
+        }
+        grouped = any(task.get("_group") for task in (works or []))
+
+        def group_for(name: str) -> str:
+            """分组优先取服务端标记；整份清单都没标记时按基础处理（不误裁）。"""
+            known = self._track_groups.get(name, "")
+            if known:
+                return known
+            return "base" if (not grouped or name in base_names) else "extra"
+
+        # 先把**整份清单**（含稍后被上限裁掉的）的分组记下来：
+        # 评分回调晚到的那一行还要按 extra 继续受每日上限约束。
+        for task in works or []:
+            try:
+                work = task.get("work") or {}
+                name = str(work.get("name") or "")
+            except Exception:
+                continue
+            if not name:
+                continue
+            group = str(task.get("_group") or "") or group_for(name)
+            # 基础任务即使也被额外清单列出来，也必须留在 base 组：
+            # 否则会被算进额外 15 首上限，曲目表从 20 行被裁成 15 行
+            if name in base_names:
+                group = "base"
+            self._track_groups[name] = group
         notes = {name: str(entry.get("note") or "")
                  for name, entry in entries.items()}
         added = 0
@@ -885,7 +962,7 @@ class TaskPage(QWidget):
                 score=score if done else "",
                 state=state,
                 note=notes.get(name, ""),
-                group=str(task.get("_group") or ""),
+                group=self._track_groups.get(name) or group_for(name),
             )
             added += 1
             if server_done:
@@ -897,16 +974,12 @@ class TaskPage(QWidget):
                         artist=str(work.get("authorName") or ""),
                         score=str(task.get("score") or ""),
                         note=notes.get(name, ""),
+                        group=self._track_groups.get(name, ""),
                     )
                 except Exception:
                     pass
         # 服务端待评清单会随着评分缩水；本机账本里的今日曲目要补回来，
         # 否则额外任务评完/跳过后再打开，曲目表就只剩基础那几首。
-        base_names = {
-            str((task.get("work") or {}).get("name") or "")
-            for task in (works or [])
-            if task.get("_group") == "base"
-        }
         for name, entry in entries.items():
             if self._track_list.contains(name):
                 continue
@@ -919,13 +992,19 @@ class TaskPage(QWidget):
             # 否则清单换批次后越堆越多（手机端出现 20/41 的来源）
             if state != "done" and name not in server_names:
                 continue
+            # 本机记录里的分组优先（跨会话保留），其次用本次清单的分组
+            group = (str(entry.get("group") or "")
+                     or self._track_groups.get(name) or group_for(name))
+            if name in base_names:
+                group = "base"
+            self._track_groups[name] = group
             self._track_list.add(
                 name,
                 meta=str(entry.get("artist") or ""),
                 score=str(entry.get("score") or "") if state == "done" else "",
                 state=state,
                 note=str(entry.get("note") or ""),
-                group="base" if name in base_names else "extra",
+                group=group,
             )
             added += 1
         # 基础 5 + 额外最多 15：服务端多返回的旧批次行不展示
@@ -945,10 +1024,12 @@ class TaskPage(QWidget):
         """批注提交成功：填到对应曲目行上、写进账本、更新右栏计数。"""
         if not note:
             return
-        self._track_list.add(song, score=str(score), state="done", note=note)
+        self._track_list.add(song, score=str(score), state="done",
+                             note=note, group=self._group_for(song))
         self._cap_tracks()
         try:
-            TrackLog().record(song, score=str(score), note=note)
+            TrackLog().record(song, score=str(score), note=note,
+                              group=self._group_for(song))
         except Exception:
             pass
         self._refresh_rail()
@@ -974,7 +1055,8 @@ class TaskPage(QWidget):
                 for row in self._track_list.rows_with_state("done"):
                     if row.group == "extra" and not row.score:
                         TrackLog().record(
-                            row.song, artist=row.meta, note=row.note)
+                            row.song, artist=row.meta, note=row.note,
+                            group=row.group)
             except Exception:
                 pass
         # 跳过的歌也记进今日账本：下次再打开时，额外任务即使不在服务端待评清单里，
@@ -985,7 +1067,7 @@ class TaskPage(QWidget):
                 for row in self._track_list.rows_with_state("skipped"):
                     TrackLog().record(
                         row.song, artist=row.meta, score=row.score,
-                        note=row.note, state=STATE_SKIPPED)
+                        note=row.note, state=STATE_SKIPPED, group=row.group)
             except Exception:
                 pass
 

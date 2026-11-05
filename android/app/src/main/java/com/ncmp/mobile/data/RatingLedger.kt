@@ -27,21 +27,28 @@ class RatingLedgerStore(context: Context) {
     /** 本任务里这首是否已评过；评过返回当时的分数。 */
     fun score(account: String, taskId: Any, workId: Any): String? {
         val key = workId.toString()
+        // 作品 id 缺失时所有歌都会撞到同一个空 key，绝不能拿它去判定「已评过」
+        if (key.isBlank() || key.equals("null", ignoreCase = true)) return null
         return load().firstOrNull {
             it.account == account && it.taskId == taskId.toString() && it.workId == key
-        }?.score?.takeIf { it.isNotBlank() }
+        }?.score?.let(::normalizeScore)?.takeIf { it.isNotBlank() }
     }
 
     /** 记一次服务端确认收下的评分。 */
     fun mark(account: String, taskId: Any, workId: Any, score: String) {
         val taskKey = taskId.toString()
         val workKey = workId.toString()
+        if (workKey.isBlank() || workKey.equals("null", ignoreCase = true)) return
+        // 旧版本把 JSON null 读成 "null" 记了进来：这种条目不能用来跳过评分，
+        // 否则修好解析后仍然会整轮「本任务已评过」
+        val cleanScore = normalizeScore(score)
+        if (cleanScore.isBlank()) return
         val now = System.currentTimeMillis()
         val entries = load().toMutableList()
         entries.removeAll {
             it.account == account && it.taskId == taskKey && it.workId == workKey
         }
-        entries.add(Entry(account, taskKey, workKey, score, now))
+        entries.add(Entry(account, taskKey, workKey, cleanScore, now))
         save(entries.filter { now - it.ts <= MAX_AGE_MS }.takeLast(MAX_RECORDS))
     }
 
@@ -52,15 +59,18 @@ class RatingLedgerStore(context: Context) {
             (0 until array.length()).mapNotNull { i ->
                 val obj = array.optJSONObject(i) ?: return@mapNotNull null
                 val workId = obj.optString("workId")
-                if (workId.isEmpty()) return@mapNotNull null
+                if (workId.isEmpty() || workId.equals("null", ignoreCase = true)) {
+                    return@mapNotNull null
+                }
                 Entry(
                     account = obj.optString("account"),
                     taskId = obj.optString("taskId"),
                     workId = workId,
-                    score = obj.optString("score"),
+                    // 无效分数（"null" / 0 / 空）等于没评过，读取时直接丢弃
+                    score = normalizeScore(obj.optString("score")),
                     ts = obj.optLong("ts", 0L),
                 )
-            }
+            }.filter { it.score.isNotBlank() }
         } catch (_: Exception) {
             emptyList()
         }

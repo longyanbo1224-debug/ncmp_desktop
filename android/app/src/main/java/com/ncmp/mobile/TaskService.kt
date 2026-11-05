@@ -3,6 +3,7 @@ package com.ncmp.mobile
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.net.wifi.WifiManager
@@ -188,6 +189,9 @@ class TaskService : Service() {
                         }
                         val base = result.base.coerceIn(0, doneCount)
                         val extra = (doneCount - base).coerceAtLeast(0)
+                        // 和桌面端同一句摘要：成功，今日已完成 N 首（基础 X、额外 Y），
+                        // 跳过 S 首，留下 M 条批注
+                        val noteCount = TaskBus.noteCount()
                         historyMessage = if (doneCount > 0) {
                             "成功，今日已完成 $doneCount 首（基础 $base 首、额外 $extra 首）"
                         } else {
@@ -195,6 +199,9 @@ class TaskService : Service() {
                         }
                         if (skippedCount > 0) {
                             historyMessage += "，跳过 $skippedCount 首"
+                        }
+                        if (noteCount > 0) {
+                            historyMessage += "，留下 $noteCount 条批注"
                         }
                         if (result.extraAllDone) {
                             historyMessage += "，额外任务今日已全部完成"
@@ -221,8 +228,16 @@ class TaskService : Service() {
                 // 先落历史再置 running=false：界面观察到结束时记录已经写好了
                 recordHistory()
                 // 收尾曲目表：本次没评到的「待评/评分中」不能一直挂着
-                // （今天已经评过时，第一首会卡在"评分中"，下面全是"待评"）
-                TaskBus.settleQueue(TaskBus.resultIsError.value)
+                // （今天已经评过时，第一首会卡在"评分中"，下面全是"待评"）。
+                // 只有成功跑完才把未轮到的额外曲目按「已评过」算；取消 / 失败时
+                // 一律记「跳过」，否则第 5 首及以后会谎报成「已提交」。
+                val outcome = when {
+                    TaskBus.resultIsError.value -> "failed"
+                    TaskBus.resultLabel.value == "已取消" -> "cancelled"
+                    TaskBus.resultLabel.value == "任务完成" -> "success"
+                    else -> "failed"
+                }
+                TaskBus.settleQueue(outcome)
                 // 成功跑完后，把跳过的曲目也记进今日账本：服务端待评清单缩水后，
                 // 下次打开仍能补回曲目表，不会只剩基础那几首
                 if (TaskBus.resultLabel.value == "任务完成") {
@@ -256,7 +271,14 @@ class TaskService : Service() {
                 TaskBus.running.value = false
                 releaseLocks()
                 val nm = getSystemService(NotificationManager::class.java)
-                nm.notify(NOTIF_ID, buildNotification(TaskBus.resultLabel.value.ifEmpty { "任务结束" }))
+                // 结果通知：点一下回到 App；不再是常驻通知，可被划掉
+                nm.notify(
+                    NOTIF_ID,
+                    buildNotification(
+                        TaskBus.resultLabel.value.ifEmpty { "任务结束" },
+                        ongoing = false,
+                    ),
+                )
                 stopForeground(STOP_FOREGROUND_DETACH)
                 stopSelf()
             }
@@ -328,12 +350,30 @@ class TaskService : Service() {
         }
     }
 
-    private fun buildNotification(text: String): Notification =
+    /** 点击通知回到 App 的入口。没设置它时，点通知什么都不会发生。 */
+    private fun openAppIntent(): PendingIntent {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PendingIntent.FLAG_IMMUTABLE
+            } else {
+                0
+            }
+        return PendingIntent.getActivity(this, 0, intent, flags)
+    }
+
+    private fun buildNotification(text: String, ongoing: Boolean = true): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("ncmp 音乐合伙人")
             .setContentText(text)
-            .setOngoing(true)
+            .setContentIntent(openAppIntent())
+            .setOngoing(ongoing)
+            .setAutoCancel(!ongoing)
             .setOnlyAlertOnce(true)
             .build()
 

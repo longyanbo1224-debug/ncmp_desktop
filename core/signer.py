@@ -284,6 +284,10 @@ class Signer:
         下一轮补跑就会把同一首再提交一遍。
         """
         try:
+            work_key = str(work.get("id") or "").strip()
+            # 缺 id 时不能确认：空键会把任意一首已评的歌误认成这一首
+            if not work_key or work_key.lower() == "none":
+                return False
             if is_extra:
                 response = self.session.get(
                     self.extra_url, timeout=15,
@@ -296,7 +300,7 @@ class Signer:
                 item = task.get("work") or {}
                 rated = (task.get("completed")
                          or str(task.get("score") or "").strip())
-                if str(item.get("id")) == str(work.get("id")) and rated:
+                if str(item.get("id")) == work_key and rated:
                     return True
         except Exception as e:
             self.logger.debug(f"确认评分状态失败（按未评上处理）：{e}")
