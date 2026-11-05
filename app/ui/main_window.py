@@ -150,6 +150,7 @@ class MainWindow(QMainWindow):
         # 任务页 Cookie 预检失败 → 跳登录页
         self._task.goto_login.connect(lambda: self._goto_page(1))
         self._task.goto_settings.connect(lambda: self._goto_page(4))
+        self._task.goto_ledger.connect(self._goto_ledger_history)
         # 云端 worker 完成 → 托盘通知（定时 + 手动都走这条）
         self._task.cloud_finished_sig.connect(self._on_schedule_cloud_finished)
 
@@ -228,6 +229,8 @@ class MainWindow(QMainWindow):
             pass
         # 错过补跑：等界面立起来再查，免得启动瞬间弹通知吓人
         QTimer.singleShot(3000, self._maybe_catch_up)
+        # 启动后同步一次今日进度：另一台设备评过的歌也要显示成已提交
+        QTimer.singleShot(1500, self._task.refresh_today)
 
     # ------------------------------------------------------------------
     # 槽
@@ -238,6 +241,9 @@ class MainWindow(QMainWindow):
             if row == 1:
                 # 进入登录页时启动扫码
                 self._login.start()
+            elif row == 2:
+                # 进入今日页时同步服务端的完成状态（另一台设备评过的歌）
+                self._task.refresh_today()
             elif row == 3:
                 # 进入账本页时重读本地记录（曲目/批注可能刚被别处写入）
                 self._ledger.refresh()
@@ -252,6 +258,12 @@ class MainWindow(QMainWindow):
         self._show_and_raise()
         self._nav.setCurrentRow(2)
         self._task.execute()
+
+    def _goto_ledger_history(self) -> None:
+        """今日页「查看全部」：跳到记录页的执行情况。"""
+        self._show_and_raise()
+        self._goto_page(3)
+        self._ledger.scroll_to_history()
 
     def _goto_about(self) -> None:
         """托盘「关于」入口：显示主窗口并跳关于页。"""

@@ -18,6 +18,14 @@ class _Logger:
         return lambda *args, **kwargs: None
 
 
+class _Ledger:
+    def __init__(self):
+        self.marked = []
+
+    def mark(self, account, task_id, work_id, score):
+        self.marked.append((account, task_id, str(work_id), score))
+
+
 class TestEmitWorks(unittest.TestCase):
     def test_accepts_merged_list(self):
         received = []
@@ -34,6 +42,21 @@ class TestEmitWorks(unittest.TestCase):
         bot = MusicPartnerBot(_Config(), _Logger(), None, on_works=received.extend)
         bot._emit_works(None)
         self.assertEqual(received, [])
+
+
+class TestRememberCompleted(unittest.TestCase):
+    def test_server_completed_works_go_into_ledger(self):
+        """服务端已完成的（包括另一台设备评的）要记进账本，重跑不再提交。"""
+        bot = MusicPartnerBot(_Config(), _Logger(), None)
+        bot.ledger = _Ledger()
+        bot.account_id = "user"
+
+        bot._remember_completed("task", [
+            {"work": {"id": 1}, "completed": True, "score": 4},
+            {"work": {"id": 2}, "completed": False, "score": ""},
+        ])
+
+        self.assertEqual(bot.ledger.marked, [("user", "task", "1", "4")])
 
 
 if __name__ == "__main__":

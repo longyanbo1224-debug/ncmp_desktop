@@ -42,6 +42,7 @@ class _FakeExtra(ExtraTask):
         self.script = script
         self.fetches = 0
         self.attempts = 0
+        self.attempted_ids = []
         self.fail_on = set(fail_on)
         self.no_more = no_more
         #: 这些次序的尝试会被"服务端跳过"（如资源状态异常），应返回 False
@@ -55,6 +56,7 @@ class _FakeExtra(ExtraTask):
 
     def _process_single_task(self, task, task_id, done_offset=0, total=None) -> bool:
         self.attempts += 1
+        self.attempted_ids.append(str(task["work"]["id"]))
         if self.no_more:
             raise RuntimeError("评分失败: 今日没有更多可评定歌曲啦 (响应码: 405)")
         if self.attempts in self.fail_on:
@@ -105,6 +107,13 @@ class ExtraRepairTest(unittest.TestCase):
         self.assertEqual(job.fetches, 1, "没有更多时不应再补跑")
         self.assertTrue(any("额外任务今日已全部完成" in m for m in messages))
         self.assertFalse(any("仍有" in m for m in messages))
+
+    def test_rejected_work_is_not_requested_again(self):
+        """资源状态异常的曲目补跑轮不再请求：重复执行也不会成功。"""
+        job = _FakeExtra([(2, 0), (2, 0)], full=True, fail_on=(), skip_on={2})
+        job.process_extra_tasks("task")
+
+        self.assertEqual(job.attempted_ids.count("1"), 1)
 
 
 if __name__ == "__main__":

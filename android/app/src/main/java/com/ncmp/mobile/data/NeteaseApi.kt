@@ -42,6 +42,10 @@ class NeteaseApi {
     /** 调试日志回调（把 WeAPI 原始响应显示到界面日志）。 */
     var debugLogger: ((String) -> Unit)? = null
 
+    /** 当前账号 id（验证用户信息时拿到），本地评分账本按它隔离。 */
+    var userId: String = ""
+        private set
+
     // 扫码 / 密码登录所需的会话配置（一次进程内固定）
     private val sDeviceId = "unknown-${Random.nextInt(1000000)}"
     private val wnMCID = generateWNMCID()
@@ -274,6 +278,7 @@ class NeteaseApi {
             ?: throw IOException("验证用户信息失败：获取用户信息失败")
         val nickname = profile.optString("nickname", "")
         if (nickname.isEmpty()) throw IOException("验证用户信息失败：获取用户信息失败")
+        userId = profile.opt("userId")?.toString() ?: ""
         return nickname
     }
 
@@ -308,11 +313,12 @@ class NeteaseApi {
         for (i in 0 until works.length()) {
             val item = works.optJSONObject(i) ?: continue
             val work = item.optJSONObject("work") ?: continue
+            val score = item.optString("score", "")
             items.add(
                 WorkItem(
                     parseWork(work),
-                    item.optBoolean("completed", false),
-                    item.optString("score", ""),
+                    isCompleted(item, score),
+                    score,
                 ),
             )
         }
@@ -330,11 +336,13 @@ class NeteaseApi {
         for (i in 0 until arr.length()) {
             val item = arr.optJSONObject(i) ?: continue
             val work = item.optJSONObject("work") ?: continue
+            val score = item.optString("score", "")
             items.add(
                 WorkItem(
                     parseWork(work),
-                    item.optBoolean("completed", false),
-                    item.optString("score", ""),
+                    isCompleted(item, score),
+                    score,
+                    group = "extra",
                 ),
             )
         }
@@ -342,9 +350,13 @@ class NeteaseApi {
         return items to completedCount
     }
 
-    /** 确认某首是否已评上：**只查一次**，用于"写入结果不明"，绝不重投评分。 */
-    suspend fun isWorkRated(workId: Any): Boolean = try {
-        getDailyTasks().items.any {
+    /**
+     * 确认某首是否已评上：**只查一次**，用于"写入结果不明"，绝不重投评分。
+     * 额外曲目不在每日任务列表里，要查它自己的清单。
+     */
+    suspend fun isWorkRated(workId: Any, isExtra: Boolean = false): Boolean = try {
+        val items = if (isExtra) getExtraTasks().first else getDailyTasks().items
+        items.any {
             it.completed && it.work.id.toString() == workId.toString()
         }
     } catch (_: Exception) {
@@ -434,6 +446,21 @@ class NeteaseApi {
         authorName = w.optString("authorName", ""),
         resourceId = w.opt("resourceId") ?: "",
     )
+
+    /**
+     * 是否已评过。`completed` 可能是 Boolean / 0-1 / "true"，各接口不一致；
+     * 有分数也说明评过，所以两个信号取或。
+     */
+    private fun isCompleted(item: JSONObject, score: String): Boolean {
+        val flag = when (val value = item.opt("completed")) {
+            is Boolean -> value
+            is Number -> value.toInt() != 0
+            is String -> value == "1" || value.equals("true", true) ||
+                value.equals("yes", true)
+            else -> false
+        }
+        return flag || score.isNotBlank()
+    }
 
     /** Set-Cookie 已由 CookieJar 写入 cookies；这里再兜底解析 body 里的 cookie 字段。 */
     private fun extractCookies(json: JSONObject) {

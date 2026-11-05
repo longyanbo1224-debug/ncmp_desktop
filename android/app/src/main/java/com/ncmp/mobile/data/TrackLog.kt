@@ -19,7 +19,16 @@ data class TrackRecord(
     val artist: String = "",
     val score: String = "",
     val note: String = "",
+    //: submitted / skipped / failed（与桌面端 track_log 同构）
+    val state: String = STATE_SUBMITTED,
+    //: base / extra：按每日上限裁剪时用
+    val group: String = "",
 )
+
+/** 与桌面端 app/track_log.py 的状态值一致。 */
+const val STATE_SUBMITTED = "submitted"
+const val STATE_SKIPPED = "skipped"
+const val STATE_FAILED = "failed"
 
 /** 记录页顶部的三个数 + 口味曲线要的档位分布。 */
 data class TrackStats(
@@ -50,6 +59,8 @@ class TrackLogStore(context: Context) {
         score: String = "",
         note: String = "",
         day: String = today(),
+        state: String = STATE_SUBMITTED,
+        group: String = "",
     ) {
         if (song.isBlank()) return
         val list = load().toMutableList()
@@ -62,6 +73,9 @@ class TrackLogStore(context: Context) {
             score = score.ifBlank { old?.score ?: "" },
             // 后一次没写批注，不等于要抹掉前一次写的
             note = note.ifBlank { old?.note ?: "" },
+            // 已经提交过的，不能被后来的「跳过」覆盖
+            state = if (old?.state == STATE_SUBMITTED) STATE_SUBMITTED else state,
+            group = group.ifBlank { old?.group ?: "" },
         )
         if (index >= 0) list[index] = merged else list.add(merged)
         save(list)
@@ -81,6 +95,8 @@ class TrackLogStore(context: Context) {
                     artist = obj.optString("artist"),
                     score = obj.optString("score"),
                     note = obj.optString("note"),
+                    state = obj.optString("state", STATE_SUBMITTED),
+                    group = obj.optString("group"),
                 )
             }
         } catch (_: Exception) {
@@ -88,12 +104,15 @@ class TrackLogStore(context: Context) {
         }
     }
 
-    /** 最近的曲目，新的在前。 */
+    /** 最近的曲目，新的在前。只含提交成功的：跳过的不算「评过」。 */
     fun recent(limit: Int = 30): List<TrackRecord> =
-        load().sortedWith(compareByDescending<TrackRecord> { it.day }).take(limit)
+        load()
+            .filter { it.state == STATE_SUBMITTED }
+            .sortedWith(compareByDescending<TrackRecord> { it.day })
+            .take(limit)
 
     fun stats(): TrackStats {
-        val all = load()
+        val all = load().filter { it.state == STATE_SUBMITTED }
         if (all.isEmpty()) return TrackStats()
         val tiers = mutableMapOf<String, Int>()
         var notes = 0
@@ -117,6 +136,8 @@ class TrackLogStore(context: Context) {
                     put("artist", item.artist)
                     put("score", item.score)
                     put("note", item.note)
+                    put("state", item.state)
+                    put("group", item.group)
                 },
             )
         }

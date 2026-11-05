@@ -7,6 +7,8 @@ from core.utils.config import Config
 from core.utils.logger import Logger
 from .tasks.daily import DailyTask
 from .tasks.extra import ExtraTask
+from .rating_ledger import RatingLedger
+from .signer import RequestPacer
 class MusicPartnerBot:
     def __init__(self, config: Config, logger: Logger, session: requests.Session,
                  on_step: Optional[Callable[[str, str, float], None]] = None,
@@ -25,6 +27,12 @@ class MusicPartnerBot:
         self.cancel_event = cancel_event  # threading.Event
         self.t0 = 0.0
         self._current_step = ""
+        #: 本地评分账本：同一任务重跑时不再提交已评过的歌
+        self.ledger = RatingLedger()
+        #: 整轮共享的请求节奏：第一次真实请求不等待
+        self.pacer = RequestPacer()
+        #: 当前账号 id（验证用户信息时拿到），账本按账号隔离
+        self.account_id = ""
         #: 失败时的原始异常。run() 会把异常吞掉只返回 False，
         #: 但调用方（TaskWorker）需要异常本身来做失败原因分类。
         self.last_error: Optional[BaseException] = None
@@ -61,8 +69,13 @@ class MusicPartnerBot:
                 on_progress=self.on_progress,
                 cancel_event=self.cancel_event,
                 on_note=self.on_note,
+                ledger=self.ledger,
+                account=self.account_id,
+                pacer=self.pacer,
             )
             complete, task_data = daily_task._get_daily_tasks()
+            self._remember_completed(task_data.get("id"),
+                                     task_data.get("works") or [])
             self._step("拉取每日任务", "success")
             # 今日曲目清单（含服务端已记的分数）直接交给界面：
             # 今天已经评完时评分流程不会跑，界面否则一片空白。
@@ -74,13 +87,23 @@ class MusicPartnerBot:
                 cancel_event=self.cancel_event,
                 on_note=self.on_note,
                 on_works=self.on_works,
+                ledger=self.ledger,
+                account=self.account_id,
+                pacer=self.pacer,
             )
             extra_task.preload()
+            self._remember_completed(
+                task_data.get("id"), getattr(extra_task, "last_all", []) or [])
             try:
                 extra_works = list(getattr(extra_task, "last_all", []) or [])
             except Exception:
                 extra_works = []
-            self._emit_works(list(task_data.get("works") or []) + extra_works)
+            base_works = list(task_data.get("works") or [])
+            for item in base_works:
+                item["_group"] = "base"
+            for item in extra_works:
+                item["_group"] = "extra"
+            self._emit_works(base_works + extra_works)
 
             if not complete:
                 self._check_cancel()
@@ -120,6 +143,24 @@ class MusicPartnerBot:
         except Exception as cb_err:
             self.logger.debug(f"on_works 回调异常: {cb_err}")
 
+    def _remember_completed(self, task_id, tasks) -> None:
+        """把服务端标成已完成的曲目记进账本（含另一台设备评的）。
+
+        账本只用于"跳过重复提交"：下次同一任务里服务端标记滞后时，也不会再提交。
+        """
+        if not task_id:
+            return
+        for task in tasks or []:
+            try:
+                work = task.get("work") or {}
+                score = str(task.get("score") or "").strip()
+                # 有分数就说明已经评过，completed 标记可能滞后
+                if work.get("id") is None or not score:
+                    continue
+                self.ledger.mark(self.account_id, task_id, work.get("id"), score)
+            except Exception:
+                continue
+
     def _verify_user(self) -> None:
         """验证用户信息"""
         try:
@@ -128,6 +169,7 @@ class MusicPartnerBot:
 
             profile = response.get("profile")
             if profile:
+                self.account_id = str(profile.get("userId") or "")
                 self.logger.info(f'用户名: {profile["nickname"]}')
             else:
                 raise RuntimeError("获取用户信息失败")

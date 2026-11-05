@@ -61,9 +61,17 @@ class TrackLog:
         }
         for index, existing in enumerate(entries):
             if existing.get("song") == song:
-                # 保留原有的批注：后一次没写批注不等于要抹掉前一次写的
+                # 保留原有的批注与分数：后一次没写不等于要抹掉前一次写的
                 if not entry["note"]:
                     entry["note"] = str(existing.get("note") or "")
+                if not entry["score"]:
+                    entry["score"] = str(existing.get("score") or "")
+                if not entry["artist"]:
+                    entry["artist"] = str(existing.get("artist") or "")
+                # 已经提交过的，不能被后来的「跳过」覆盖
+                if (existing.get("state", STATE_SUBMITTED) == STATE_SUBMITTED
+                        and entry["state"] != STATE_SUBMITTED):
+                    entry["state"] = STATE_SUBMITTED
                 entries[index] = entry
                 break
         else:
@@ -84,11 +92,16 @@ class TrackLog:
         return sorted(self._read().keys(), reverse=True)
 
     def recent(self, limit: int = 200) -> List[dict]:
-        """最近的曲目明细，新的在前，每项带 ``day`` 字段。"""
+        """最近的曲目明细，新的在前，每项带 ``day`` 字段。
+
+        只返回提交成功的记录：跳过的歌没评上，不能出现在「最近评过的曲子」里。
+        """
         result: List[dict] = []
         data = self._read()
         for day in sorted(data.keys(), reverse=True):
             for entry in reversed(data[day]):
+                if entry.get("state", STATE_SUBMITTED) != STATE_SUBMITTED:
+                    continue
                 item = dict(entry)
                 item["day"] = day
                 result.append(item)
@@ -109,6 +122,8 @@ class TrackLog:
         for day, entries in data.items():
             month = day[:7]
             for entry in entries:
+                if entry.get("state", STATE_SUBMITTED) != STATE_SUBMITTED:
+                    continue
                 total += 1
                 if entry.get("note"):
                     notes += 1
@@ -135,7 +150,8 @@ class TrackLog:
         这是"值班簿"这个比喻的兑现：跑完能产出一份可以贴出去的东西。
         """
         day = day or date.today().isoformat()
-        entries = self.day(day)
+        entries = [entry for entry in self.day(day)
+                   if entry.get("state", STATE_SUBMITTED) == STATE_SUBMITTED]
         if not entries:
             return f"# {day}\n\n今天还没有评过曲子。\n"
         try:

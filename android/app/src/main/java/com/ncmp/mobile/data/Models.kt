@@ -12,6 +12,8 @@ data class WorkItem(
     val work: Work,
     val completed: Boolean,
     val score: String = "",
+    //: base / extra：每日上限（基础 5 + 额外最多 15）按这个分组裁剪
+    val group: String = "base",
 )
 
 /** 单曲状态（用词见 docs/DESIGN.md §6，不得混用同义词）。 */
@@ -34,6 +36,7 @@ data class TrackItem(
     val score: String = "",
     val note: String = "",
     val state: String = TrackState.PENDING,
+    val group: String = "",
 )
 
 data class DailyTasks(

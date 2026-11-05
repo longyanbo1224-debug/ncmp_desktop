@@ -13,6 +13,26 @@ from core import scoring
 from core.notes import NoteGenerator
 from core.utils.config import Config
 from core.utils.logger import Logger
+from core.rating_ledger import RatingLedger
+
+
+class RequestPacer:
+    """整轮任务共享的请求节奏。
+
+    第一次真实评分请求不等待；之后每次请求前等一次。跳过已评过的歌不会
+    消耗等待，所以「前 5 首都已提交、第 6 首是新请求」时第 6 首直接开始。
+    """
+
+    def __init__(self) -> None:
+        self.sent = 0
+
+    def before_request(self) -> bool:
+        """返回 True 表示这次请求前应当等待。"""
+        should_wait = self.sent > 0
+        self.sent += 1
+        return should_wait
+
+
 class Signer:
     #: 单首遇到"频繁"时最多尝试几次（首次 + 2 次重试）。
     #: 不设上限会一直递归等下去，定时任务可能永远结束不了。
@@ -23,7 +43,10 @@ class Signer:
                  cancel_event: Optional["object"] = None,
                  total: Optional[int] = None,
                  done_offset: int = 0,
-                 on_note: Optional[Callable[[dict, str, str], None]] = None):
+                 on_note: Optional[Callable[[dict, str, str], None]] = None,
+                 ledger: Optional[RatingLedger] = None,
+                 account: str = "",
+                 pacer: Optional[RequestPacer] = None):
         self.session = session
         self.task_id = task_id
         self.logger = logger
@@ -36,9 +59,16 @@ class Signer:
         self.on_note = on_note
         # 批注生成器：note_enabled 为假时 generate() 直接返回空串
         self.notes = NoteGenerator(config)
+        #: 本地评分账本：服务端确认收过的评分写一份，重跑时不再提交同一首
+        self.ledger = ledger
+        self.account = account
+        #: 整轮任务共享的请求节奏；None 时保持旧行为（每次请求前都等）
+        self.pacer = pacer
         self.sign_url = "https://interface.music.163.com/weapi/music/partner/work/evaluate"
         #: 确认用：写入口失败时查一次"这首到底评没评上"
         self.daily_url = "https://interface.music.163.com/api/music/partner/daily/task/get"
+        #: 额外任务不在每日任务列表里，确认时要查它自己的清单
+        self.extra_url = "https://interface.music.163.com/api/music/partner/extra/wait/evaluate/work/list"
 
         # 加密相关常量
         self.random_str = self._generate_random_string(16)
@@ -105,6 +135,35 @@ class Signer:
         """
         score = scoring.score_for(work, self.config.get("score", scoring.DEFAULT_STRATEGY))
         return score, scoring.tag_for(score)
+    def already_rated(self, work: dict) -> Optional[str]:
+        """本任务里这首是否已经被服务端确认收下；是则返回当时的分数。
+
+        账本只在服务端确认后写入，所以命中就代表账号上已经有这次评分了。
+        """
+        if self.ledger is None or not self.task_id:
+            return None
+        try:
+            return self.ledger.score(self.account, self.task_id, work.get("id"))
+        except Exception:
+            return None
+
+    def _mark_rated(self, work: dict, score: str) -> None:
+        if self.ledger is None or not self.task_id:
+            return
+        try:
+            self.ledger.mark(self.account, self.task_id, work.get("id"), score)
+        except Exception:
+            pass
+
+    def _count_success(self, work: dict, score: str) -> None:
+        """推进进度并通知界面：只有服务端确认/本地账本命中才走这里。"""
+        self.done += 1
+        if self.on_progress:
+            try:
+                self.on_progress(self.done, self.total, work["name"], score)
+            except Exception as cb_err:
+                self.logger.debug(f"on_progress 回调异常: {cb_err}")
+
     def sign(self, work: dict, is_extra: bool = False, _retry: int = 0) -> bool:
         """为作品评分。``_retry`` 是内部重试计数，调用方不用传。
 
@@ -114,11 +173,20 @@ class Signer:
         """
         # 评分入口处响应取消
         self._check_cancel()
+        cached = self.already_rated(work)
+        if cached is not None:
+            self.logger.info(
+                f'{work["name"]}「{work["authorName"]}」本任务已评过'
+                f'（本地记录 {cached} 分），跳过重复提交')
+            self._count_success(work, cached)
+            return True
         try:
-            # 使用配置的等待时间
-            delay = self.config.get_wait_time()
-            self.logger.info(f"等待 {delay:.1f} 秒后继续...")
-            self._sleep(delay)
+            # 只在两次真实请求之间等待：跳过/账本命中不消耗节奏，
+            # 所以前面几首都已评过时，第一首真正要评的歌不用白等一轮。
+            if self.pacer is None or self.pacer.before_request():
+                delay = self.config.get_wait_time()
+                self.logger.info(f"等待 {delay:.1f} 秒后继续...")
+                self._sleep(delay)
             csrf = str(self.session.cookies["__csrf"])
             score, tag = self._get_score_and_tag(work)
             # 批注：随评分一起提交（note_enabled 关闭时为空串，行为与旧版一致）
@@ -155,13 +223,9 @@ class Signer:
 
             if response["code"] == 200:
                 self.logger.info(f'{work["name"]}「{work["authorName"]}」评分完成：{score}分')
+                self._mark_rated(work, score)
                 # 评分成功后推进进度回调
-                self.done += 1
-                if self.on_progress:
-                    try:
-                        self.on_progress(self.done, self.total, work["name"], score)
-                    except Exception as cb_err:
-                        self.logger.debug(f"on_progress 回调异常: {cb_err}")
+                self._count_success(work, score)
                 # 批注单独一条日志 + 单独回调：界面靠它把"留下了什么话"落到曲目行上
                 if comment:
                     self.logger.info(f'批注已提交：{comment}')
@@ -202,29 +266,37 @@ class Signer:
             #
             # 绝不重投评分：超时不代表服务端没收到，重投就是重复评分，
             # 既污染账号，也是最容易触发风控的形态（这条来自 ncmm 的做法）。
-            if self._confirm_rated(work):
+            if self._confirm_rated(work, is_extra):
                 score = scoring.score_for(
                     work, self.config.get("score", scoring.DEFAULT_STRATEGY))
                 self.logger.warning(
                     f'歌曲「{work["name"]}」提交结果不明，但服务端已记录这次评分，按成功处理')
-                self.done += 1
-                if self.on_progress:
-                    try:
-                        self.on_progress(self.done, self.total, work["name"], score)
-                    except Exception as cb_err:
-                        self.logger.debug(f"on_progress 回调异常: {cb_err}")
+                self._mark_rated(work, score)
+                self._count_success(work, score)
                 return True
             self.logger.error(f'歌曲「{work["name"]}」评分异常：{str(e)}')
             raise RuntimeError(f"评分过程出错: {str(e)}")
 
-    def _confirm_rated(self, work: dict) -> bool:
-        """查一次服务端：这首是不是已经评过了。查不到就当没评上。"""
+    def _confirm_rated(self, work: dict, is_extra: bool = False) -> bool:
+        """查一次服务端：这首是不是已经评过了。查不到就当没评上。
+
+        额外曲目不在每日任务列表里，必须查它自己的清单，否则永远确认不到，
+        下一轮补跑就会把同一首再提交一遍。
+        """
         try:
-            response = self.session.get(self.daily_url, timeout=15).json()
-            works = ((response.get("data") or {}).get("works") or [])
+            if is_extra:
+                response = self.session.get(
+                    self.extra_url, timeout=15,
+                    headers={"Referer": "https://mp.music.163.com/"}).json()
+                works = response.get("data") or []
+            else:
+                response = self.session.get(self.daily_url, timeout=15).json()
+                works = ((response.get("data") or {}).get("works") or [])
             for task in works:
                 item = task.get("work") or {}
-                if str(item.get("id")) == str(work.get("id")) and task.get("completed"):
+                rated = (task.get("completed")
+                         or str(task.get("score") or "").strip())
+                if str(item.get("id")) == str(work.get("id")) and rated:
                     return True
         except Exception as e:
             self.logger.debug(f"确认评分状态失败（按未评上处理）：{e}")

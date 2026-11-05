@@ -67,6 +67,8 @@ class TrackRow(QWidget):
     def __init__(self, index: int, song: str, meta: str = "", parent=None) -> None:
         super().__init__(parent)
         self.song = song
+        self.meta = meta
+        self.group = ""       # base / extra：完成总结要分开计数
         self.score = ""
         self.state = "pending"
         self.note = ""
@@ -131,6 +133,7 @@ class TrackRow(QWidget):
 
     # ------------------------------------------------------------------
     def set_meta(self, text: str) -> None:
+        self.meta = text
         self._meta.setText(text)
 
     def set_score(self, score: str, scale: str = "5") -> None:
@@ -222,12 +225,15 @@ class TrackList(QWidget):
     # 对外 API
     # ------------------------------------------------------------------
     def add(self, song: str, meta: str = "", score: str = "",
-            state: str = "done", note: str = "", scale: str = "5") -> TrackRow:
+            state: str = "done", note: str = "", scale: str = "5",
+            group: str = "") -> TrackRow:
         row = self._rows.get(song)
         if row is None:
             row = self._row_for(song, meta)
         if meta:
             row.set_meta(meta)
+        if group:
+            row.group = group
         if score:
             row.set_score(score, scale)
         if note:
@@ -276,6 +282,37 @@ class TrackList(QWidget):
         """
         return sum(1 for row in self._rows.values() if row.state == "done")
 
+    def contains(self, song: str) -> bool:
+        return song in self._rows
+
+    def count_by_group(self, group: str, state: str | None = "done") -> int:
+        """按基础/额外分组计数；state=None 时统计所有行。"""
+        return sum(
+            1 for row in self._rows.values()
+            if row.group == group and (state is None or row.state == state)
+        )
+
+    def cap_extra(self, limit: int) -> None:
+        """额外行超过每日上限时裁掉多余的，优先保留已提交的。"""
+        extras = [row for row in self._rows.values() if row.group == "extra"]
+        if len(extras) <= limit:
+            return
+        extras.sort(key=lambda row: 0 if row.state == "done" else 1)
+        keep = {row.song for row in extras[:limit]}
+        data = [
+            (row.song, row.meta, row.score, row.state, row.note, row.group)
+            for row in self._rows.values()
+            if row.group != "extra" or row.song in keep
+        ]
+        self.clear()
+        for song, meta, score, state, note, group in data:
+            self.add(song, meta=meta, score=score, state=state,
+                     note=note, group=group)
+
+    def rows_with_state(self, state: str):
+        """某状态的行，供收尾时把「跳过」写进账本。"""
+        return [row for row in self._rows.values() if row.state == state]
+
     def settle_pending(self, state: str = "skipped") -> None:
         """给还挂着"待评"的行收尾。
 
@@ -285,6 +322,16 @@ class TrackList(QWidget):
         for row in self._rows.values():
             if row.state == "pending":
                 row.set_state(state)
+
+    def mark_extra_skipped_done(self) -> None:
+        """额外任务被跳过时按「已评过」算：计入今日完成数。
+
+        额外曲目通常是服务端已经评过、只是待评清单没同步下来；用户看到的
+        「跳过」应该算进 20 首里，而不是只算基础 5 首。
+        """
+        for row in self._rows.values():
+            if row.state == "skipped" and row.group == "extra":
+                row.set_state("done")
 
     # ------------------------------------------------------------------
     # 内部

@@ -17,6 +17,9 @@ import kotlin.random.Random
 /** 服务端 405「今日没有更多可评定歌曲」：当天已没有可评的歌，不是额度异常。 */
 class NoMoreWorksException(message: String) : RuntimeException(message)
 
+/** 每天额外任务的固定上限（基础 5 + 额外 15 = 20 首）。 */
+private const val EXTRA_DAILY_MAX = 15
+
 class TaskRunner(
     private val api: NeteaseApi,
     private val config: TaskConfig,
@@ -32,6 +35,8 @@ class TaskRunner(
     private val onTrack: (Work, String) -> Unit = { _, _ -> },
     // callback(points)：任务结束后查到的合伙人积分/等级（拿不到就不回调）
     private val onPoints: (Map<String, String>) -> Unit = {},
+    // 本地评分账本：同一任务重跑时不再提交已评过的歌
+    private val ledger: RatingLedgerStore? = null,
 ) {
     @Volatile var cancelled = false
     private var currentStep = ""
@@ -40,6 +45,8 @@ class TaskRunner(
     private var baseDone = 0
     private var extraDone = 0
     private var extraAllDone = false
+    //: 整轮已发出的真实评分请求数：第一次不等，之后每次请求前等一次
+    private var requestsSent = 0
 
     // 阶段在全局进度里的区间（移植自桌面端 task_page.py）。
     // 两个评分阶段在 8~100 之间按条目数分配，见 planScoring。
@@ -54,6 +61,7 @@ class TaskRunner(
         baseDone = 0
         extraDone = 0
         extraAllDone = false
+        requestsSent = 0
         Notes.resetRun()
         if (config.noteSource.equals("llm", ignoreCase = true)) {
             // 手机端没有 LLM：选了 llm 也走本地模板，说清楚比悄悄回落好
@@ -69,11 +77,15 @@ class TaskRunner(
             checkCancel()
             step("拉取每日任务", "running")
             val daily = api.getDailyTasks()
-            log("今日任务：${if (daily.complete) "已完成" else "未完成"}[${daily.completedCount}/${daily.count}]")
+            // 服务端已完成的（含另一台设备评的）计入今日结果，并记进本地账本
+            baseDone = daily.items.count { it.completed }
+            rememberCompleted(daily.id, daily.items)
+            log("今日任务：${if (daily.complete) "已完成" else "未完成"}[$baseDone/${daily.count}]")
             step("拉取每日任务", "success")
             // 额外清单先拉好，再和基础任务一起**一次性**摆进曲目表：
             // 分两次 onQueue 会让界面先闪 5 首再跳到 15 首。
             val preloadedExtra = runCatching { api.getExtraTasks() }.getOrNull()
+            preloadedExtra?.let { rememberCompleted(daily.id, it.first) }
             onQueue(daily.items + (preloadedExtra?.first ?: emptyList()))
 
             if (!daily.complete) {
@@ -177,6 +189,16 @@ class TaskRunner(
         return if (max == min) min else Random.nextDouble(min, max)
     }
 
+    /** 把服务端已完成的曲目记进账本：下次同一任务里标记滞后也不会再提交。 */
+    private fun rememberCompleted(taskId: Any, items: List<WorkItem>) {
+        val store = ledger ?: return
+        val account = api.userId
+        for (item in items) {
+            if (!item.completed || item.score.isBlank()) continue
+            store.mark(account, taskId, item.work.id, item.score)
+        }
+    }
+
     private suspend fun rateWorks(taskId: Any, pending: List<Work>) {
         if (pending.isEmpty()) {
             log("没有待评分作品")
@@ -185,6 +207,8 @@ class TaskRunner(
         log("开始评分...")
         var done = 0
         val total = pending.size
+        // 服务端已完成的基础曲目已经计入 baseDone；阶段进度仍从 0 开始
+        val baseBefore = baseDone
         planScoring(total)
         // 今日曲目在 run() 拉完每日任务时已经整体摆进曲目表（含已评过的），
         // 这里不再重复摆一遍。
@@ -195,7 +219,7 @@ class TaskRunner(
             try {
                 sign(work, taskId, isExtra = false) { w, score ->
                     done++
-                    baseDone = done
+                    baseDone = baseBefore + done
                     onProgress(done, total, w.name, score)
                     phaseProgress(done, total)
                 }
@@ -208,10 +232,21 @@ class TaskRunner(
 
     private suspend fun sign(work: Work, taskId: Any, isExtra: Boolean, onScored: (Work, String) -> Unit): Boolean {
         checkCancel()
+        // 本任务已由服务端确认收下：不再发评分请求，按已评推进
+        val cached = ledger?.score(api.userId, taskId, work.id)
+        if (cached != null) {
+            log("${work.name}「${work.authorName}」本任务已评过（本地记录 $cached 分），跳过重复提交")
+            onScored(work, cached)
+            return true
+        }
         onTrack(work, TrackState.RUNNING)
-        val delaySec = randomWait()
-        log("等待 %.1f 秒后继续...".format(delaySec))
-        sleepCancellable(delaySec)
+        // 只在两次真实请求之间等待：前面几首都已评过时，第一首真正要评的歌直接开始
+        if (requestsSent > 0) {
+            val delaySec = randomWait()
+            log("等待 %.1f 秒后继续...".format(delaySec))
+            sleepCancellable(delaySec)
+        }
+        requestsSent++
 
         val score = scoreFor(work)
         val tag = "$score-A-1"
@@ -246,8 +281,9 @@ class TaskRunner(
                 // 写入结果不明（超时/断连/响应不是 JSON）：只查一次服务端，
                 // 确认到了就按成功处理，确认不到再报错。**绝不重投评分**——
                 // 超时不代表服务端没收到，重投就是重复评分。
-                if (api.isWorkRated(work.id)) {
+                if (api.isWorkRated(work.id, isExtra)) {
                     log("${work.name} 提交结果不明，但服务端已记录这次评分，按成功处理")
+                    ledger?.mark(api.userId, taskId, work.id, score)
                     onScored(work, score)
                     if (comment.isNotEmpty()) {
                         log("批注已提交：$comment")
@@ -260,6 +296,7 @@ class TaskRunner(
             val code = resp.optInt("code", -1)
             if (code == 200) {
                 log("${work.name}「${work.authorName}」评分完成：${score}分")
+                ledger?.mark(api.userId, taskId, work.id, score)
                 onScored(work, score)
                 // 批注单独一条日志 + 单独回调：界面靠它把"留下了什么话"落到曲目行上
                 if (comment.isNotEmpty()) {
@@ -308,11 +345,17 @@ class TaskRunner(
     ) {
         val fetched = preloaded ?: api.getExtraTasks()
         var completedCount = fetched.second
+        // 本轮开始前服务端已完成的额外曲目：计入今日结果，也补进本地账本
+        val extraBefore = completedCount
+        extraDone = extraBefore
+        rememberCompleted(taskId, fetched.first)
         var uncompleted = fetched.first.filter { !it.completed }
         // 整份清单都摆进曲目表（含已评的）：今天已经评完时，这里至少看得见评过哪些歌
         onQueue(fetched.first)
         val full = config.fullExtraTasks
-        var target = if (full) uncompleted.size else 7 - completedCount
+        val dailyLimit = if (full) EXTRA_DAILY_MAX else 7
+        val maxNew = (dailyLimit - extraBefore).coerceAtLeast(0)
+        var target = minOf(uncompleted.size, maxNew)
 
         if (uncompleted.isEmpty()) {
             log("额外评定完成数: $completedCount")
@@ -328,6 +371,8 @@ class TaskRunner(
         var success = 0
         // 被服务端拒绝（资源状态异常）的歌：要能告诉用户"缺的是哪首"
         val skipped = mutableListOf<String>()
+        // 本轮已被服务端明确拒绝的作品：补跑轮别再请求同一首
+        val rejected = mutableSetOf<String>()
         onProgress(0, target, "", "")
         phaseProgress(0, target)
         var noMore = false
@@ -345,8 +390,11 @@ class TaskRunner(
                 }
                 uncompleted = refreshed.first.filter { !it.completed }
                 completedCount = refreshed.second
-                target = if (full) maxOf(target, success + uncompleted.size)
-                else maxOf(target, 7 - completedCount)
+                rememberCompleted(taskId, refreshed.first)
+                // 服务端分批返回：先把新一批整份摆进曲目表，再去评分，
+                // 不要等评到哪首才冒出一行
+                onQueue(refreshed.first)
+                target = minOf(maxNew, maxOf(target, success + uncompleted.size))
                 if (uncompleted.isEmpty() || success >= target) {
                     log("补跑检查：没有剩余额外任务")
                     break
@@ -357,27 +405,32 @@ class TaskRunner(
                 if (success >= target) break
                 checkCancel()
                 val work = item.work
+                val workKey = work.id.toString()
+                if (workKey in rejected) {
+                    // 上一轮服务端已明确拒绝，重复执行也不会成功
+                    continue
+                }
                 try {
-                    api.reportListen(work)
-                    log("歌曲 ${work.name} 听歌记录上报成功")
+                    // 本任务已确认收下的，连听歌上报都不用再发
+                    if (ledger?.score(api.userId, taskId, work.id) == null) {
+                        api.reportListen(work)
+                        log("歌曲 ${work.name} 听歌记录上报成功")
+                    }
                     val rated = sign(work, taskId, isExtra = true) { w, score ->
                         success++
-                        extraDone = success
+                        extraDone = extraBefore + success
                         onProgress(success, target, w.name, score)
                         phaseProgress(success, target)
                     }
                     if (!rated) {
                         // 服务端没接受这首：不算成功，重试也不会成功，记下来告诉用户
+                        rejected.add(workKey)
                         skipped.add(work.name)
                         log("「${work.name}」未评上，先跳过")
                         continue
                     }
                     log("成功完成第 $success/$target 个额外评分任务")
-                    if (success < target) {
-                        val delaySec = randomWait()
-                        log("等待 %.1f 秒后继续...".format(delaySec))
-                        sleepCancellable(delaySec)
-                    }
+                    // 等待节奏由 sign() 在两次真实请求之间统一控制，这里不再重复等
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: NoMoreWorksException) {
@@ -390,7 +443,7 @@ class TaskRunner(
             }
             if (noMore) break
         }
-        extraDone = success
+        extraDone = extraBefore + success
         if (noMore) {
             // 服务端已经没有可评的歌了：这是完成，不是"还有 N 个没完成"，也不再补跑
             extraAllDone = true

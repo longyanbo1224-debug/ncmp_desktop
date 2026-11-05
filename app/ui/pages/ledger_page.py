@@ -7,10 +7,10 @@
 
 完成率那套数字首页已经有了，这里刻意不重复——用户来这里是想看"我评过什么"。
 """
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import List, Tuple
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QToolButton,
     QVBoxLayout, QWidget,
@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
 from app.task_history import TaskHistory
 from app.track_log import TrackLog
 from app.ui import theme
-from app.ui.widgets.streak_grid import StreakGrid
 from app.ui.widgets.track_list import TrackList
 
 
@@ -53,8 +52,13 @@ class _PointsWorker(QThread):
 #: 口味曲线里的档位，从高到低
 _TIERS = ("5", "4", "3", "2", "1")
 
-#: 最近曲目展示条数
-_RECENT_LIMIT = 40
+#: 最近曲目展示条数（与手机端一致）
+_RECENT_LIMIT = 30
+
+#: 「执行情况」最多读多少条（与手机端的 800 条对齐）
+_HISTORY_LIMIT = 800
+
+_WEEKDAYS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
 
 
 class LedgerPage(QWidget):
@@ -62,6 +66,7 @@ class LedgerPage(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self._expanded_days = set()
         self._build_ui()
         self.refresh()
 
@@ -81,6 +86,8 @@ class LedgerPage(QWidget):
         content = QWidget()
         scroll.setWidget(content)
         page.addWidget(scroll)
+        #: 供「查看全部」跳转后滚到执行情况
+        self._scroll = scroll
 
         outer = QVBoxLayout(content)
         outer.setContentsMargins(theme.PAGE_MARGIN, theme.PAGE_MARGIN,
@@ -150,16 +157,7 @@ class LedgerPage(QWidget):
         self._curve_empty.setObjectName("emptyState")
         outer.addWidget(self._curve_empty)
 
-        # ---- 打卡格子 ----
-        grid_title = QLabel("坚持")
-        grid_title.setObjectName("sectionHeading")
-        outer.addWidget(grid_title)
-        self._grid = StreakGrid()
-        # 不要给 StreakGrid 设最大/最小高度：它自带 setFixedSize，
-        # 高度里已经算好了底部图例（成功/失败/没跑）的位置。
-        # 之前这里加过 setMinimumHeight(120)，把固定高度压小，图例就被下面的
-        # 「最近评过的曲子」标题盖住了。
-        outer.addWidget(self._grid)
+        # 打卡格子只在首页出现；记录页不再重复一张
 
         # ---- 最近曲目 ----
         # 最近曲目可能几十条，默认收起（与手机端一致），点标题右侧的按钮展开
@@ -185,6 +183,24 @@ class LedgerPage(QWidget):
         # 展开时给一块能看的高度（约 5~6 行），不再和上面的内容抢空间
         self._recent.setMinimumHeight(300)
         outer.addWidget(self._recent)
+
+        # ---- 执行情况（与手机端同构：一天一条，可展开）----
+        self._history_section = QWidget()
+        section_lay = QVBoxLayout(self._history_section)
+        section_lay.setContentsMargins(0, 0, 0, 0)
+        section_lay.setSpacing(theme.SP_1)
+        history_title = QLabel("执行情况")
+        history_title.setObjectName("sectionHeading")
+        section_lay.addWidget(history_title)
+        history_hint = QLabel("一天一条；同一天多次执行合并在这里，点开看明细")
+        history_hint.setObjectName("captionText")
+        section_lay.addWidget(history_hint)
+        self._history_box = QWidget()
+        self._history_lay = QVBoxLayout(self._history_box)
+        self._history_lay.setContentsMargins(0, 0, 0, 0)
+        self._history_lay.setSpacing(0)
+        section_lay.addWidget(self._history_box)
+        outer.addWidget(self._history_section)
 
     def _stat_block(self, label: str, value: str) -> QWidget:
         # 不做卡片：三个数直接坐在页面底色上（手机端记录页同样处理）
@@ -231,12 +247,8 @@ class LedgerPage(QWidget):
 
         self._render_points()
 
-        try:
-            self._grid.set_days(days)
-        except Exception:
-            pass
-
         self._render_recent()
+        self._render_history()
 
         if total:
             self._subtitle.setText(
@@ -391,6 +403,200 @@ class LedgerPage(QWidget):
                 state="done",
                 note=str(item.get("note") or ""),
             )
+
+    # ------------------------------------------------------------------
+    # 执行情况（与手机端同构：一天一条，可展开）
+    # ------------------------------------------------------------------
+    def scroll_to_history(self) -> None:
+        """「查看全部」跳过来时，直接落到执行情况那一块。"""
+        QTimer.singleShot(
+            0, lambda: self._scroll.ensureWidgetVisible(self._history_section))
+
+    def _render_history(self) -> None:
+        while self._history_lay.count():
+            item = self._history_lay.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+
+        try:
+            records = TaskHistory().load_recent(_HISTORY_LIMIT)
+        except Exception:
+            records = []
+
+        groups = {}
+        for entry in records:
+            ts = str(entry.get("ts") or "")
+            try:
+                moment = datetime.fromisoformat(ts)
+            except ValueError:
+                continue
+            groups.setdefault(moment.date().isoformat(), []).append((moment, entry))
+
+        if not groups:
+            empty = QLabel("还没有执行记录，点「今日」页的「立即执行」跑第一次。")
+            empty.setObjectName("captionText")
+            empty.setWordWrap(True)
+            self._history_lay.addWidget(empty)
+            return
+
+        for day in sorted(groups, reverse=True):
+            runs = sorted(groups[day], key=lambda pair: pair[0], reverse=True)
+            self._history_lay.addWidget(self._history_day(day, runs))
+            rule = QFrame()
+            rule.setObjectName("rule")
+            self._history_lay.addWidget(rule)
+
+    def _history_day(self, day: str, runs) -> QWidget:
+        statuses = [_run_status(entry) for _, entry in runs]
+        if "success" in statuses:
+            day_status = "success"
+        elif "fail" in statuses:
+            day_status = "fail"
+        else:
+            day_status = "cancel"
+        marker, name = _STATUS_VIEW[day_status]
+
+        wrapper = QWidget()
+        lay = QVBoxLayout(wrapper)
+        lay.setContentsMargins(0, 10, 0, 10)
+        lay.setSpacing(3)
+
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setSpacing(theme.SP_2)
+        title = QLabel(_day_title(day))
+        title.setObjectName("trackName")
+        head.addWidget(title, 0, Qt.AlignBaseline)
+        weekday = QLabel(_weekday(day))
+        weekday.setObjectName("trackMeta")
+        head.addWidget(weekday, 0, Qt.AlignBaseline)
+        head.addStretch(1)
+        status = QLabel(marker)
+        status.setObjectName(name)
+        head.addWidget(status, 0, Qt.AlignBaseline)
+        toggle = QToolButton()
+        toggle.setObjectName("textButton")
+        toggle.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        toggle.setCursor(Qt.PointingHandCursor)
+        head.addWidget(toggle)
+        lay.addLayout(head)
+
+        latest_time, latest_entry = runs[0]
+        summary = (str(latest_entry.get("summary") or "")
+                   if len(runs) == 1 else
+                   f"执行 {len(runs)} 次，最近 "
+                   f"{latest_time.strftime('%H:%M')} {_STATUS_VIEW[_run_status(latest_entry)][0]}")
+        summary_label = QLabel(summary)
+        summary_label.setObjectName("captionText")
+        summary_label.setWordWrap(True)
+        lay.addWidget(summary_label)
+
+        panel = self._history_runs_panel()
+        show = day in self._expanded_days
+        if show:
+            self._fill_runs_panel(panel, runs)
+        panel.setVisible(show)
+        toggle.setText("收起 ▾" if show else "展开 ▸")
+        toggle.clicked.connect(
+            lambda _=False, d=day, p=panel, b=toggle, r=runs:
+            self._toggle_day(d, p, b, r))
+        lay.addWidget(panel)
+        return wrapper
+
+    def _history_runs_panel(self) -> QWidget:
+        """先建空面板；展开时才填内容，避免几百天一次性建控件。"""
+        panel = QFrame()
+        panel.setObjectName("card")
+        lay = QVBoxLayout(panel)
+        lay.setContentsMargins(theme.SP_3, theme.SP_2, theme.SP_3, theme.SP_2)
+        lay.setSpacing(theme.SP_1)
+        panel.setProperty("filled", False)
+        return panel
+
+    def _fill_runs_panel(self, panel: QWidget, runs) -> None:
+        if panel.property("filled"):
+            return
+        panel.setProperty("filled", True)
+        lay = panel.layout()
+        for index, (moment, entry) in enumerate(runs):
+            if index:
+                rule = QFrame()
+                rule.setObjectName("rule")
+                lay.addWidget(rule)
+            row = QWidget()
+            row_lay = QHBoxLayout(row)
+            row_lay.setContentsMargins(0, 0, 0, 0)
+            row_lay.setSpacing(theme.SP_2)
+
+            stamp = QLabel(moment.strftime("%H:%M"))
+            stamp.setObjectName("dataTextMuted")
+            stamp.setFixedWidth(48)
+            row_lay.addWidget(stamp, 0, Qt.AlignTop)
+
+            marker, name = _STATUS_VIEW[_run_status(entry)]
+            status = QLabel(marker)
+            status.setObjectName(name)
+            status.setFixedWidth(40)
+            row_lay.addWidget(status, 0, Qt.AlignTop)
+
+            text = QWidget()
+            text_lay = QVBoxLayout(text)
+            text_lay.setContentsMargins(0, 0, 0, 0)
+            text_lay.setSpacing(2)
+            message = QLabel(str(entry.get("summary") or ""))
+            message.setObjectName("subtitle")
+            message.setWordWrap(True)
+            text_lay.addWidget(message)
+            detail = str(entry.get("detail") or "")
+            if detail:
+                detail_label = QLabel(detail)
+                detail_label.setObjectName("captionText")
+                detail_label.setWordWrap(True)
+                text_lay.addWidget(detail_label)
+            row_lay.addWidget(text, 1)
+            lay.addWidget(row)
+
+    def _toggle_day(self, day: str, panel: QWidget, button: QToolButton,
+                    runs) -> None:
+        show = panel.isHidden()
+        if show:
+            self._fill_runs_panel(panel, runs)
+        panel.setVisible(show)
+        button.setText("收起 ▾" if show else "展开 ▸")
+        if show:
+            self._expanded_days.add(day)
+        else:
+            self._expanded_days.discard(day)
+
+
+_STATUS_VIEW = {
+    "success": ("成功", "successText"),
+    "fail": ("失败", "dangerText"),
+    "cancel": ("取消", "warningText"),
+}
+
+
+def _run_status(entry: dict) -> str:
+    if entry.get("success"):
+        return "success"
+    return "cancel" if "取消" in str(entry.get("summary") or "") else "fail"
+
+
+def _day_title(day: str) -> str:
+    try:
+        moment = date.fromisoformat(day)
+        return f"{moment.month}月{moment.day}日"
+    except Exception:
+        return day
+
+
+def _weekday(day: str) -> str:
+    try:
+        return _WEEKDAYS[date.fromisoformat(day).weekday()]
+    except Exception:
+        return ""
 
 
 def _tier_color(tier: str) -> str:

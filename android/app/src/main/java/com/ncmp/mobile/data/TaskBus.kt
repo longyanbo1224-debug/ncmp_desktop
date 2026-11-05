@@ -22,6 +22,11 @@ object TaskBus {
     val resultSummary = MutableStateFlow("")
     val resultIsError = MutableStateFlow(false)
 
+    /** 歌名 → base/extra。曲目被上限裁掉后仍保留，评分回调才能把它归回额外。 */
+    private val knownGroups = mutableMapOf<String, String>()
+
+    fun groupOf(song: String): String = knownGroups[song] ?: ""
+
     fun reset() {
         logs.value = emptyList()
         done.value = 0
@@ -36,6 +41,7 @@ object TaskBus {
         resultHint.value = ""
         resultSummary.value = ""
         resultIsError.value = false
+        knownGroups.clear()
     }
 
     fun append(line: String) {
@@ -63,13 +69,53 @@ object TaskBus {
     // 曲目表
     // ------------------------------------------------------------------
 
+    /** 重建曲目表时先清空；跨天另见 clearDay。 */
+    fun clearTracks() {
+        tracks.value = emptyList()
+    }
+
+    /** 跨天时清掉上一天的状态：曲目、进度、结果和日志都换新的一天。 */
+    fun clearDay() {
+        tracks.value = emptyList()
+        logs.value = emptyList()
+        done.value = 0
+        total.value = 0
+        percent.value = 0
+        song.value = ""
+        score.value = ""
+        step.value = ""
+        resultLabel.value = ""
+        resultHint.value = ""
+        resultSummary.value = ""
+        resultIsError.value = false
+        knownGroups.clear()
+    }
+
     /** 预置今天的曲目：已评过的直接显示「已提交」并带上服务端分数，没评的显示「待评」。 */
-    fun seedQueue(items: List<WorkItem>) {
+    fun seedQueue(items: List<WorkItem>, extraLimit: Int = 0,
+                  baseNames: Set<String> = emptySet()) {
         if (items.isEmpty()) return
         val cur = tracks.value.toMutableList()
+        addItems(cur, items)
+        val grouped = inferList(cur, baseNames)
+        tracks.value = if (extraLimit > 0) capList(grouped, extraLimit) else grouped
+    }
+
+    /** 把本机今日记录并进曲目表：服务端待评清单缩水时，评过/跳过的不丢失。 */
+    fun seedRecords(records: List<TrackRecord>, extraLimit: Int = 0,
+                    baseNames: Set<String> = emptySet()) {
+        if (records.isEmpty()) return
+        val cur = tracks.value.toMutableList()
+        addRecords(cur, records)
+        val grouped = inferList(cur, baseNames)
+        tracks.value = if (extraLimit > 0) capList(grouped, extraLimit) else grouped
+    }
+
+    private fun addItems(cur: MutableList<TrackItem>, items: List<WorkItem>) {
         for (item in items) {
             val work = item.work
             if (work.name.isBlank()) continue
+            if (item.group.isNotBlank()) knownGroups[work.name] = item.group
             val index = cur.indexOfFirst { it.song == work.name }
             if (index < 0) {
                 cur.add(
@@ -78,6 +124,7 @@ object TaskBus {
                         artist = work.authorName,
                         score = item.score,
                         state = if (item.completed) TrackState.DONE else TrackState.PENDING,
+                        group = item.group,
                     ),
                 )
             } else if (item.completed) {
@@ -86,52 +133,125 @@ object TaskBus {
                 cur[index] = old.copy(
                     state = TrackState.DONE,
                     score = old.score.ifBlank { item.score },
+                    group = if (item.group.isNotBlank()) item.group else old.group,
                 )
             }
         }
-        tracks.value = cur
+    }
+
+    private fun addRecords(cur: MutableList<TrackItem>, records: List<TrackRecord>) {
+        for (record in records) {
+            if (record.song.isBlank()) continue
+            if (record.group.isNotBlank()) knownGroups[record.song] = record.group
+            val state = when (record.state) {
+                STATE_SUBMITTED -> TrackState.DONE
+                STATE_SKIPPED -> TrackState.SKIPPED
+                STATE_FAILED -> TrackState.FAILED
+                else -> TrackState.PENDING
+            }
+            val index = cur.indexOfFirst { it.song == record.song }
+            if (index < 0) {
+                cur.add(
+                    TrackItem(
+                        song = record.song,
+                        artist = record.artist,
+                        score = record.score,
+                        note = record.note,
+                        state = state,
+                        group = record.group,
+                    ),
+                )
+            } else if (record.state == STATE_SUBMITTED) {
+                // 本机已提交、服务端还没标完成的，保留「已提交」；不反向降级
+                val old = cur[index]
+                if (old.state == TrackState.PENDING) {
+                    cur[index] = old.copy(
+                        state = TrackState.DONE,
+                        score = old.score.ifBlank { record.score },
+                        note = old.note.ifBlank { record.note },
+                        artist = old.artist.ifBlank { record.artist },
+                        group = if (record.group.isNotBlank()) record.group else old.group,
+                    )
+                }
+            }
+        }
+    }
+
+    /** 旧记录没有 group 时，按服务端基础清单补上：不在清单里的算额外。 */
+    private fun inferList(cur: List<TrackItem>,
+                          baseNames: Set<String>): List<TrackItem> =
+        cur.map { item ->
+            val group = when {
+                item.group.isNotBlank() -> item.group
+                item.song in baseNames -> "base"
+                else -> "extra"
+            }
+            knownGroups[item.song] = group
+            if (group == item.group) item else item.copy(group = group)
+        }
+
+    /**
+     * 按每日上限裁剪额外行（基础全留，额外最多 [extraLimit] 条）。
+     * 优先保留已提交的，避免旧批次/旧运行的行把 20/20 撑成 20/41。
+     */
+    fun capTracks(extraLimit: Int) {
+        if (extraLimit <= 0) return
+        tracks.value = capList(tracks.value, extraLimit)
+    }
+
+    private fun capList(all: List<TrackItem>, extraLimit: Int): List<TrackItem> {
+        val extras = all.filter { it.group == "extra" }
+        if (extras.size <= extraLimit) return all
+        val keep = extras
+            .sortedBy { if (it.state == TrackState.DONE) 0 else 1 }
+            .take(extraLimit)
+            .map { it.song }
+            .toSet()
+        return all.filter { it.group != "extra" || it.song in keep }
     }
 
     /** 记一首已评分的曲目（同一首歌只保留一行，批注后到就补上去）。 */
-    fun addTrack(song: String, score: String, note: String = "", artist: String = "") {
+    fun addTrack(song: String, score: String, note: String = "",
+                 artist: String = "", group: String = "",
+                 extraLimit: Int = 0) {
         if (song.isBlank()) return
         val cur = tracks.value
         val index = cur.indexOfFirst { it.song == song }
+        val resolvedGroup = group.ifBlank {
+            knownGroups[song] ?: (if (index >= 0) cur[index].group else "")
+        }
         val item = if (index >= 0) {
             cur[index].copy(
                 artist = if (artist.isNotBlank()) artist else cur[index].artist,
                 score = score.ifBlank { cur[index].score },
                 note = note.ifBlank { cur[index].note },
                 state = TrackState.DONE,
+                group = resolvedGroup,
             )
         } else {
-            TrackItem(song = song, artist = artist, score = score, note = note, state = TrackState.DONE)
+            TrackItem(song = song, artist = artist, score = score, note = note,
+                state = TrackState.DONE, group = resolvedGroup)
         }
-        tracks.value = if (index >= 0) {
+        val next = if (index >= 0) {
             cur.toMutableList().also { it[index] = item }
         } else {
             cur + item
         }
+        tracks.value = if (extraLimit > 0) capList(next, extraLimit) else next
     }
 
-    /** 改一首歌的状态（评分中 / 跳过 / 失败）；歌不在列表里就先补一行。 */
+    /** 改一首歌的状态（评分中 / 跳过 / 失败）。歌不在今日列表里就忽略。 */
     fun setState(work: Work, state: String) {
         if (work.name.isBlank()) return
         val cur = tracks.value
         val index = cur.indexOfFirst { it.song == work.name }
-        val item = if (index >= 0) {
-            cur[index].copy(
-                artist = cur[index].artist.ifBlank { work.authorName },
-                state = state,
-            )
-        } else {
-            TrackItem(song = work.name, artist = work.authorName, state = state)
-        }
-        tracks.value = if (index >= 0) {
-            cur.toMutableList().also { it[index] = item }
-        } else {
-            cur + item
-        }
+        // 已被每日上限裁掉的行不再补回来，否则会出现 35/35、45/45 的闪烁
+        if (index < 0) return
+        val item = cur[index].copy(
+            artist = cur[index].artist.ifBlank { work.authorName },
+            state = state,
+        )
+        tracks.value = cur.toMutableList().also { it[index] = item }
     }
 
     /** 已提交的批注条数（页头那一行要用）。 */
@@ -146,10 +266,16 @@ object TaskBus {
      */
     fun settleQueue(failed: Boolean) {
         tracks.value = tracks.value.map { item ->
+            val extraDone = !failed && item.group == "extra"
             when (item.state) {
                 TrackState.RUNNING ->
-                    item.copy(state = if (failed) TrackState.FAILED else TrackState.SKIPPED)
-                TrackState.PENDING -> item.copy(state = TrackState.SKIPPED)
+                    item.copy(state = when {
+                        failed -> TrackState.FAILED
+                        extraDone -> TrackState.DONE
+                        else -> TrackState.SKIPPED
+                    })
+                TrackState.PENDING ->
+                    item.copy(state = if (extraDone) TrackState.DONE else TrackState.SKIPPED)
                 else -> item
             }
         }

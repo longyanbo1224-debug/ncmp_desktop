@@ -69,6 +69,9 @@ class TaskService : Service() {
         val store = SessionStore(applicationContext)
         // 按曲目记账（哪首/几分/写了什么），记录页的口味曲线和最近曲目都读它
         val trackLog = com.ncmp.mobile.data.TrackLogStore(applicationContext)
+        // 本地评分账本：同一任务重跑时不再提交已评过的歌（双端同构）
+        val ledger = com.ncmp.mobile.data.RatingLedgerStore(applicationContext)
+        // 曲目表等 onQueue 拿到服务端清单后再一起摆：先摆本地记录会出现 35/35 的闪烁
         val cfg = TaskConfig(
             scoreStrategy = intent?.getIntExtra(EXTRA_SCORE, 3) ?: 3,
             waitMinSeconds = intent?.getDoubleExtra(EXTRA_WAIT_MIN, 15.0) ?: 15.0,
@@ -98,16 +101,24 @@ class TaskService : Service() {
                         TaskBus.total.value = total
                         TaskBus.song.value = song
                         TaskBus.score.value = sc
-                        TaskBus.addTrack(song, sc)
+                        val group = TaskBus.groupOf(song)
+                        TaskBus.addTrack(
+                            song, sc, group = group,
+                            extraLimit = if (cfg.fullExtraTasks) 15 else 7,
+                        )
                         if (song.isNotBlank() && sc.isNotBlank()) {
-                            trackLog.record(song, score = sc)
+                            trackLog.record(song, score = sc, group = group)
                         }
                     },
                     onPercent = { TaskBus.percent.value = it },
                     onNote = { song, sc, note ->
-                        TaskBus.addTrack(song, sc, note)
+                        val group = TaskBus.groupOf(song)
+                        TaskBus.addTrack(
+                            song, sc, note, group = group,
+                            extraLimit = if (cfg.fullExtraTasks) 15 else 7,
+                        )
                         if (song.isNotBlank()) {
-                            trackLog.record(song, score = sc, note = note)
+                            trackLog.record(song, score = sc, note = note, group = group)
                         }
                     },
                     onPoints = { points ->
@@ -116,7 +127,22 @@ class TaskService : Service() {
                         store.partnerPoints = org.json.JSONObject(points).toString()
                     },
                     onQueue = { items ->
-                        TaskBus.seedQueue(items)
+                        val limit = if (cfg.fullExtraTasks) 15 else 7
+                        val baseNames = items
+                            .filter { it.group != "extra" }
+                            .map { it.work.name }
+                            .toSet()
+                        // 服务端清单 + 本机已提交记录一次摆好，再统一裁到每日上限，
+                        // 避免先出现 35/35 再跳回 20/20
+                        TaskBus.seedQueue(items, limit, baseNames)
+                        TaskBus.seedRecords(
+                            trackLog.load().filter {
+                                it.day == com.ncmp.mobile.data.TrackLogStore.today() &&
+                                    it.state == com.ncmp.mobile.data.STATE_SUBMITTED
+                            },
+                            limit,
+                            baseNames,
+                        )
                         // 服务端说"已评过"的，补记进本机账本：今天在电脑端评的歌，
                         // 手机端「记录」页也能看到。同一天同一首会覆盖，不会重复。
                         items.filter { it.completed }.forEach { item ->
@@ -124,10 +150,27 @@ class TaskService : Service() {
                                 item.work.name,
                                 artist = item.work.authorName,
                                 score = item.score,
+                                group = item.group,
                             )
                         }
                     },
-                    onTrack = { work, state -> TaskBus.setState(work, state) },
+                    onTrack = { work, state ->
+                        TaskBus.setState(work, state)
+                        // 跳过的歌也记下来：下次即使不在服务端待评清单里，
+                        // 曲目表仍能看到它们的状态
+                        if (state == com.ncmp.mobile.data.TrackState.SKIPPED ||
+                            state == com.ncmp.mobile.data.TrackState.FAILED
+                        ) {
+                            val group = TaskBus.groupOf(work.name)
+                            trackLog.record(
+                                work.name,
+                                artist = work.authorName,
+                                state = state,
+                                group = group,
+                            )
+                        }
+                    },
+                    ledger = ledger,
                 )
                 runner = r
                 val result = r.run()
@@ -136,16 +179,34 @@ class TaskService : Service() {
                     is TaskResult.Success -> {
                         TaskBus.resultLabel.value = "任务完成"
                         TaskBus.resultIsError.value = false
-                        historyMessage = if (result.extraAllDone) {
-                            "成功，基础 ${result.base} 首、额外任务今日已全部完成"
+                        // 用曲目表的实际行数：本机补回来的额外任务也算进去
+                        val doneCount = TaskBus.tracks.value.count {
+                            it.state == com.ncmp.mobile.data.TrackState.DONE
+                        }
+                        val skippedCount = TaskBus.tracks.value.count {
+                            it.state == com.ncmp.mobile.data.TrackState.SKIPPED
+                        }
+                        val base = result.base.coerceIn(0, doneCount)
+                        val extra = (doneCount - base).coerceAtLeast(0)
+                        historyMessage = if (doneCount > 0) {
+                            "成功，今日已完成 $doneCount 首（基础 $base 首、额外 $extra 首）"
                         } else {
-                            "成功，基础 ${result.base} 首、额外 ${result.extra} 首"
+                            "成功，今日已完成 0 首"
+                        }
+                        if (skippedCount > 0) {
+                            historyMessage += "，跳过 $skippedCount 首"
+                        }
+                        if (result.extraAllDone) {
+                            historyMessage += "，额外任务今日已全部完成"
                         }
                     }
                     is TaskResult.Cancelled -> {
                         TaskBus.resultLabel.value = "已取消"
                         TaskBus.resultIsError.value = false
-                        historyMessage = "已取消，基础 ${result.base} 首、额外 ${result.extra} 首"
+                        val doneCount = TaskBus.tracks.value.count {
+                            it.state == com.ncmp.mobile.data.TrackState.DONE
+                        }
+                        historyMessage = "已取消，今日已完成 $doneCount 首"
                     }
                     is TaskResult.Failed -> {
                         TaskBus.resultLabel.value = "失败：${result.kind.label}"
@@ -162,6 +223,36 @@ class TaskService : Service() {
                 // 收尾曲目表：本次没评到的「待评/评分中」不能一直挂着
                 // （今天已经评过时，第一首会卡在"评分中"，下面全是"待评"）
                 TaskBus.settleQueue(TaskBus.resultIsError.value)
+                // 成功跑完后，把跳过的曲目也记进今日账本：服务端待评清单缩水后，
+                // 下次打开仍能补回曲目表，不会只剩基础那几首
+                if (TaskBus.resultLabel.value == "任务完成") {
+                    // 跳过的额外曲目按“已评过”算，落进本地记录，下次仍是 20/20
+                    TaskBus.tracks.value
+                        .filter {
+                            it.state == com.ncmp.mobile.data.TrackState.DONE &&
+                                it.group == "extra" && it.score.isBlank()
+                        }
+                        .forEach {
+                            trackLog.record(
+                                it.song,
+                                artist = it.artist,
+                                note = it.note,
+                                group = "extra",
+                            )
+                        }
+                    TaskBus.tracks.value
+                        .filter { it.state == com.ncmp.mobile.data.TrackState.SKIPPED }
+                        .forEach {
+                            trackLog.record(
+                                it.song,
+                                artist = it.artist,
+                                score = it.score,
+                                note = it.note,
+                                state = com.ncmp.mobile.data.STATE_SKIPPED,
+                                group = it.group,
+                            )
+                        }
+                }
                 TaskBus.running.value = false
                 releaseLocks()
                 val nm = getSystemService(NotificationManager::class.java)

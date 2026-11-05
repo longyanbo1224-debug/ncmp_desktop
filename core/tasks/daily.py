@@ -3,12 +3,17 @@ from ..signer import Signer
 from .base import BaseTask
 class DailyTask(BaseTask):
     def __init__(self, session, logger, config, on_progress=None, cancel_event=None,
-                 on_note=None):
+                 on_note=None, ledger=None, account="", pacer=None):
         super().__init__(session, logger, config)
         self.on_progress = on_progress
         self.cancel_event = cancel_event
         # callback(work, score, note)：批注提交后回调界面
         self.on_note = on_note
+        # 本地评分账本与账号：重跑时跳过已确认收下的评分
+        self.ledger = ledger
+        self.account = account
+        # 整轮共享的请求节奏：第一次真实请求不等待
+        self.pacer = pacer
         self.api = {
             "task_data": "https://interface.music.163.com/api/music/partner/daily/task/get"
         }
@@ -37,8 +42,12 @@ class DailyTask(BaseTask):
         """处理未完成的任务"""
         self.logger.info("开始评分...")
         works = task_data.get("works", [])
+        # 有分数就说明已经评过：服务端的 completed 标记偶尔滞后
+        def rated(task: Dict) -> bool:
+            return (bool(task.get("completed"))
+                    or bool(str(task.get("score") or "").strip()))
         # 只统计待评分的作品，避免「已评分作品计入 total 但不会推进 done」导致进度条不动
-        pending_works = [task for task in works if not task.get("completed", False)]
+        pending_works = [task for task in works if not rated(task)]
         total = len(pending_works)
         if total <= 0:
             self.logger.info("没有待评分作品")
@@ -49,13 +58,17 @@ class DailyTask(BaseTask):
             cancel_event=self.cancel_event,
             total=total,
             on_note=self.on_note,
+            ledger=self.ledger,
+            account=self.account,
+            pacer=self.pacer,
         )
         self._emit_progress(0, total)
 
         for task in works:
             work = task["work"]
-            if task.get("completed", False):
-                self.logger.info(f'{work["name"]}「{work["authorName"]}」已有评分：{int(task["score"])}分')
+            if rated(task):
+                score_text = str(task.get("score") or "").strip() or "?"
+                self.logger.info(f'{work["name"]}「{work["authorName"]}」已有评分：{score_text}分')
             else:
                 try:
                     signer.sign(work)

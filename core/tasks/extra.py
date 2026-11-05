@@ -1,12 +1,11 @@
 import json
 import random
-import time
 from typing import Dict, List, Tuple, Optional
 from core import CancelledError
 from ..signer import Signer
 class ExtraTask:
     def __init__(self, session, logger, config, on_progress=None, cancel_event=None,
-                 on_note=None, on_works=None):
+                 on_note=None, on_works=None, ledger=None, account="", pacer=None):
         self.session = session
         self.logger = logger
         self.config = config
@@ -16,6 +15,11 @@ class ExtraTask:
         self.on_note = on_note
         # callback(tasks)：额外任务的曲目清单，交给界面预置"待评"行
         self.on_works = on_works
+        # 本地评分账本与账号：重跑时跳过已确认收下的评分
+        self.ledger = ledger
+        self.account = account
+        # 整轮共享的请求节奏：第一次真实请求不等待
+        self.pacer = pacer
         self.api = {
             "extra_list": "https://interface.music.163.com/api/music/partner/extra/wait/evaluate/work/list",
             "report_listen": "https://interface.music.163.com/weapi/partner/resource/interact/report"
@@ -26,6 +30,8 @@ class ExtraTask:
     #: 额外评分最多跑几轮：首轮 + 一次补跑。
     #: 单首失败只跳过不重试，跑完不重新核对就会"15 条只评了 12 首"却报成功。
     _MAX_PASSES = 2
+    #: 每天额外任务上限（基础 5 + 额外 15 = 20 首）
+    _DAILY_MAX = 15
 
     def preload(self) -> None:
         """提前拉一次额外任务清单，让界面一开始就看到全部曲目。
@@ -58,8 +64,12 @@ class ExtraTask:
                 self._prefetched = None
             else:
                 extra_tasks, completed_count = self._get_extra_tasks()
+            self._remember_completed(task_id, getattr(self, "last_all", []) or [])
             full = bool(self.config.get('full_extra_tasks', False))
-            target = len(extra_tasks) if full else 7 - completed_count
+            limit = self._DAILY_MAX if full else 7
+            extra_before = completed_count
+            max_new = max(0, limit - extra_before)
+            target = min(len(extra_tasks), max_new)
 
             # 如果已经完成任务，直接返回
             if target <= 0:
@@ -75,6 +85,8 @@ class ExtraTask:
             success_count = 0
             #: 服务端拒绝（资源状态异常）而被跳过的歌名，最后要告诉用户缺哪首
             skipped: list = []
+            #: 本轮已被服务端明确拒绝的作品 id：补跑轮别再请求同一首
+            rejected: set = set()
             # 先给一个 0/total，进度条在等待第一首歌时就能显示任务总量
             if self.on_progress:
                 try:
@@ -93,10 +105,10 @@ class ExtraTask:
                     except Exception as e:
                         self.logger.warning(f"补跑检查失败，结束额外评分: {e}")
                         break
-                    if full:
-                        target = max(target, success_count + len(extra_tasks))
-                    else:
-                        target = max(target, 7 - completed_count)
+                    self._remember_completed(
+                        task_id, getattr(self, "last_all", []) or [])
+                    target = min(max_new, max(
+                        target, success_count + len(extra_tasks)))
                     if not extra_tasks or success_count >= target:
                         self.logger.info("补跑检查：没有剩余额外任务")
                         break
@@ -106,6 +118,12 @@ class ExtraTask:
                 for task in extra_tasks:
                     if success_count >= target:
                         break
+
+                    work = task.get("work") or {}
+                    work_id = str(work.get("id"))
+                    if work_id in rejected:
+                        # 上一轮服务端已明确拒绝，重复执行也不会成功
+                        continue
 
                     # 任务循环开始处响应取消
                     if self.cancel_event is not None and self.cancel_event.is_set():
@@ -121,17 +139,12 @@ class ExtraTask:
                         if not rated:
                             # 服务端返回「资源状态异常」这类跳过：不能算成功，
                             # 否则本地计数会比网易云上实际评过的多一首。
-                            skipped.append(str((task.get("work") or {}).get("name") or ""))
+                            rejected.add(work_id)
+                            skipped.append(str(work.get("name") or ""))
                             self.logger.info("本首未计入成功，补跑轮次会再核对")
                             continue
                         success_count += 1
                         self.logger.info(f"成功完成第 {success_count}/{target} 个额外评分任务")
-
-                        # 添加随机等待时间
-                        if success_count < target:  # 最后一个任务不需要等待
-                            delay = self.config.get_wait_time()
-                            self.logger.info(f"等待 {delay:.1f} 秒后继续...")
-                            time.sleep(delay)
 
                     except CancelledError:
                         # 取消异常必须向上传递，不能按单首失败吞掉
@@ -163,6 +176,26 @@ class ExtraTask:
         except Exception as e:
             self.logger.error(f"处理额外评分任务时出错: {str(e)}")
             raise
+    def _remember_completed(self, task_id, tasks) -> None:
+        """把服务端标成已完成的额外曲目记进账本。
+
+        这样即使下次运行服务端的完成标记滞后，同一任务里也不会再提交一遍。
+        """
+        ledger = getattr(self, "ledger", None)
+        if ledger is None:
+            return
+        for task in tasks or []:
+            try:
+                work = task.get("work") or {}
+                score = str(task.get("score") or "").strip()
+                # 有分数就说明已经评过，completed 标记可能滞后
+                if work.get("id") is None or not score:
+                    continue
+                ledger.mark(getattr(self, "account", ""), task_id,
+                            work.get("id"), score)
+            except Exception:
+                continue
+
     def _emit_works(self, extra_tasks) -> None:
         """把额外任务的曲目清单交给界面，先摆成"待评"行。
 
@@ -174,6 +207,8 @@ class ExtraTask:
         if not callback:
             return
         try:
+            for task in extra_tasks or []:
+                task["_group"] = "extra"
             callback(list(extra_tasks or []))
         except Exception as e:
             # 测试替身的 logger 可能没有 debug，这里不能因为日志把任务打断
@@ -197,8 +232,14 @@ class ExtraTask:
             self.last_all = extra_tasks
             if emit:
                 self._emit_works(extra_tasks)
-            completed_tasks = [t for t in extra_tasks if t['completed']]
-            uncompleted_tasks = [t for t in extra_tasks if not t['completed']]
+            completed_tasks = [
+                t for t in extra_tasks
+                if t.get("completed") or str(t.get("score") or "").strip()
+            ]
+            uncompleted_tasks = [
+                t for t in extra_tasks
+                if not (t.get("completed") or str(t.get("score") or "").strip())
+            ]
 
             # 获取所有未完成的任务，而不是只取前7个
             return uncompleted_tasks, len(completed_tasks)
@@ -210,10 +251,6 @@ class ExtraTask:
         """处理单个额外评分任务。返回服务端是否真的记下了这次评分。"""
         work = task['work']
         try:
-            # 1. 上报听歌记录
-            self._report_listen(work)
-
-            # 2. 评分
             signer = Signer(
                 self.session, task_id, self.logger, self.config,
                 on_progress=self.on_progress,
@@ -221,7 +258,19 @@ class ExtraTask:
                 total=total,
                 done_offset=done_offset,
                 on_note=self.on_note,
+                ledger=self.ledger,
+                account=self.account,
+                pacer=self.pacer,
             )
+
+            # 本任务已确认收下的，连听歌上报都不用再发
+            if signer.already_rated(work) is not None:
+                return signer.sign(work, is_extra=True)
+
+            # 1. 上报听歌记录
+            self._report_listen(work)
+
+            # 2. 评分
             return signer.sign(work, is_extra=True)
         except CancelledError:
             # 用户在评分入口处取消，直接透传，不按失败记录日志

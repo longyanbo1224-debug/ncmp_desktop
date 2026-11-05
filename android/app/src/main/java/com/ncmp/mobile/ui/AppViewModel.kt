@@ -27,6 +27,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val historyStore = TaskHistoryStore(app)
     private val trackLog = com.ncmp.mobile.data.TrackLogStore(app)
     private val api = NeteaseApi()
+    //: 上次同步服务端今日状态的时间（30 秒节流）
+    private var lastSyncAt = 0L
+    //: 曲目表当前属于哪一天；跨天同步时先清空，避免昨天的行累积
+    private var trackDay = ""
 
     // ---------- 登录态 ----------
     var loggedIn by mutableStateOf(false)
@@ -111,8 +115,68 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         history.clear()
         history.addAll(historyStore.load())
         trackStats = trackLog.stats()
-        recentTracks = trackLog.recent(20)
+        recentTracks = trackLog.recent(RECENT_LIMIT)
         if (points.isEmpty()) points = readPoints()
+        syncToday()
+    }
+
+    /**
+     * 把服务端今日的完成状态同步到本机：另一台设备评过的歌也能显示、能跳过。
+     *
+     * 30 秒内不重复请求；没登录或任务在跑时跳过。失败静默。
+     */
+    fun syncToday(force: Boolean = false) {
+        if (!loggedIn || TaskBus.running.value) return
+        val now = System.currentTimeMillis()
+        val today = com.ncmp.mobile.data.TrackLogStore.today()
+        // 跨天不受 30 秒节流限制：刚过零点也要立刻换成新一天
+        if (!force && today == trackDay && now - lastSyncAt < 30_000) return
+        lastSyncAt = now
+        viewModelScope.launch {
+            try {
+                if (api.userId.isBlank()) runCatching { api.verifyUser() }
+                val daily = api.getDailyTasks()
+                val extra = runCatching { api.getExtraTasks() }.getOrNull()
+                val items = daily.items + (extra?.first ?: emptyList())
+                // 跨天了先清空；同一天也重建一次，别把旧批次/旧运行的行越堆越多
+                if (trackDay != today) {
+                    TaskBus.clearDay()
+                    trackDay = today
+                } else {
+                    TaskBus.clearTracks()
+                }
+                val limit = if (fullExtra) 15 else 7
+                val serverNames = items.map { it.work.name }.toSet()
+                val baseNames = items
+                    .filter { it.group != "extra" }
+                    .map { it.work.name }
+                    .toSet()
+                TaskBus.seedQueue(items, limit, baseNames)
+                // 本机记录只补两类：已提交的（清单缩水也要留），以及仍在服务端清单里的
+                TaskBus.seedRecords(
+                    trackLog.load().filter {
+                        it.day == today &&
+                            (it.state == com.ncmp.mobile.data.STATE_SUBMITTED ||
+                                it.song in serverNames)
+                    },
+                    limit,
+                    baseNames,
+                )
+                val ledger = com.ncmp.mobile.data.RatingLedgerStore(getApplication())
+                items.filter { it.completed && it.score.isNotBlank() }.forEach { item ->
+                    trackLog.record(
+                        item.work.name,
+                        artist = item.work.authorName,
+                        score = item.score,
+                    )
+                    ledger.mark(api.userId, daily.id, item.work.id, item.score)
+                }
+                trackStats = trackLog.stats()
+                recentTracks = trackLog.recent(RECENT_LIMIT)
+            } catch (_: Exception) {
+                // 离线或接口异常：保持本机现有内容
+            }
+        }
     }
 
     /** 手动刷新合伙人积分/等级（记录页的「刷新」）。拿不到就保持原值。 */
@@ -146,9 +210,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun observeTaskBus() {
         viewModelScope.launch {
             TaskBus.running.collect {
+                val wasRunning = running
                 running = it
                 // 服务端先落记录再置 false，所以这时读到的就是本次结果
-                if (!it) refreshHistory()
+                if (wasRunning && !it) {
+                    // 这次执行已经把曲目表换成了今天，别再被跨天同步清掉
+                    trackDay = com.ncmp.mobile.data.TrackLogStore.today()
+                    refreshHistory()
+                }
             }
         }
         viewModelScope.launch {
@@ -276,6 +345,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         nickname = nick
         store.nickname = nick
         loggedIn = true
+        syncToday(force = true)
     }
 
     fun logout() {
@@ -386,3 +456,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return h to m
     }
 }
+
+/** 最近曲目展示条数（与桌面端一致）。 */
+private const val RECENT_LIMIT = 30

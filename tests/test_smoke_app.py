@@ -130,6 +130,23 @@ class TestTrackLog(unittest.TestCase):
         self.assertEqual(recent[0]["song"], "新歌")
         self.assertEqual(recent[0]["day"], date.today().isoformat())
 
+    def test_skipped_does_not_overwrite_submitted(self):
+        log = self._log()
+        log.record("夜航西飞", score="4")
+        log.record("夜航西飞", state="skipped")
+        row = log.day()[0]
+        self.assertEqual(row["state"], "submitted")
+        self.assertEqual(row["score"], "4")
+
+    def test_skipped_is_not_a_rated_track(self):
+        """跳过的歌留在今日账本里（曲目表要显示），但不计入「评过」。"""
+        log = self._log()
+        log.record("跳过歌", state="skipped")
+        self.assertEqual(log.day()[0]["song"], "跳过歌")
+        self.assertEqual(log.stats()["total"], 0)
+        self.assertEqual(log.recent(10), [])
+        self.assertNotIn("跳过歌", log.export_markdown())
+
 
 class TestScoringPreview(unittest.TestCase):
     """D1 的判定：四种策略必须给出可区分的结果。"""

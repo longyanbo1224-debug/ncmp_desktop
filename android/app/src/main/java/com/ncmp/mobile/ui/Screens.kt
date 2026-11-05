@@ -90,6 +90,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -98,6 +99,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -334,6 +337,15 @@ private fun CookieLoginTab(vm: AppViewModel) {
 @Composable
 fun MainScreen(vm: AppViewModel) {
     var tab by remember { mutableStateOf(0) }
+    // 回到前台时同步一次：跨天后把昨天的曲目表清掉，换成今天的
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) vm.syncToday()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     // 保存设置之类的一次性反馈走底部 Snackbar：比在表单里加一行小字显眼
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(vm.saveHint) {
@@ -353,7 +365,7 @@ fun MainScreen(vm: AppViewModel) {
             NavigationBar(containerColor = NCMP.Panel) {
                 NavigationBarItem(
                     selected = tab == 0,
-                    onClick = { tab = 0 },
+                    onClick = { tab = 0; vm.syncToday() },
                     icon = { Icon(Icons.Filled.PlayArrow, contentDescription = null) },
                     label = { Text("任务") },
                     colors = NavigationBarItemDefaults.colors(

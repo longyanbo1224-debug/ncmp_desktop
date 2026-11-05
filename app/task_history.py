@@ -17,8 +17,8 @@ from typing import Dict, List
 
 from app.app_config import _default_config_path
 
-#: 保留多少条明细（给记录表用）
-MAX_RECORDS = 50
+#: 保留多少条明细（给记录表/「执行情况」用；与手机端的 800 条对齐）
+MAX_RECORDS = 800
 
 #: 保留多少天的按天结论（一年多一点，够画 53 周格子图）
 MAX_DAYS = 400
