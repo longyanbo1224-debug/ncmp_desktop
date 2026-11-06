@@ -17,6 +17,24 @@ except Exception:  # pragma: no cover - 无 Qt 环境时跳过
     _HAS_QT = False
 
 
+class _NoQuotaState:
+    """测试替身：默认表示「今日额外额度还没用完」。"""
+
+    exhausted = False
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def exhausted_today(self, day=None):
+        return self.exhausted
+
+
+class _ExhaustedQuotaState(_NoQuotaState):
+    """测试替身：今日额外额度已用完。"""
+
+    exhausted = True
+
+
 @unittest.skipUnless(_HAS_QT, "PySide6 不可用")
 class TestTodayPage(unittest.TestCase):
     app = None
@@ -26,6 +44,16 @@ class TestTodayPage(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
         from app.ui import theme
         theme.apply_theme(cls.app, "light")
+
+    def setUp(self):
+        # 不读用户真实的「今日额外额度已用完」缓存，默认按未用完处理
+        import app.ui.pages.task_page as task_page_module
+        self._original_quota_state = task_page_module.QuotaState
+        task_page_module.QuotaState = _NoQuotaState
+
+    def tearDown(self):
+        import app.ui.pages.task_page as task_page_module
+        task_page_module.QuotaState = self._original_quota_state
 
     def _page(self):
         from app.ui.pages.task_page import TaskPage
@@ -230,8 +258,12 @@ class TestTodayPage(unittest.TestCase):
         self.assertEqual(page._track_list.done_count(), 1)
         self.assertEqual(page._track_list.rows_with_state("pending"), [])
 
-    def test_skipped_extra_counts_as_done_on_success(self):
-        """额外曲目「已评过所以跳过」算进今日完成数，不再只算基础 5 首。"""
+    def test_skipped_extra_stays_skipped(self):
+        """未轮到的额外曲目保持「跳过」，不能自动算成「已提交」。
+
+        服务端返回「今日没有更多」只说明今天的额外额度用完了，不代表这首
+        刚刚被评过。以前这里会统一改成「已提交」，界面会谎报 20/20。
+        """
         from app.track_log import TrackLog
         import app.ui.pages.task_page as task_page_module
 
@@ -248,12 +280,34 @@ class TestTodayPage(unittest.TestCase):
                     "_group": "extra",
                 }])
                 page._track_list.settle_pending()
-                page._track_list.mark_extra_skipped_done()
+            finally:
+                task_page_module.TrackLog = original
+
+        self.assertEqual(page._track_list.done_count(), 0)
+        self.assertEqual(len(page._track_list.rows_with_state("skipped")), 1)
+
+    def test_blank_local_submitted_marks_done_from_history(self):
+        """本机历史为 submitted 时（即使没有分数），重复执行也按「已完成」展示。"""
+        from app.track_log import TrackLog
+        import app.ui.pages.task_page as task_page_module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log = TrackLog(path=Path(tmp) / "track_log.json")
+            log.record("无分歌", state="submitted")
+            original = task_page_module.TrackLog
+            task_page_module.TrackLog = lambda: log
+            try:
+                page = self._page()
+                page._begin_run("执行中…", "running")
+                page._on_works([{
+                    "work": {"name": "无分歌", "authorName": "某"},
+                    "completed": False,
+                    "_group": "extra",
+                }])
             finally:
                 task_page_module.TrackLog = original
 
         self.assertEqual(page._track_list.done_count(), 1)
-        self.assertEqual(page._track_list.rows_with_state("skipped"), [])
 
     def test_extra_rows_are_capped_at_daily_limit(self):
         """基础 5 + 额外最多 15：多出来的旧批次行不展示，优先保留已提交。"""
@@ -287,6 +341,101 @@ class TestTodayPage(unittest.TestCase):
         self.assertEqual(page._track_list.done_count(), 20)
         self.assertEqual(page._track_list.count_by_group("base"), 5)
         self.assertEqual(page._track_list.count_by_group("extra"), 15)
+
+    def test_extra_batch_after_base_reaches_twenty(self):
+        """基础评完后服务端放出第二批次：曲目表从 15 行补到 20 行。
+
+        用户反馈的场景：新的一天点执行先只有 15 首，基础 5 首评完后
+        才放出剩下的 5 首额外曲目。第二次 on_works 必须合并而不是裁掉基础行。
+        """
+        from app.track_log import TrackLog
+        import app.ui.pages.task_page as task_page_module
+
+        base = [
+            {"work": {"name": f"基础{i}", "authorName": "某"},
+             "completed": i < 5, "score": 4 if i < 5 else "",
+             "_group": "base"}
+            for i in range(5)
+        ]
+        first_extra = [
+            {"work": {"name": f"额外{i}", "authorName": "某"},
+             "completed": False, "score": 0, "_group": "extra"}
+            for i in range(10)
+        ]
+        second_extra = [
+            {"work": {"name": f"额外{i}", "authorName": "某"},
+             "completed": False, "score": 0, "_group": "extra"}
+            for i in range(15)
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log = TrackLog(path=Path(tmp) / "track_log.json")
+            original = task_page_module.TrackLog
+            task_page_module.TrackLog = lambda: log
+            try:
+                page = self._page()
+                page._begin_run("执行中…", "running")
+                page._on_works(base + first_extra)
+                self.assertEqual(page._track_list.count(), 15)
+
+                page._on_works(second_extra)
+            finally:
+                task_page_module.TrackLog = original
+
+        self.assertEqual(page._track_list.count(), 20)
+        self.assertEqual(page._track_list.count_by_group("base"), 5)
+        self.assertEqual(page._track_list.count_by_group("extra", state=None), 15)
+
+    def test_quota_exhausted_marks_extra_done_on_refresh(self):
+        """本地已缓存「今日额外额度用完」时，刷新就把未完成的额外行显示为已完成。"""
+        import app.ui.pages.task_page as task_page_module
+        from app.track_log import TrackLog
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log = TrackLog(path=Path(tmp) / "track_log.json")
+            original_log = task_page_module.TrackLog
+            task_page_module.TrackLog = lambda: log
+            task_page_module.QuotaState = _ExhaustedQuotaState
+            try:
+                page = self._page()
+                page._begin_run("执行中…", "running")
+                page._on_works([{
+                    "work": {"name": "额外歌", "authorName": "某"},
+                    "completed": False,
+                    "_group": "extra",
+                }])
+            finally:
+                task_page_module.TrackLog = original_log
+                task_page_module.QuotaState = _NoQuotaState
+
+        self.assertEqual(page._track_list.done_count(), 1)
+
+    def test_same_name_different_artist_are_separate_rows(self):
+        """同名不同作品（不同歌手）要各占一行，不能被歌名去重裁成 19 首。"""
+        from app.track_log import TrackLog
+        import app.ui.pages.task_page as task_page_module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log = TrackLog(path=Path(tmp) / "track_log.json")
+            original = task_page_module.TrackLog
+            task_page_module.TrackLog = lambda: log
+            try:
+                page = self._page()
+                page._begin_run("执行中…", "running")
+                page._on_works([
+                    {"work": {"name": "同名歌", "authorName": "甲"},
+                     "completed": False, "_group": "extra"},
+                    {"work": {"name": "同名歌", "authorName": "乙"},
+                     "completed": False, "_group": "extra"},
+                ])
+                self.assertEqual(page._track_list.count(), 2)
+
+                page._on_progress(1, 2, "同名歌", "4")
+                page._on_progress(2, 2, "同名歌", "3")
+            finally:
+                task_page_module.TrackLog = original
+
+        self.assertEqual(page._track_list.done_count(), 2)
 
     def test_new_day_clears_previous_tracks(self):
         """跨天后第一次同步要把昨天的行清掉，不能两天堆在一起。"""

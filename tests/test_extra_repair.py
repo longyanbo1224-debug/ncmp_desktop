@@ -49,14 +49,17 @@ class _FakeExtra(ExtraTask):
         self.skip_on = set(skip_on)
 
     def _get_extra_tasks(self):
-        pending, completed = self.script[min(self.fetches, len(self.script) - 1)]
+        spec, completed = self.script[min(self.fetches, len(self.script) - 1)]
         self.fetches += 1
-        return ([{"work": {"name": f"w{i}", "id": i}} for i in range(pending)],
+        # spec 可以是数量（id 从 0 起），也可以是明确的 id 列表——
+        # 补跑轮要模拟「服务端只返回真正没评上的那几首」
+        ids = list(range(spec)) if isinstance(spec, int) else list(spec)
+        return ([{"work": {"name": f"w{i}", "id": i}} for i in ids],
                 completed)
 
     def _process_single_task(self, task, task_id, done_offset=0, total=None) -> bool:
         self.attempts += 1
-        self.attempted_ids.append(str(task["work"]["id"]))
+        self.attempted_ids.append(str(task["work"].get("id")))
         if self.no_more:
             raise RuntimeError("评分失败: 今日没有更多可评定歌曲啦 (响应码: 405)")
         if self.attempts in self.fail_on:
@@ -70,8 +73,9 @@ class _FakeExtra(ExtraTask):
 
 class ExtraRepairTest(unittest.TestCase):
     def test_skipped_songs_are_retried_until_complete(self):
-        # 首轮 15 条，末尾 3 条失败；补跑时服务端只剩这 3 条
-        job = _FakeExtra([(15, 0), (3, 12)])
+        # 首轮 15 条，第 12~14 次尝试（id 11、12、13）失败；
+        # 补跑时服务端只剩这 3 条未完成
+        job = _FakeExtra([(15, 0), ([11, 12, 13], 12)])
         job.process_extra_tasks("task")
 
         self.assertEqual(job.fetches, 2, "补跑前必须重新核对服务端")
@@ -80,6 +84,18 @@ class ExtraRepairTest(unittest.TestCase):
         done = [d for d, _ in job.progress]
         self.assertEqual(done, sorted(done))
         self.assertTrue(all(t == 15 for _, t in job.progress))
+
+    def test_small_first_batch_is_topped_up_to_daily_limit(self):
+        """首轮只返回 10 首（接口分批）也要在同一次执行里补到 15 首。
+
+        以前 target 等于首轮清单长度，评完 10 首就结束，用户得再点一次执行
+        才能拿到剩下 5 首。
+        """
+        job = _FakeExtra([(10, 0), ([10, 11, 12, 13, 14], 10)])
+        job.process_extra_tasks("task")
+
+        self.assertEqual(job.fetches, 2, "补跑前必须重新核对服务端")
+        self.assertEqual(job.attempts, 15, "一轮应评满额外的 15 首")
 
     def test_limited_mode_stops_at_seven(self):
         job = _FakeExtra([(10, 0)], full=False, fail_on=())
@@ -105,7 +121,7 @@ class ExtraRepairTest(unittest.TestCase):
 
         messages = [m for _, m in job.logger.lines]
         self.assertEqual(job.fetches, 1, "没有更多时不应再补跑")
-        self.assertTrue(any("额外任务今日已全部完成" in m for m in messages))
+        self.assertTrue(any("今日额外额度已用完" in m for m in messages))
         self.assertFalse(any("仍有" in m for m in messages))
 
     def test_rejected_work_is_not_requested_again(self):
@@ -114,6 +130,20 @@ class ExtraRepairTest(unittest.TestCase):
         job.process_extra_tasks("task")
 
         self.assertEqual(job.attempted_ids.count("1"), 1)
+
+    def test_missing_ids_do_not_share_one_key(self):
+        """缺 id 的作品不能共用一个去重键，否则评上第一首后其余全被跳过。"""
+        class _NoIdJob(_FakeExtra):
+            def _get_extra_tasks(self):
+                self.fetches += 1
+                if self.fetches == 1:
+                    return ([{"work": {"name": "甲"}}, {"work": {"name": "乙"}}], 0)
+                return ([], 0)
+
+        job = _NoIdJob([(0, 0)])
+        job.process_extra_tasks("task")
+
+        self.assertEqual(job.attempts, 2)
 
 
 if __name__ == "__main__":

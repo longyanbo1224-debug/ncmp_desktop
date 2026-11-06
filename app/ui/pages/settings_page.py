@@ -85,7 +85,7 @@ DEFAULTS: Dict[str, Any] = {
     "wait_time_max": 20,
     "score": 3,
     "full_extra_tasks": True,
-    "note_enabled": True,
+    "note_enabled": False,
     "note_voice": "restrained",
     "note_length": "standard",
     "notify_email": "",
@@ -180,7 +180,7 @@ FIELD_HINTS: Dict[str, Dict[str, str]] = {
     },
     "note_enabled": {
         "tooltip": (
-            "勾选后，评分时同时提交一条批注（乐评短句）。\n"
+            "默认关闭。勾选并保存后，评分时同时提交一条批注（乐评短句）。\n"
             "批注会公开显示在你的账号下，可在「记录」里回看每一条。"),
     },
     "note_voice": {

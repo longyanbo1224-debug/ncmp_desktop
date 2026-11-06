@@ -50,6 +50,9 @@ class TaskWorker(QThread):
         self.cancel_event = threading.Event()
         # "task"=手动执行用 notify_on_task_done；"schedule"=定时执行用 notify_on_schedule
         self._notify_context: str = "task"
+        #: 本次执行服务端是否明确说过「今日没有更多」（当天额外额度已用完）。
+        #: 界面用它决定未轮到的额外曲目是否按今日完成计。
+        self.extra_all_done = False
 
     # ------------------------------------------------------------------
     # 启动接口
@@ -68,6 +71,7 @@ class TaskWorker(QThread):
             self._session = session
         self._notify_context = notify_context if notify_context in ("task", "schedule") else "task"
         self.cancel_event.clear()
+        self.extra_all_done = False
         if not self.isRunning():
             self.start()
 
@@ -127,6 +131,18 @@ class TaskWorker(QThread):
 
     def _attempt(self, config, session):
         """跑一次 bot，返回 ``(是否成功, 失败分类)``。"""
+        # 先读本地历史：今天已经提交的曲目数。达到「基础 + 额外上限」时
+        # bot 会直接跳过额外阶段，不再请求服务端（先本地、后服务端）。
+        local_submitted = 0
+        try:
+            from app.track_log import STATE_SUBMITTED, TrackLog
+
+            local_submitted = sum(
+                1 for entry in TrackLog().day()
+                if str(entry.get("state") or STATE_SUBMITTED) == STATE_SUBMITTED
+            )
+        except Exception:
+            local_submitted = 0
         bot = MusicPartnerBot(
             config=config,
             logger=Logger(),
@@ -136,9 +152,11 @@ class TaskWorker(QThread):
             cancel_event=self.cancel_event,
             on_note=self._on_note,
             on_works=self._on_works,
+            local_submitted_count=local_submitted,
         )
         try:
             ok = bot.run()
+            self.extra_all_done = bool(getattr(bot, "extra_all_done", False))
         except CancelledError:
             return False, ""
         except Exception as e:

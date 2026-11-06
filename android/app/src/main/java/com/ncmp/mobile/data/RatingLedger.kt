@@ -34,6 +34,10 @@ class RatingLedgerStore(context: Context) {
         }?.score?.let(::normalizeScore)?.takeIf { it.isNotBlank() }
     }
 
+    /** 本任务里已经由服务端确认收下的作品数（用于判断今天是否已评满）。 */
+    fun count(account: String, taskId: Any): Int =
+        load().count { it.account == account && it.taskId == taskId.toString() }
+
     /** 记一次服务端确认收下的评分。 */
     fun mark(account: String, taskId: Any, workId: Any, score: String) {
         val taskKey = taskId.toString()

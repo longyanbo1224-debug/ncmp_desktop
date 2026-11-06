@@ -73,6 +73,34 @@ def _notify_already_running() -> None:
         print(_msg)
 
 
+def _migrate_note_default_off(app_config) -> None:
+    """把旧版本默认开启的批注一次性关掉（每个安装只做一次）。
+
+    旧版本 ``note_enabled`` 默认 True，用户只要保存过一次设置就会把 true
+    落盘。新版本要求批注默认关闭、必须手动打开并保存；这里在升级后的第一次
+    启动把已落盘的 true 改成 false，之后完全尊重用户在设置页的选择。
+    """
+    if app_config.get("note_default_off_migrated", False):
+        return
+    # GitHub Actions 的 runner 每次都是全新环境，标记不会持久化；
+    # 在那里反复改写 setting.json 会让云端用户永远打不开批注。
+    if os.getenv("GITHUB_ACTIONS") == "true":
+        return
+    try:
+        from core.utils.config import Config
+
+        # 即使还没有 setting.json 也写一份，保证本地默认关闭；
+        # 共享 core 的默认值保持旧行为，不影响云端。
+        raw = dict(Config._load_json_config() or {})
+        raw["note_enabled"] = False
+        Config.write_file_config(raw)
+    except Exception:
+        # 写失败就下次启动再试，不能让一次配置迁移挡住程序启动
+        return
+    app_config.set("note_default_off_migrated", True)
+    app_config.save()
+
+
 def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("ncmp desktop")
@@ -116,6 +144,8 @@ def main() -> int:
 
     # 配置
     app_config = AppConfig()
+    # 批注功能默认关闭：旧版本落盘的 true 在这里一次性关掉
+    _migrate_note_default_off(app_config)
 
     # 主窗口
     window = MainWindow(app_config=app_config)

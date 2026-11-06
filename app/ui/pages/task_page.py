@@ -24,8 +24,9 @@ from PySide6.QtWidgets import (
 from app.cookie_store import CookieStore
 from app.task_history import TaskHistory
 from app.track_log import (
-    STATE_FAILED, STATE_SKIPPED, STATE_SUBMITTED, TrackLog,
+    STATE_FAILED, STATE_SKIPPED, STATE_SUBMITTED, TrackLog, clean_score,
 )
+from core.quota_state import QuotaState
 from app.ui import theme
 from app.ui.icons import ICON_RUN, op_icon
 from app.ui.widgets.log_view import GuiLogHandler, LogView
@@ -647,10 +648,11 @@ class TaskPage(QWidget):
             self._track_list.add(
                 str(entry.get("song") or ""),
                 meta=str(entry.get("artist") or ""),
-                score=str(entry.get("score") or ""),
+                score=clean_score(entry.get("score")),
                 state=state,
                 note=str(entry.get("note") or ""),
                 group=str(entry.get("group") or ""),
+                key=f'{entry.get("song") or ""}|{entry.get("artist") or ""}',
             )
         self._refresh_rail()
 
@@ -943,8 +945,12 @@ class TaskPage(QWidget):
             # 否则服务端说「待评」的歌会被误标成「已提交」（桌面端恒 20/20 的根因）
             local_state = (str(local.get("state") or STATE_SUBMITTED)
                            if local else "")
-            task_score = str(task.get("score") or "").strip()
-            # 有分数就说明已经评过，completed 标记偶尔滞后
+            # 本机记录为 submitted 就按「已提交」展示（1.2.4 的历史口径）：
+            # 旧版本 / 额度用完时可能没有分数，但历史已经确认这天评过。
+            # 只有本机记录是 skipped / failed 且服务端没标完成时才降级。
+            local_score = clean_score(local.get("score")) if local else ""
+            task_score = clean_score(task.get("score"))
+            # 有合法分数就说明已经评过，completed 标记偶尔滞后
             server_done = bool(task.get("completed")) or bool(task_score)
             if server_done or local_state == STATE_SUBMITTED:
                 state = "done"
@@ -953,9 +959,9 @@ class TaskPage(QWidget):
             else:
                 state = "pending"
             done = state == "done"
-            score = str(task.get("score") or "")
+            score = task_score
             if not server_done:
-                score = str(local.get("score") or "")
+                score = local_score
             self._track_list.add(
                 name,
                 meta=str(work.get("authorName") or ""),
@@ -963,6 +969,7 @@ class TaskPage(QWidget):
                 state=state,
                 note=notes.get(name, ""),
                 group=self._track_groups.get(name) or group_for(name),
+                key=f'{name}|{work.get("authorName") or ""}',
             )
             added += 1
             if server_done:
@@ -972,7 +979,7 @@ class TaskPage(QWidget):
                     TrackLog().record(
                         name,
                         artist=str(work.get("authorName") or ""),
-                        score=str(task.get("score") or ""),
+                        score=task_score,
                         note=notes.get(name, ""),
                         group=self._track_groups.get(name, ""),
                     )
@@ -981,7 +988,8 @@ class TaskPage(QWidget):
         # 服务端待评清单会随着评分缩水；本机账本里的今日曲目要补回来，
         # 否则额外任务评完/跳过后再打开，曲目表就只剩基础那几首。
         for name, entry in entries.items():
-            if self._track_list.contains(name):
+            entry_key = f'{name}|{entry.get("artist") or ""}'
+            if self._track_list.contains_key(entry_key):
                 continue
             state = str(entry.get("state") or STATE_SUBMITTED)
             if state == STATE_SUBMITTED:
@@ -1001,12 +1009,20 @@ class TaskPage(QWidget):
             self._track_list.add(
                 name,
                 meta=str(entry.get("artist") or ""),
-                score=str(entry.get("score") or "") if state == "done" else "",
+                score=clean_score(entry.get("score")) if state == "done" else "",
                 state=state,
                 note=str(entry.get("note") or ""),
                 group=group,
+                key=entry_key,
             )
             added += 1
+        # 本地已经有「今日额外额度已用完」的记录：不用等下一次服务端探测，
+        # 直接把仍标待评的额外曲目显示为今日完成（先本地、后服务端）。
+        try:
+            if QuotaState().exhausted_today():
+                self._track_list.mark_extra_pending_done()
+        except Exception:
+            pass
         # 基础 5 + 额外最多 15：服务端多返回的旧批次行不展示
         self._cap_tracks()
         if added:
@@ -1025,7 +1041,8 @@ class TaskPage(QWidget):
         if not note:
             return
         self._track_list.add(song, score=str(score), state="done",
-                             note=note, group=self._group_for(song))
+                             note=note, group=self._group_for(song),
+                             prefer="note")
         self._cap_tracks()
         try:
             TrackLog().record(song, score=str(score), note=note,
@@ -1048,9 +1065,15 @@ class TaskPage(QWidget):
         self._set_run_buttons_enabled(True)
         # 没轮到的行不能一直挂着"待评"（今天额度用完时最明显）
         self._track_list.settle_pending()
-        if status == "success":
-            # 额外任务通常是「已评过所以跳过」：算进今日完成数，而不是只算基础 5 首
+        # 服务端明确返回「今日没有更多」：当天额外额度已用完。
+        # 未轮到的额外曲目**保持「跳过」**，不再自动算成「已提交」——
+        # 否则用户会看到 20/20，但实际上那几首并没有评过。
+        extra_all_done = bool(getattr(self._worker, "extra_all_done", False))
+        if status == "success" and extra_all_done:
+            # 服务端已确认今日额外额度用完：没轮到的额外曲目按今日完成计
+            # （和本地额度缓存一致；普通取消 / 单首失败不走这里）
             self._track_list.mark_extra_skipped_done()
+        if status == "success":
             try:
                 for row in self._track_list.rows_with_state("done"):
                     if row.group == "extra" and not row.score:
@@ -1088,6 +1111,9 @@ class TaskPage(QWidget):
                 head += f"，跳过 {skipped} 首"
             if notes:
                 head += f"，留下 {notes} 条批注"
+            if extra_all_done:
+                # 服务端说没有更多：跳过的额外曲目不是失败，是今天的额度用完了
+                head += "，今日额外额度已用完"
             summary = "成功，" + head
             self._set_status(head + "。", "successText")
             self._meter.set_state("success")

@@ -3,19 +3,22 @@ import time
 from typing import Callable, Optional
 import requests
 from core import CancelledError
+from core import scoring
 from core.utils.config import Config
 from core.utils.logger import Logger
 from .tasks.daily import DailyTask
 from .tasks.extra import ExtraTask
 from .rating_ledger import RatingLedger
-from .signer import RequestPacer
+from .quota_state import QuotaState
 class MusicPartnerBot:
     def __init__(self, config: Config, logger: Logger, session: requests.Session,
                  on_step: Optional[Callable[[str, str, float], None]] = None,
                  on_progress: Optional[Callable[[int, Optional[int], str, str], None]] = None,
                  cancel_event: Optional[threading.Event] = None,
                  on_note: Optional[Callable[[dict, str, str], None]] = None,
-                 on_works: Optional[Callable[[list], None]] = None):
+                 on_works: Optional[Callable[[list], None]] = None,
+                 quota_state: Optional[QuotaState] = None,
+                 local_submitted_count: int = 0):
         self.config = config
         self.logger = logger
         self.session = session
@@ -29,10 +32,16 @@ class MusicPartnerBot:
         self._current_step = ""
         #: 本地评分账本：同一任务重跑时不再提交已评过的歌
         self.ledger = RatingLedger()
-        #: 整轮共享的请求节奏：第一次真实请求不等待
-        self.pacer = RequestPacer()
+        #: 当天额外额度已用完的本地标记：命中就直接跳过额外阶段
+        self.quota_state = quota_state if quota_state is not None else QuotaState()
+        #: 本机今日曲目记录里已提交的条数（由界面层传入）：达到 基础+额外上限
+        #: 时同样直接跳过额外阶段，不再请求服务端。
+        self.local_submitted_count = int(local_submitted_count or 0)
         #: 当前账号 id（验证用户信息时拿到），账本按账号隔离
         self.account_id = ""
+        #: 服务端明确返回「今日没有更多」：当天额外额度已用完。
+        #: 界面用它决定未轮到的额外曲目是否按今日完成计。
+        self.extra_all_done = False
         #: 失败时的原始异常。run() 会把异常吞掉只返回 False，
         #: 但调用方（TaskWorker）需要异常本身来做失败原因分类。
         self.last_error: Optional[BaseException] = None
@@ -71,7 +80,6 @@ class MusicPartnerBot:
                 on_note=self.on_note,
                 ledger=self.ledger,
                 account=self.account_id,
-                pacer=self.pacer,
             )
             complete, task_data = daily_task._get_daily_tasks()
             self._remember_completed(task_data.get("id"),
@@ -89,11 +97,26 @@ class MusicPartnerBot:
                 on_works=self.on_works,
                 ledger=self.ledger,
                 account=self.account_id,
-                pacer=self.pacer,
             )
             base_works = list(task_data.get("works") or [])
             for item in base_works:
                 item["_group"] = "base"
+
+            # 先查本地，再决定额外评分要不要请求服务端：
+            # 1) 已缓存「今天这个任务额度用完」；
+            # 2) 本地账本已经确认收下「基础 + 额外上限」这么多首；
+            # 3) 本机今日曲目记录已经这么多首 submitted。
+            # 命中时只跳过**评分**，仍拉一次只读的额外清单用于显示完整曲目
+            # （不发评分请求、不等待）。
+            full = bool(self.config.get("full_extra_tasks", False))
+            extra_limit = 15 if full else 7
+            base_count = max(1, int(task_data.get("count") or 0))
+            ledger_done = self.ledger.count(self.account_id, task_data.get("id"))
+            local_complete = ledger_done >= base_count + extra_limit
+            history_complete = self.local_submitted_count >= base_count + extra_limit
+            quota_done = self.quota_state.exhausted(self.account_id, task_data.get("id"))
+            skip_extra = quota_done or local_complete or history_complete
+
             # 额外清单接口会把等待评分的基础任务也列出来：先告诉 ExtraTask
             # 哪些是基础任务，取清单时剔除，避免 20 首被裁成 15 首、额度重复计算
             extra_task.set_base_works(base_works)
@@ -116,7 +139,26 @@ class MusicPartnerBot:
 
             self._check_cancel()
             self._step("额外评分任务", "running")
-            extra_task.process_extra_tasks(task_data["id"])
+            if skip_extra:
+                # 本地命中：不再等待、不再发评分请求
+                if quota_done:
+                    self.logger.info("本机记录显示今日额外额度已用完，跳过额外评分")
+                elif local_complete:
+                    self.logger.info(
+                        f"本地评分账本显示今日已评满（{ledger_done} 首），跳过额外评分")
+                else:
+                    self.logger.info(
+                        f"本地曲目记录显示今日已评满（{self.local_submitted_count} 首），"
+                        f"跳过额外评分")
+                self.extra_all_done = True
+            else:
+                # 基础任务评完后额外清单才会放出下一批：基础阶段跑过时重新拉一次，
+                # 否则一轮只评到第一批（例如 15 首），用户还得再点一次执行才到 20 首
+                extra_task.process_extra_tasks(task_data["id"], refresh=not complete)
+                self.extra_all_done = bool(getattr(extra_task, "quota_exhausted", False))
+                if self.extra_all_done:
+                    # 记住「今天这个任务额度已用完」，下次重跑直接跳过
+                    self.quota_state.mark(self.account_id, task_data.get("id"))
             self._step("额外评分任务", "success")
             return True
 
@@ -156,8 +198,9 @@ class MusicPartnerBot:
         for task in tasks or []:
             try:
                 work = task.get("work") or {}
-                score = str(task.get("score") or "").strip()
-                # 有分数就说明已经评过，completed 标记可能滞后
+                # 用 clean_score：服务端可能给 4.0 / 0.0 / "null"，只有 1–5
+                # 的整档才算「已评过」，否则会把待评歌写进账本
+                score = scoring.clean_score(task.get("score"))
                 if work.get("id") is None or not score:
                     continue
                 self.ledger.mark(self.account_id, task_id, work.get("id"), score)

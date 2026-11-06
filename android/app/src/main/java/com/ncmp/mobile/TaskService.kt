@@ -39,6 +39,8 @@ class TaskService : Service() {
     private var wifiLock: WifiManager.WifiLock? = null
     private var historyMessage = ""
     private var historyDetail = ""
+    //: 本次执行是否已确认今日额外额度用完（用于收尾时把未轮到的额外行算今日完成）
+    private var lastExtraAllDone = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -64,6 +66,7 @@ class TaskService : Service() {
         TaskBus.running.value = true
         historyMessage = ""
         historyDetail = ""
+        lastExtraAllDone = false
         startForeground(NOTIF_ID, buildNotification("正在执行音乐合伙人任务…"))
         acquireLocks()
 
@@ -92,6 +95,12 @@ class TaskService : Service() {
 
         job = scope.launch {
             try {
+                // 先读本地历史：今天已经提交的曲目数；达到基础 + 额外上限时
+                // TaskRunner 会直接跳过额外阶段，不再请求服务端。
+                val localSubmittedCount = trackLog.load().count {
+                    it.day == com.ncmp.mobile.data.TrackLogStore.today() &&
+                        it.state == com.ncmp.mobile.data.STATE_SUBMITTED
+                }
                 val r = TaskRunner(
                     api = api,
                     config = cfg,
@@ -129,17 +138,25 @@ class TaskService : Service() {
                     },
                     onQueue = { items ->
                         val limit = if (cfg.fullExtraTasks) 15 else 7
-                        val baseNames = items
-                            .filter { it.group != "extra" }
-                            .map { it.work.name }
-                            .toSet()
-                        // 服务端清单 + 本机已提交记录一次摆好，再统一裁到每日上限，
-                        // 避免先出现 35/35 再跳回 20/20
+                        // 额外阶段再次摆清单时 items 只有额外曲目：把曲目表里
+                        // 已有的基础行也算进来，避免旧记录（没有 group）被误归为额外
+                        val baseNames = buildSet {
+                            items.filter { it.group != "extra" }
+                                .forEach { add(it.work.name) }
+                            TaskBus.tracks.value.filter { it.group == "base" }
+                                .forEach { add(it.song) }
+                        }
+                        // 服务端清单 + 本机记录一次摆好，再统一裁到每日上限，
+                        // 避免先出现 35/35 再跳回 20/20。
+                        // 跳过 / 失败的记录只在服务端仍列出这首歌时才采用，
+                        // 已经不在清单里的旧跳过行不再补回来。
                         TaskBus.seedQueue(items, limit, baseNames)
+                        val serverNames = items.map { it.work.name }.toSet()
                         TaskBus.seedRecords(
                             trackLog.load().filter {
                                 it.day == com.ncmp.mobile.data.TrackLogStore.today() &&
-                                    it.state == com.ncmp.mobile.data.STATE_SUBMITTED
+                                    (it.state == com.ncmp.mobile.data.STATE_SUBMITTED ||
+                                        it.song in serverNames)
                             },
                             limit,
                             baseNames,
@@ -172,6 +189,8 @@ class TaskService : Service() {
                         }
                     },
                     ledger = ledger,
+                    quotaStore = store,
+                    localSubmittedCount = localSubmittedCount,
                 )
                 runner = r
                 val result = r.run()
@@ -180,6 +199,7 @@ class TaskService : Service() {
                     is TaskResult.Success -> {
                         TaskBus.resultLabel.value = "任务完成"
                         TaskBus.resultIsError.value = false
+                        lastExtraAllDone = result.extraAllDone
                         // 用曲目表的实际行数：本机补回来的额外任务也算进去
                         val doneCount = TaskBus.tracks.value.count {
                             it.state == com.ncmp.mobile.data.TrackState.DONE
@@ -204,7 +224,7 @@ class TaskService : Service() {
                             historyMessage += "，留下 $noteCount 条批注"
                         }
                         if (result.extraAllDone) {
-                            historyMessage += "，额外任务今日已全部完成"
+                            historyMessage += "，今日额外额度已用完"
                         }
                     }
                     is TaskResult.Cancelled -> {
@@ -237,11 +257,12 @@ class TaskService : Service() {
                     TaskBus.resultLabel.value == "任务完成" -> "success"
                     else -> "failed"
                 }
-                TaskBus.settleQueue(outcome)
-                // 成功跑完后，把跳过的曲目也记进今日账本：服务端待评清单缩水后，
+                TaskBus.settleQueue(outcome, lastExtraAllDone)
+                // 成功跑完后把结果落进今日账本：服务端待评清单缩水后，
                 // 下次打开仍能补回曲目表，不会只剩基础那几首
                 if (TaskBus.resultLabel.value == "任务完成") {
-                    // 跳过的额外曲目按“已评过”算，落进本地记录，下次仍是 20/20
+                    // 服务端标成已提交、但没给分数的额外曲目：记下来，
+                    // 下次打开仍按「已提交」显示（没有分数，不参与口味曲线）
                     TaskBus.tracks.value
                         .filter {
                             it.state == com.ncmp.mobile.data.TrackState.DONE &&
@@ -255,6 +276,8 @@ class TaskService : Service() {
                                 group = "extra",
                             )
                         }
+                    // 跳过就是跳过：落成 skipped，下次打开两端都显示「跳过」，
+                    // 不能写成 submitted 冒充已评过
                     TaskBus.tracks.value
                         .filter { it.state == com.ncmp.mobile.data.TrackState.SKIPPED }
                         .forEach {

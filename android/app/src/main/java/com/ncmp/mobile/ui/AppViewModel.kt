@@ -164,6 +164,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     limit,
                     baseNames,
                 )
+                // 先查本地：今天这个 taskId 已确认过「额度用完」时，服务端仍标
+                // 待评的额外曲目直接显示为今日已完成（和桌面端一致）。
+                if (store.isQuotaExhausted(today, daily.id.toString(), api.userId)) {
+                    TaskBus.markExtraPendingDone()
+                }
                 val ledger = com.ncmp.mobile.data.RatingLedgerStore(getApplication())
                 items.filter { it.completed && it.score.isNotBlank() }.forEach { item ->
                     trackLog.record(

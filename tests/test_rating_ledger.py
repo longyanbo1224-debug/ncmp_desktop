@@ -67,6 +67,23 @@ class RatingLedgerTest(unittest.TestCase):
         self.assertIsNone(ledger.score("user", "task", 1))
         self.assertEqual(ledger.score("user", "task", 2), "4")
 
+    def test_float_score_is_normalized(self):
+        """服务端把档位返回成 4.0 时，仍要记成 4 并在重跑时命中。"""
+        ledger = RatingLedger(self.path)
+        ledger.mark("user", "task", 1, "4.0")
+
+        self.assertEqual(ledger.score("user", "task", 1), "4")
+
+    def test_count_returns_entries_for_task(self):
+        ledger = RatingLedger(self.path)
+        ledger.mark("user", "task", 1, "4")
+        ledger.mark("user", "task", 2, "3")
+        ledger.mark("user", "other", 3, "4")
+
+        self.assertEqual(ledger.count("user", "task"), 2)
+        self.assertEqual(ledger.count("user", "other"), 1)
+        self.assertEqual(ledger.count("other", "task"), 0)
+
     def test_blank_work_id_is_never_marked(self):
         """缺 id 的作品共用一个空键，会让所有歌都被误判成已评过。"""
         ledger = RatingLedger(self.path)

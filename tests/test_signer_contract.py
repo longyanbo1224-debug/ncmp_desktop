@@ -5,7 +5,7 @@
 """
 import unittest
 
-from core.signer import RequestPacer, Signer
+from core.signer import NoMoreWorksError, Signer
 
 _WORK = {"id": 1, "name": "夜航西飞", "authorName": "某乐队"}
 
@@ -69,9 +69,9 @@ class _Logger:
         return lambda *args, **kwargs: None
 
 
-def _signer(payload, session=None, ledger=None, config=None, pacer=None) -> Signer:
+def _signer(payload, session=None, ledger=None, config=None) -> Signer:
     return Signer(session or _Session(payload), "task", _Logger(), config or _Config(),
-                  ledger=ledger, pacer=pacer)
+                  ledger=ledger)
 
 
 class TestSignReturn(unittest.TestCase):
@@ -84,6 +84,13 @@ class TestSignReturn(unittest.TestCase):
         """「资源状态异常」= 服务端没评上，必须返回 False 且不推进计数。"""
         signer = _signer({"code": 405, "message": "资源状态异常"})
         self.assertFalse(signer.sign(_WORK))
+        self.assertEqual(signer.done, 0)
+
+    def test_no_more_is_completion_signal(self):
+        """405「今日没有更多」是完成信号，用独立异常安静地上抛。"""
+        signer = _signer({"code": 405, "message": "今日没有更多可评定歌曲啦"})
+        with self.assertRaises(NoMoreWorksError):
+            signer.sign(_WORK)
         self.assertEqual(signer.done, 0)
 
     def test_other_error_raises(self):
@@ -125,17 +132,28 @@ class TestSignReturn(unittest.TestCase):
         url = session.gets[0][1].get("url") or session.gets[0][0][0]
         self.assertIn("extra/wait/evaluate/work/list", url)
 
-    def test_first_request_does_not_wait(self):
-        """整轮第一次真实请求直接发；第二次起才等待。"""
+    def test_every_request_waits_including_first(self):
+        """每次真实请求前都等待（含第一次），与上游 ncmp 一致。
+
+        人工评分要先听够一段时间才能点提交；只有账本命中 / 跳过的歌不等待。
+        """
         config = _CountingConfig()
-        pacer = RequestPacer()
-        signer = _signer({"code": 200}, config=config, pacer=pacer)
+        signer = _signer({"code": 200}, config=config)
         second = {"id": 2, "name": "另一首", "authorName": "某乐队"}
 
         self.assertTrue(signer.sign(_WORK))
-        self.assertEqual(config.waits, 0)
-        self.assertTrue(signer.sign(second))
         self.assertEqual(config.waits, 1)
+        self.assertTrue(signer.sign(second))
+        self.assertEqual(config.waits, 2)
+
+    def test_ledger_hit_does_not_wait(self):
+        """已评过、不需要发请求的歌不该消耗等待。"""
+        config = _CountingConfig()
+        ledger = _Ledger({"1": "4"})
+        signer = _signer(None, ledger=ledger, config=config)
+
+        self.assertTrue(signer.sign(_WORK))
+        self.assertEqual(config.waits, 0)
 
 
 if __name__ == "__main__":

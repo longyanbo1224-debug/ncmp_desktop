@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from app.app_config import _default_config_path
+# 分数归一化放在 core：评分判定、账本、曲目表、口味曲线共用同一条规则
+from core.scoring import clean_score
 
 #: 保留多少天的明细（一年多一点，和打卡格子图对齐）
 MAX_DAYS = 400
@@ -54,7 +56,8 @@ class TrackLog:
         entry = {
             "song": song,
             "artist": str(artist or "").strip(),
-            "score": str(score or "").strip(),
+            # 服务端可能给 "4.0" 这种浮点字符串：归一化成 "4" 再落盘
+            "score": clean_score(score),
             "note": str(note or "").strip(),
             "state": state if state in STATE_LABEL else STATE_SUBMITTED,
             # base / extra：额外清单可能重复列出基础任务，靠它避免把基础行算进额外上限
@@ -67,12 +70,13 @@ class TrackLog:
                 if not entry["note"]:
                     entry["note"] = str(existing.get("note") or "")
                 if not entry["score"]:
-                    entry["score"] = str(existing.get("score") or "")
+                    entry["score"] = clean_score(existing.get("score"))
                 if not entry["artist"]:
                     entry["artist"] = str(existing.get("artist") or "")
                 if not entry["group"]:
                     entry["group"] = str(existing.get("group") or "")
-                # 已经提交过的，不能被后来的「跳过」覆盖
+                # 已经提交过的，不能被后来的「跳过」覆盖：
+                # 重复执行时按历史展示「已完成」（1.2.4 口径）。
                 if (existing.get("state", STATE_SUBMITTED) == STATE_SUBMITTED
                         and entry["state"] != STATE_SUBMITTED):
                     entry["state"] = STATE_SUBMITTED
@@ -108,6 +112,8 @@ class TrackLog:
                     continue
                 item = dict(entry)
                 item["day"] = day
+                # 旧账本里可能留着 "4.0"：展示与统计统一按整档处理
+                item["score"] = clean_score(item.get("score"))
                 result.append(item)
                 if len(result) >= limit:
                     return result
@@ -131,12 +137,12 @@ class TrackLog:
                 total += 1
                 if entry.get("note"):
                     notes += 1
-                try:
-                    value = int(str(entry.get("score") or "").strip())
-                except (TypeError, ValueError):
+                # 旧账本 / 服务端可能给 "4.0"：先归一化，否则永远归不进档位，
+                # 口味曲线会只显示最近一次（分数是整数）的记录
+                score = clean_score(entry.get("score"))
+                if not score:
                     continue
-                if not 1 <= value <= 5:
-                    continue
+                value = int(score)
                 tiers[str(value)] = tiers.get(str(value), 0) + 1
                 monthly.setdefault(month, []).append(value)
         medians = {month: _median(values) for month, values in monthly.items()}
@@ -168,14 +174,15 @@ class TrackLog:
         except ValueError:
             stamp = day
         lines = [f"# {stamp} · 音乐合伙人", ""]
-        tiers = [e.get("score") for e in entries if e.get("score")]
+        tiers = [clean_score(e.get("score")) for e in entries
+                 if clean_score(e.get("score"))]
         head = f"共 {len(entries)} 首"
         if tiers:
             head += f"，档位 {' / '.join(str(t) for t in tiers)}"
         lines.append(head)
         lines.append("")
         for index, entry in enumerate(entries, 1):
-            score = entry.get("score") or "–"
+            score = clean_score(entry.get("score")) or "–"
             artist = entry.get("artist") or ""
             name = entry.get("song") or ""
             title = f"{index:02d}. {name}"

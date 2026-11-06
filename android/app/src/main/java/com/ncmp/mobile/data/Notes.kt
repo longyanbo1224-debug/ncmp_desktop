@@ -260,7 +260,7 @@ object Notes {
     fun generate(
         work: Work,
         score: String,
-        enabled: Boolean = true,
+        enabled: Boolean = false,
         voice: String = DEFAULT_VOICE,
         length: String = DEFAULT_LENGTH,
         maxChars: Int = NoteGenerator.DEFAULT_MAX_CHARS,
@@ -287,7 +287,7 @@ object Notes {
  * - **不重复**：同一次运行里尽量不和已经用过的句子撞车；撞了换下一个 salt 重摇。
  */
 class NoteGenerator(
-    private val enabled: Boolean = true,
+    private val enabled: Boolean = false,
     private val voice: String = Notes.DEFAULT_VOICE,
     private val length: String = Notes.DEFAULT_LENGTH,
     private val maxChars: Int = DEFAULT_MAX_CHARS,
@@ -454,7 +454,7 @@ class NoteGenerator(
 fun buildNote(
     work: Work,
     score: String,
-    enabled: Boolean = true,
+    enabled: Boolean = false,
     voice: String = Notes.DEFAULT_VOICE,
     length: String = Notes.DEFAULT_LENGTH,
     maxChars: Int = NoteGenerator.DEFAULT_MAX_CHARS,

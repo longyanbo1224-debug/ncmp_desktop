@@ -36,12 +36,18 @@ const val STATE_FAILED = "failed"
  *
  * 不能只判断 `isNotBlank()`：Android 的 `optString` 会把 `"score": null`
  * 读成字符串 `"null"`，把它当成「已评过」会让整天一首都不评。
+ *
+ * 服务端有时把整数档位返回成浮点数（`4.0` / `"4.0"`）：直接 `toIntOrNull()`
+ * 会失败，曲目按「已提交」记着却永远进不了口味曲线的档位——表现为
+ * 「昨天评的歌没累加进来」。这里先按数字解析，只保留整数档。
  */
 fun normalizeScore(raw: String?): String {
     val text = raw?.trim().orEmpty()
     if (text.isEmpty() || text.equals("null", ignoreCase = true)) return ""
-    val value = text.toIntOrNull() ?: return ""
-    return if (value in 1..5) value.toString() else ""
+    val value = text.toDoubleOrNull() ?: return ""
+    if (!value.isFinite() || value % 1.0 != 0.0) return ""
+    val tier = value.toInt()
+    return if (tier in 1..5) tier.toString() else ""
 }
 
 /** 记录页顶部的三个数 + 口味曲线要的档位分布。 */
@@ -97,7 +103,8 @@ class TrackLogStore(context: Context) {
             score = normalizeScore(score).ifBlank { normalizeScore(old?.score) },
             // 后一次没写批注，不等于要抹掉前一次写的
             note = note.ifBlank { old?.note ?: "" },
-            // 已经提交过的，不能被后来的「跳过」覆盖
+            // 已经提交过的，不能被后来的「跳过」覆盖：
+            // 重复执行时按历史展示「已完成」（1.2.4 口径）。
             state = if (old?.state == STATE_SUBMITTED) STATE_SUBMITTED else state,
             group = group.ifBlank { old?.group ?: "" },
         )

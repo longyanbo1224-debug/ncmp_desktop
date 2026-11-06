@@ -13,10 +13,14 @@ from core.notes.llm import generate_with_llm
 
 
 class _Cfg:
-    """最小配置替身：只需 get(key, default)。"""
+    """最小配置替身：只需 get(key, default)。
+
+    批注现在默认关闭（需用户显式开启），生成相关的用例统一在替身里打开，
+    默认关闭本身由 ``test_disabled_by_default`` 单独覆盖。
+    """
 
     def __init__(self, **kwargs):
-        self._data = kwargs
+        self._data = {"note_enabled": True, **kwargs}
 
     def get(self, key, default=None):
         return self._data.get(key, default)
@@ -117,6 +121,11 @@ class TestSwitches(unittest.TestCase):
         self.assertEqual(NoteGenerator(_Cfg(note_enabled=False)).generate(_WORK, "4"), "")
 
     def test_enabled_by_default(self):
+        """共享 core 默认开启（旧行为 / 云端不变）；本地桌面端在设置层默认关闭。"""
+        self.assertTrue(NoteGenerator(None).generate(_WORK, "4"))
+        self.assertTrue(NoteGenerator(_Cfg()).generate(_WORK, "4"))
+
+    def test_enabled_when_configured(self):
         self.assertTrue(NoteGenerator(_Cfg()).generate(_WORK, "4"))
 
     def test_llm_without_config_falls_back_to_template(self):

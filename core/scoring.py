@@ -27,6 +27,29 @@ DEFAULT_STRATEGY = 3
 _NAME_PATTERN = re.compile(r".*[a-zA-Z].*")
 
 
+def clean_score(score) -> str:
+    """把服务端 / 旧账本里的分数归一化成 1–5 的整档字符串；无效返回空串。
+
+    服务端偶尔把整数档位返回成浮点数（``4.0``）：直接 ``int()`` 会失败，
+    曲目照样按「已提交」记着，却永远进不了口味曲线的档位——表现为
+    「昨天评的歌没累加进来」。这里先按数字解析，只保留整数档。
+
+    空串、``None``、JSON ``null``、0、非整数（如 4.5）、nan/inf 都算
+    「没有分数」。两端（评分判定 / 账本 / 曲目表 / 口味曲线）共用这一条规则。
+    """
+    text = str(score if score is not None else "").strip()
+    if not text or text.lower() == "null":
+        return ""
+    try:
+        value = float(text)
+        tier = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return ""
+    if value != tier or not 1 <= tier <= 5:
+        return ""
+    return str(tier)
+
+
 def has_latin(work: dict) -> bool:
     """歌名或歌手名里是否含拉丁字母。"""
     try:

@@ -371,6 +371,9 @@ class NeteaseApi {
         val json = try {
             // 合伙人接口在 mp 域下：带和额外任务列表同一个 Referer
             weapiPost(PARTNER_HOME_URL, JSONObject(), referer = "https://mp.music.163.com/")
+        } catch (e: CancellationException) {
+            // 取消任务要立刻停：不能被「查不到就返回空」吞掉
+            throw e
         } catch (e: Exception) {
             debugLogger?.invoke("合伙人积分查询失败：${e.message}")
             return emptyMap()
@@ -477,8 +480,9 @@ class NeteaseApi {
         val value = item.opt("score")
         return when (value) {
             null, JSONObject.NULL -> ""
-            is String -> if (value.equals("null", ignoreCase = true)) "" else value.trim()
-            is Number -> if (value.toDouble() == 0.0) "" else value.toString()
+            is String -> normalizeScore(value)
+            // 服务端可能把整数档位返回成 4.0：交给 normalizeScore 统一成 "4"
+            is Number -> normalizeScore(value.toString())
             // 其他形状（对象 / 数组）不可能是分数，按「没有分数」处理
             else -> ""
         }

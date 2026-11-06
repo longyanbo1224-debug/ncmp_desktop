@@ -65,7 +65,12 @@ data class TrackItem(
     val note: String = "",
     val state: String = TrackState.PENDING,
     val group: String = "",
-)
+    //: 曲目表内部去重键：默认歌名；同名不同作品时用「歌名|歌手」区分
+    val key: String = "",
+) {
+    /** 实际使用的去重键（旧数据 key 为空时退回歌名）。 */
+    val trackKey: String get() = key.ifBlank { song }
+}
 
 data class DailyTasks(
     val id: Any,
@@ -82,8 +87,8 @@ data class TaskConfig(
     val waitMinSeconds: Double = 15.0,
     val waitMaxSeconds: Double = 20.0,
     val fullExtraTasks: Boolean = true,
-    // 批注（乐评文案）：随评分一起提交到 comment 字段
-    val noteEnabled: Boolean = true,
+    // 批注（乐评文案）：随评分一起提交到 comment 字段；默认关闭，需用户显式开启
+    val noteEnabled: Boolean = false,
     /** template（默认）| llm。手机端没有 LLM，传 llm 也按 template 处理。 */
     val noteSource: String = "template",
     val noteVoice: String = Notes.DEFAULT_VOICE, // restrained | warm | brief

@@ -110,6 +110,7 @@ import com.ncmp.mobile.data.Notes
 import com.ncmp.mobile.data.PartnerTitles
 import com.ncmp.mobile.data.TrackItem
 import com.ncmp.mobile.data.TrackState
+import com.ncmp.mobile.data.normalizeScore
 import com.ncmp.mobile.data.gridDays
 import com.ncmp.mobile.data.groupDays
 import com.ncmp.mobile.data.streakDays
@@ -637,7 +638,7 @@ private fun todayLine(): String {
 }
 
 /** 档位标 4⁄5 的颜色：和桌面端同一条规则（设计文档 §4.1）。 */
-private fun tierColor(score: String): Color = when (score.trim().toIntOrNull() ?: 0) {
+private fun tierColor(score: String): Color = when (normalizeScore(score).toIntOrNull() ?: 0) {
     5, 4 -> NCMP.Ink
     3 -> NCMP.Muted
     else -> NCMP.Red
@@ -744,15 +745,16 @@ private fun TrackRow(index: Int, item: TrackItem) {
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                if (item.score.isNotBlank()) {
+                val tier = normalizeScore(item.score)
+                if (tier.isNotBlank()) {
                     Spacer(Modifier.width(8.dp))
                     // 档位标 4⁄5：全应用唯一的"分数表达"，用分数斜线不用 /
                     Text(
-                        "${item.score}⁄5",
+                        "$tier⁄5",
                         fontFamily = FontFamily.Serif,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = tierColor(item.score),
+                        color = tierColor(tier),
                     )
                 }
                 Spacer(Modifier.width(10.dp))

@@ -111,6 +111,19 @@ object TaskBus {
         tracks.value = if (extraLimit > 0) capList(grouped, extraLimit) else grouped
     }
 
+    private fun itemKey(song: String, artist: String): String =
+        if (artist.isBlank()) song else "$song|$artist"
+
+    private fun indexOfTrack(
+        cur: List<TrackItem>, song: String, artist: String,
+    ): Int {
+        val wanted = itemKey(song, artist)
+        val exact = cur.indexOfFirst { it.trackKey == wanted }
+        if (exact >= 0) return exact
+        // 旧数据 / 进度回调没有歌手时：退回按歌名匹配尚未确定键的行
+        return cur.indexOfFirst { it.song == song && it.key.isBlank() }
+    }
+
     private fun addItems(cur: MutableList<TrackItem>, items: List<WorkItem>) {
         for (item in items) {
             val work = item.work
@@ -124,7 +137,8 @@ object TaskBus {
             ) {
                 knownGroups[work.name] = incomingGroup
             }
-            val index = cur.indexOfFirst { it.song == work.name }
+            val index = indexOfTrack(cur, work.name, work.authorName)
+            val trackKey = itemKey(work.name, work.authorName)
             if (index < 0) {
                 cur.add(
                     TrackItem(
@@ -133,6 +147,7 @@ object TaskBus {
                         score = item.score,
                         state = if (item.completed) TrackState.DONE else TrackState.PENDING,
                         group = incomingGroup,
+                        key = trackKey,
                     ),
                 )
             } else if (item.completed) {
@@ -146,7 +161,9 @@ object TaskBus {
                 cur[index] = old.copy(
                     state = TrackState.DONE,
                     score = old.score.ifBlank { item.score },
+                    artist = old.artist.ifBlank { work.authorName },
                     group = group,
+                    key = old.trackKey,
                 )
             }
         }
@@ -166,7 +183,8 @@ object TaskBus {
                 STATE_FAILED -> TrackState.FAILED
                 else -> TrackState.PENDING
             }
-            val index = cur.indexOfFirst { it.song == record.song }
+            val index = indexOfTrack(cur, record.song, record.artist)
+            val trackKey = itemKey(record.song, record.artist)
             if (index < 0) {
                 cur.add(
                     TrackItem(
@@ -176,15 +194,16 @@ object TaskBus {
                         note = record.note,
                         state = state,
                         group = record.group,
+                        key = trackKey,
                     ),
                 )
             } else if (record.state == STATE_SUBMITTED) {
-                // 本机已提交、服务端还没标完成的，保留「已提交」；不反向降级。
-                // 但只有**有效分数**才说明这次评分真的提交过：旧版本可能把服务端的
-                // null 分数写成本地记录，那种行不能把服务端的「待评」升级成「已提交」。
+                // 本机记录为 submitted 就按「已提交」展示（1.2.4 的历史口径）：
+                // 旧版本 / 额度用完时可能没有分数，但历史已经确认这天评过。
+                // 只有 skipped / failed 且服务端没标完成时才降级。
                 val old = cur[index]
                 val recordScore = normalizeScore(record.score)
-                if (old.state == TrackState.PENDING && recordScore.isNotBlank()) {
+                if (old.state == TrackState.PENDING) {
                     val group = when {
                         old.group == "base" -> "base"
                         record.group.isNotBlank() -> record.group
@@ -194,6 +213,23 @@ object TaskBus {
                         state = TrackState.DONE,
                         score = old.score.ifBlank { recordScore },
                         note = old.note.ifBlank { record.note },
+                        artist = old.artist.ifBlank { record.artist },
+                        group = group,
+                    )
+                }
+            } else if (record.state == STATE_SKIPPED || record.state == STATE_FAILED) {
+                // 本机明确记过「跳过 / 失败」的，服务端若仍标待评，按本机状态显示。
+                // 之前这里只处理 submitted，导致跑完后一刷新又回到「待评」，
+                // 和桌面端的「跳过」对不上。
+                val old = cur[index]
+                if (old.state == TrackState.PENDING) {
+                    val group = when {
+                        old.group == "base" -> "base"
+                        record.group.isNotBlank() -> record.group
+                        else -> old.group
+                    }
+                    cur[index] = old.copy(
+                        state = state,
                         artist = old.artist.ifBlank { record.artist },
                         group = group,
                     )
@@ -231,9 +267,9 @@ object TaskBus {
         val keep = extras
             .sortedBy { if (it.state == TrackState.DONE) 0 else 1 }
             .take(extraLimit)
-            .map { it.song }
+            .map { it.trackKey }
             .toSet()
-        return all.filter { it.group != "extra" || it.song in keep }
+        return all.filter { it.group != "extra" || it.trackKey in keep }
     }
 
     /** 记一首已评分的曲目（同一首歌只保留一行，批注后到就补上去）。 */
@@ -242,7 +278,16 @@ object TaskBus {
                  extraLimit: Int = 0) {
         if (song.isBlank()) return
         val cur = tracks.value
-        val index = cur.indexOfFirst { it.song == song }
+        // 进度 / 批注回调只带歌名：同名多作品按「先待评 / 先无批注」匹配
+        val index = if (note.isNotBlank()) {
+            cur.indexOfFirst { it.song == song && it.note.isBlank() }
+                .takeIf { it >= 0 }
+                ?: cur.indexOfFirst { it.song == song }
+        } else {
+            cur.indexOfFirst { it.song == song && it.state != TrackState.DONE }
+                .takeIf { it >= 0 }
+                ?: cur.indexOfFirst { it.song == song }
+        }
         val resolvedGroup = group.ifBlank {
             knownGroups[song] ?: (if (index >= 0) cur[index].group else "")
         }
@@ -253,10 +298,12 @@ object TaskBus {
                 note = note.ifBlank { cur[index].note },
                 state = TrackState.DONE,
                 group = resolvedGroup,
+                key = cur[index].trackKey,
             )
         } else {
             TrackItem(song = song, artist = artist, score = score, note = note,
-                state = TrackState.DONE, group = resolvedGroup)
+                state = TrackState.DONE, group = resolvedGroup,
+                key = itemKey(song, artist))
         }
         val next = if (index >= 0) {
             cur.toMutableList().also { it[index] = item }
@@ -270,7 +317,11 @@ object TaskBus {
     fun setState(work: Work, state: String) {
         if (work.name.isBlank()) return
         val cur = tracks.value
-        val index = cur.indexOfFirst { it.song == work.name }
+        val wanted = itemKey(work.name, work.authorName)
+        val index = cur.indexOfFirst { it.trackKey == wanted }
+            .takeIf { it >= 0 }
+            ?: cur.indexOfFirst { it.song == work.name && it.state == TrackState.PENDING }
+            ?: cur.indexOfFirst { it.song == work.name }
         // 已被每日上限裁掉的行不再补回来，否则会出现 35/35、45/45 的闪烁
         if (index < 0) return
         val item = cur[index].copy(
@@ -284,33 +335,47 @@ object TaskBus {
     fun noteCount(): Int = tracks.value.count { it.note.isNotBlank() }
 
     /**
+     * 今日额外额度已用完（本地缓存命中）：把仍挂着「待评」的额外行显示为已完成。
+     *
+     * 只用于「服务端明确说过今日没有更多」或本地已缓存该结论的场景；
+     * 普通取消 / 单首失败留下的「跳过」不会被算成完成。
+     */
+    fun markExtraPendingDone() {
+        tracks.value = tracks.value.map { item ->
+            if (item.group == "extra" &&
+                (item.state == TrackState.PENDING || item.state == TrackState.SKIPPED)
+            ) {
+                item.copy(state = TrackState.DONE)
+            } else {
+                item
+            }
+        }
+    }
+
+    /**
      * 一次执行结束时的收尾：把没跑完的行定下来。
      *
-     * 之前的问题：今天已经评过歌了，点执行只跑完第一首就结束，但曲目表里
-     * 第一首一直显示"评分中"、下面全挂着"待评"——看着像卡死。
-     *
-     * 规则按本次结果区分：
-     * - 成功：额外任务没轮到的行按「已提交」算——额外曲目通常是服务端早就
-     *   评过、只是待评清单没同步，这样今日计数才对得上 20 首
-     * - 取消 / 失败：**绝不能**把没评到的行算成「已提交」。用户评到第 4 首
-     *   点取消，第 5 首及以后都应该是「跳过」，否则界面会谎报评了 20 首
+     * 规则：
+     * - 服务端确认今日额外额度用完（[extraAllDone]）：没轮到的额外行按今日完成计，
+     *   和 1.2.4 的记录展示一致；摘要会注明「今日额外额度已用完」。
+     * - 普通成功 / 取消 / 失败：没轮到的行记「跳过」，绝不冒充「已提交」。
+     * - 评分中没走完的行：失败 → 失败；其余 → 跳过。
      *
      * @param outcome "success" / "cancelled" / "failed"
+     * @param extraAllDone 服务端是否明确返回过「今日没有更多」或本地额度缓存命中
      */
-    fun settleQueue(outcome: String) {
-        val success = outcome == "success"
+    fun settleQueue(outcome: String, extraAllDone: Boolean = false) {
         val failed = outcome == "failed"
         tracks.value = tracks.value.map { item ->
-            val extraDone = success && item.group == "extra"
+            val quotaDone = extraAllDone && item.group == "extra"
             when (item.state) {
-                TrackState.RUNNING ->
-                    item.copy(state = when {
-                        failed -> TrackState.FAILED
-                        extraDone -> TrackState.DONE
-                        else -> TrackState.SKIPPED
-                    })
-                TrackState.PENDING ->
-                    item.copy(state = if (extraDone) TrackState.DONE else TrackState.SKIPPED)
+                TrackState.RUNNING -> item.copy(state = when {
+                    quotaDone -> TrackState.DONE
+                    failed -> TrackState.FAILED
+                    else -> TrackState.SKIPPED
+                })
+                TrackState.PENDING, TrackState.SKIPPED ->
+                    item.copy(state = if (quotaDone) TrackState.DONE else TrackState.SKIPPED)
                 else -> item
             }
         }

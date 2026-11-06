@@ -10,7 +10,8 @@
 
 配置项（``Config`` / ``setting.json``）::
 
-    note_enabled    bool    是否随评分提交批注，默认 True
+    note_enabled    bool    是否随评分提交批注；共享 core 默认 True，
+                            本地桌面端在设置层默认 False
     note_source     str     "template"（默认）或 "llm"
     note_max_chars  int     批注长度上限，默认 80
 """
@@ -86,6 +87,8 @@ class NoteGenerator:
 
     @property
     def enabled(self) -> bool:
+        # 共享 core 保持默认开启；本地桌面端的「默认关闭」在设置层落实，
+        # 不影响云端 / 旧版行为。
         return bool(self._get("note_enabled", True))
 
     @property

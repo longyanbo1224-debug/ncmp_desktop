@@ -78,6 +78,9 @@ class AppConfig:
         # 补跑失败时如果不记这一笔，60 秒心跳会每分钟重试一次直到截止时间，
         # 那就是个重试风暴——正好是最重的风控特征。
         "last_catchup_date": "",
+        # 批注默认关闭的一次性迁移标记：旧版本默认开启，升级后强制关一次，
+        # 之后完全尊重用户在设置页保存的选择。
+        "note_default_off_migrated": False,
         # 邮件通知开关（默认勾选；与 core.utils.config._apply_defaults 对齐）
         "notify_on_task_done": True,
         "notify_on_cookie_expired": True,

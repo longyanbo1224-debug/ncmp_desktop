@@ -2,10 +2,27 @@ import json
 import random
 from typing import Dict, List, Tuple, Optional
 from core import CancelledError
-from ..signer import Signer
+from core.scoring import clean_score
+from ..signer import NoMoreWorksError, Signer
+
+
+def _work_key(work: Dict) -> str:
+    """本轮去重用的作品键：优先 work id，缺 id 时退到歌名。
+
+    不能直接 ``str(work.get("id"))``：缺 id 的作品会共用 ``"None"`` 这个键，
+    评上一首后其余缺 id 的歌都会被当成「已评上」跳过。歌名在同一天的歌单里
+    不会重复（曲目表本身也按歌名去重）。
+    """
+    work_id = str(work.get("id") or "").strip()
+    if work_id and work_id.lower() not in ("none", "null"):
+        return work_id
+    name = str(work.get("name") or "").strip()
+    return f"name:{name}" if name else ""
+
+
 class ExtraTask:
     def __init__(self, session, logger, config, on_progress=None, cancel_event=None,
-                 on_note=None, on_works=None, ledger=None, account="", pacer=None):
+                 on_note=None, on_works=None, ledger=None, account=""):
         self.session = session
         self.logger = logger
         self.config = config
@@ -18,8 +35,6 @@ class ExtraTask:
         # 本地评分账本与账号：重跑时跳过已确认收下的评分
         self.ledger = ledger
         self.account = account
-        # 整轮共享的请求节奏：第一次真实请求不等待
-        self.pacer = pacer
         self.api = {
             "extra_list": "https://interface.music.163.com/api/music/partner/extra/wait/evaluate/work/list",
             "report_listen": "https://interface.music.163.com/weapi/partner/resource/interact/report"
@@ -27,6 +42,8 @@ class ExtraTask:
         self.signer = Signer(session, "", logger, config)  # task_id 为空字符串，因为上报听歌不需要
         #: 预取结果。界面要一开始就看到今天全部曲目，评分阶段复用这份，避免重复请求。
         self._prefetched = None
+        #: 服务端明确返回「今日没有更多」：当天额度已用完，不是评分失败。
+        self.quota_exhausted = False
         #: 当天基础任务的 work id / 歌名。额外清单接口会把等待评分的作品都列出来，
         #: 其中包括基础任务那 5 首——它们由基础阶段负责，不能再计入额外的 15 首额度。
         self.base_ids = set()
@@ -51,7 +68,7 @@ class ExtraTask:
                 continue
             work_id = str(work.get("id") or "").strip()
             name = str(work.get("name") or "").strip()
-            if work_id and work_id.lower() != "none":
+            if work_id and work_id.lower() not in ("none", "null"):
                 ids.add(work_id)
             if name:
                 names.add(name)
@@ -65,15 +82,17 @@ class ExtraTask:
             return False
         work_id = str(work.get("id") or "").strip()
         name = str(work.get("name") or "").strip()
-        if work_id and work_id.lower() != "none" and work_id in self.base_ids:
+        if (work_id and work_id.lower() not in ("none", "null")
+                and work_id in self.base_ids):
             return True
         return bool(name and name in self.base_names)
 
     def preload(self) -> None:
         """提前拉一次额外任务清单，让界面一开始就看到全部曲目。
 
-        结果留给 :meth:`process_extra_tasks` 复用，不会重复请求；
-        失败不影响主流程——评分阶段会自己再拉一次。
+        基础阶段评过之后 ``process_extra_tasks(refresh=True)`` 会重新拉一次
+        （那时服务端才放出下一批）；这份结果留作重新拉取失败时的回退，
+        也用于 ``daily.complete`` 已为真、没有基础阶段的场景。
         """
         try:
             self.last_all = []
@@ -86,20 +105,34 @@ class ExtraTask:
             except Exception:
                 pass
 
-    def process_extra_tasks(self, task_id: str) -> None:
+    def process_extra_tasks(self, task_id: str, refresh: bool = False) -> None:
         """处理额外的评分任务。
 
         每轮结束后重新拉一次任务列表：单首失败被跳过时，服务端仍把它标成
         未完成，补跑这一轮就能把漏掉的补上，用户不必再手动点一次执行。
+
+        :param refresh: 忽略执行前预取的清单，重新拉一次。额外接口是分批
+            返回的：基础任务评完后才会放出下一批，沿用旧预取会让一轮只评到
+            15 首，用户还得再点一次执行才能到 20 首。
         """
         try:
+            self.quota_exhausted = False
             # getattr：子类/测试替身可能不调用 super().__init__
-            prefetched = getattr(self, "_prefetched", None)
+            stale = getattr(self, "_prefetched", None)
+            # 不管用不用，都清掉预取：它可能已经是基础任务评完之前的旧批次
+            self._prefetched = None
+            prefetched = None if refresh else stale
             if prefetched is not None:
                 extra_tasks, completed_count = prefetched
-                self._prefetched = None
             else:
-                extra_tasks, completed_count = self._get_extra_tasks()
+                try:
+                    extra_tasks, completed_count = self._get_extra_tasks()
+                except Exception:
+                    if stale is None:
+                        raise
+                    # 重新拉取失败时宁可沿用旧批次，也别让额外阶段整个失败
+                    self.logger.warning("重新拉取额外任务失败，沿用执行前的清单")
+                    extra_tasks, completed_count = stale
             self._remember_completed(task_id, getattr(self, "last_all", []) or [])
             full = bool(self.config.get('full_extra_tasks', False))
             limit = self._DAILY_MAX if full else 7
@@ -107,18 +140,21 @@ class ExtraTask:
             max_new = max(0, limit - extra_before)
             target = min(len(extra_tasks), max_new)
 
+            if not extra_tasks:
+                self.logger.info(f"额外评定完成数: {completed_count}")
+                return
+
             # 如果已经完成任务，直接返回
             if target <= 0:
                 self.logger.info(f"今日已完成 {completed_count} 个额外评分任务，已达到每日上限")
-                return
-
-            if not extra_tasks:
-                self.logger.info(f"额外评定完成数: {completed_count}")
                 return
             self.logger.info(f"发现 {len(extra_tasks)} 个待额外评定任务")
 
             # 跨轮累计的成功数：进度条只前进，补跑时不会倒回 0
             success_count = 0
+            #: 本轮已评上的作品 id：补跑重新拉清单时服务端标记可能滞后，
+            #: 同一首会原样返回；不剔除就会把它再算一次成功
+            done_ids: set = set()
             #: 服务端拒绝（资源状态异常）而被跳过的歌名，最后要告诉用户缺哪首
             skipped: list = []
             #: 本轮已被服务端明确拒绝的作品 id：补跑轮别再请求同一首
@@ -132,7 +168,10 @@ class ExtraTask:
 
             no_more = False
             for attempt in range(self._MAX_PASSES):
-                if success_count >= target:
+                # 额度用完才停。这里不能用 target：首轮清单可能只有一批
+                # （15 首里的 10 首），target 会等于这批的数量；按 max_new
+                # 判断才能触发补跑，把服务端后来放出的批次评完。
+                if success_count >= max_new:
                     break
                 if attempt:
                     # 补跑前重新核对服务端状态，别拿旧列表硬跑
@@ -143,6 +182,11 @@ class ExtraTask:
                         break
                     self._remember_completed(
                         task_id, getattr(self, "last_all", []) or [])
+                    # 本轮已经评上的不再算一遍
+                    extra_tasks = [
+                        task for task in extra_tasks
+                        if _work_key(task.get("work") or {}) not in done_ids
+                    ]
                     target = min(max_new, max(
                         target, success_count + len(extra_tasks)))
                     if not extra_tasks or success_count >= target:
@@ -156,9 +200,9 @@ class ExtraTask:
                         break
 
                     work = task.get("work") or {}
-                    work_id = str(work.get("id"))
-                    if work_id in rejected:
-                        # 上一轮服务端已明确拒绝，重复执行也不会成功
+                    work_key = _work_key(work)
+                    if work_key and (work_key in rejected or work_key in done_ids):
+                        # 上一轮已明确拒绝 / 已经评上的，重复执行也不会多评一首
                         continue
 
                     # 任务循环开始处响应取消
@@ -175,11 +219,14 @@ class ExtraTask:
                         if not rated:
                             # 服务端返回「资源状态异常」这类跳过：不能算成功，
                             # 否则本地计数会比网易云上实际评过的多一首。
-                            rejected.add(work_id)
+                            if work_key:
+                                rejected.add(work_key)
                             skipped.append(str(work.get("name") or ""))
                             self.logger.info("本首未计入成功，补跑轮次会再核对")
                             continue
                         success_count += 1
+                        if work_key:
+                            done_ids.add(work_key)
                         self.logger.info(f"成功完成第 {success_count}/{target} 个额外评分任务")
 
                     except CancelledError:
@@ -188,10 +235,14 @@ class ExtraTask:
                     except Exception as e:
                         # 服务端说没有更多可评的歌了：这是完成信号，不是额度异常
                         if "没有更多" in str(e):
-                            self.logger.info("今日已没有更多可评定歌曲，额外任务今日已全部完成")
+                            self.logger.info(
+                                "今日已没有更多可评定歌曲，今日额外额度已用完")
                             no_more = True
+                            self.quota_exhausted = True
                             break
-                        self.logger.warning(f"处理歌曲 {task['work']['name']} 失败，尝试下一个: {str(e)}")
+                        self.logger.warning(
+                            f"处理歌曲 {work.get('name') or '未知曲目'} 失败，"
+                            f"尝试下一个: {str(e)}")
                         continue
                 if no_more:
                     break
@@ -223,8 +274,8 @@ class ExtraTask:
         for task in tasks or []:
             try:
                 work = task.get("work") or {}
-                score = str(task.get("score") or "").strip()
-                # 有分数就说明已经评过，completed 标记可能滞后
+                score = clean_score(task.get("score"))
+                # 有合法分数就说明已经评过，completed 标记可能滞后
                 if work.get("id") is None or not score:
                     continue
                 ledger.mark(getattr(self, "account", ""), task_id,
@@ -266,18 +317,18 @@ class ExtraTask:
             # 接口会把当天基础任务也列在待评清单里；基础阶段已经负责它们，
             # 这里剔除，确保「基础 5 + 额外 15 = 20」的额度和曲目表都不重复计数
             extra_tasks = [t for t in (response["data"] or [])
-                           if not self._is_base_work(t)]
+                           if isinstance(t, dict) and not self._is_base_work(t)]
             #: 最近一次拉到的整份清单，供上层与基础任务合并后一次性交给界面
             self.last_all = extra_tasks
             if emit:
                 self._emit_works(extra_tasks)
             completed_tasks = [
                 t for t in extra_tasks
-                if t.get("completed") or str(t.get("score") or "").strip()
+                if t.get("completed") or clean_score(t.get("score"))
             ]
             uncompleted_tasks = [
                 t for t in extra_tasks
-                if not (t.get("completed") or str(t.get("score") or "").strip())
+                if not (t.get("completed") or clean_score(t.get("score")))
             ]
 
             # 获取所有未完成的任务，而不是只取前7个
@@ -299,7 +350,6 @@ class ExtraTask:
                 on_note=self.on_note,
                 ledger=self.ledger,
                 account=self.account,
-                pacer=self.pacer,
             )
 
             # 本任务已确认收下的，连听歌上报都不用再发
@@ -311,6 +361,9 @@ class ExtraTask:
 
             # 2. 评分
             return signer.sign(work, is_extra=True)
+        except NoMoreWorksError:
+            # 当天额度用完：正常的完成信号，不按「处理失败」打 ERROR
+            raise
         except CancelledError:
             # 用户在评分入口处取消，直接透传，不按失败记录日志
             raise

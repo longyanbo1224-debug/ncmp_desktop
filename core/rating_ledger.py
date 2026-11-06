@@ -13,27 +13,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Optional
 
+from .scoring import clean_score
+
 #: 旧条目保留时长。taskId 已经做了分组，这里只是防止文件无限增长。
 _MAX_AGE = timedelta(hours=48)
 
 
 def _default_path() -> Path:
     return Path(os.path.expanduser("~")) / ".ncmp_desktop" / "rated_works.json"
-
-
-def _clean_score(score) -> str:
-    """只接受 1–5 的有效档位；空、``None``、字符串 "null"、0 都算「没有分数」。
-
-    账本用来跳过重复提交，宁可漏记也不能错记：一条假记录会让整首歌不再评分。
-    """
-    text = str(score or "").strip()
-    if not text or text.lower() == "null":
-        return ""
-    try:
-        value = int(text)
-    except (TypeError, ValueError):
-        return ""
-    return str(value) if 1 <= value <= 5 else ""
 
 
 class RatingLedger:
@@ -49,12 +36,16 @@ class RatingLedger:
         item = works.get(work_key)
         if not isinstance(item, dict):
             return None
-        score = _clean_score(item.get("score"))
+        score = clean_score(item.get("score"))
         return score or None
+
+    def count(self, account: str, task_id: str) -> int:
+        """本任务里已经由服务端确认收下的作品数（用于判断今天是否已评满）。"""
+        return len(self._task_entries(self._read(), account, task_id))
 
     def mark(self, account: str, task_id: str, work_id, score: str) -> None:
         """记一次服务端确认收下的评分。写失败静默忽略。"""
-        score = _clean_score(score)
+        score = clean_score(score)
         if not score:
             return
         work_key = str(work_id).strip()

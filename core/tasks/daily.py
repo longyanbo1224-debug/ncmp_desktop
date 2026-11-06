@@ -1,9 +1,10 @@
 from typing import Dict, Tuple
+from .. import scoring
 from ..signer import Signer
 from .base import BaseTask
 class DailyTask(BaseTask):
     def __init__(self, session, logger, config, on_progress=None, cancel_event=None,
-                 on_note=None, ledger=None, account="", pacer=None):
+                 on_note=None, ledger=None, account=""):
         super().__init__(session, logger, config)
         self.on_progress = on_progress
         self.cancel_event = cancel_event
@@ -12,8 +13,6 @@ class DailyTask(BaseTask):
         # 本地评分账本与账号：重跑时跳过已确认收下的评分
         self.ledger = ledger
         self.account = account
-        # 整轮共享的请求节奏：第一次真实请求不等待
-        self.pacer = pacer
         self.api = {
             "task_data": "https://interface.music.163.com/api/music/partner/daily/task/get"
         }
@@ -42,10 +41,12 @@ class DailyTask(BaseTask):
         """处理未完成的任务"""
         self.logger.info("开始评分...")
         works = task_data.get("works", [])
-        # 有分数就说明已经评过：服务端的 completed 标记偶尔滞后
+        # 有合法分数就说明已经评过：服务端的 completed 标记偶尔滞后。
+        # 用 clean_score：数字 0 / "null" / "0.0" 都不算分数，避免把待评歌
+        # 误判成已评（手机端 v1.2.4 踩过这个坑）。
         def rated(task: Dict) -> bool:
             return (bool(task.get("completed"))
-                    or bool(str(task.get("score") or "").strip()))
+                    or bool(scoring.clean_score(task.get("score"))))
         # 只统计待评分的作品，避免「已评分作品计入 total 但不会推进 done」导致进度条不动
         pending_works = [task for task in works if not rated(task)]
         total = len(pending_works)
@@ -60,14 +61,13 @@ class DailyTask(BaseTask):
             on_note=self.on_note,
             ledger=self.ledger,
             account=self.account,
-            pacer=self.pacer,
         )
         self._emit_progress(0, total)
 
         for task in works:
             work = task["work"]
             if rated(task):
-                score_text = str(task.get("score") or "").strip() or "?"
+                score_text = scoring.clean_score(task.get("score")) or "?"
                 self.logger.info(f'{work["name"]}「{work["authorName"]}」已有评分：{score_text}分')
             else:
                 try:

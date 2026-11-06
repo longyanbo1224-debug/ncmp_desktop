@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.task_history import TaskHistory
-from app.track_log import TrackLog
+from app.track_log import TrackLog, clean_score
 from app.ui import theme
 from app.ui.widgets.track_list import TrackList
 
@@ -411,7 +411,7 @@ class LedgerPage(QWidget):
             self._recent.add(
                 str(item.get("song") or ""),
                 meta=meta,
-                score=str(item.get("score") or ""),
+                score=clean_score(item.get("score")),
                 state="done",
                 note=str(item.get("note") or ""),
             )

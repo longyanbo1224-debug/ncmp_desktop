@@ -247,7 +247,10 @@ class Config:
         config.setdefault("smtp_port", 465)
         config.setdefault("score", 3)  # 默认使用3-4分策略
         config.setdefault("full_extra_tasks", True)
-        # 批注（乐评文案）：随评分一起提交到 comment 字段
+        # 批注（乐评文案）：随评分一起提交到 comment 字段。
+        # 云端 / 旧版保持默认开启；本地桌面端的「默认关闭」在设置层
+        # （settings_page.DEFAULTS + app/main.py 的一次性迁移）落实，
+        # 不改动共享 core 的默认行为。
         config.setdefault("note_enabled", True)
         config.setdefault("note_source", "template")  # template | llm
         config.setdefault("note_max_chars", 80)

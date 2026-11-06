@@ -16,21 +16,8 @@ from core.utils.logger import Logger
 from core.rating_ledger import RatingLedger
 
 
-class RequestPacer:
-    """整轮任务共享的请求节奏。
-
-    第一次真实评分请求不等待；之后每次请求前等一次。跳过已评过的歌不会
-    消耗等待，所以「前 5 首都已提交、第 6 首是新请求」时第 6 首直接开始。
-    """
-
-    def __init__(self) -> None:
-        self.sent = 0
-
-    def before_request(self) -> bool:
-        """返回 True 表示这次请求前应当等待。"""
-        should_wait = self.sent > 0
-        self.sent += 1
-        return should_wait
+class NoMoreWorksError(RuntimeError):
+    """服务端 405「今日没有更多可评定歌曲」：当天额度已用完，不是失败。"""
 
 
 class Signer:
@@ -45,8 +32,7 @@ class Signer:
                  done_offset: int = 0,
                  on_note: Optional[Callable[[dict, str, str], None]] = None,
                  ledger: Optional[RatingLedger] = None,
-                 account: str = "",
-                 pacer: Optional[RequestPacer] = None):
+                 account: str = ""):
         self.session = session
         self.task_id = task_id
         self.logger = logger
@@ -62,8 +48,6 @@ class Signer:
         #: 本地评分账本：服务端确认收过的评分写一份，重跑时不再提交同一首
         self.ledger = ledger
         self.account = account
-        #: 整轮任务共享的请求节奏；None 时保持旧行为（每次请求前都等）
-        self.pacer = pacer
         self.sign_url = "https://interface.music.163.com/weapi/music/partner/work/evaluate"
         #: 确认用：写入口失败时查一次"这首到底评没评上"
         self.daily_url = "https://interface.music.163.com/api/music/partner/daily/task/get"
@@ -181,12 +165,11 @@ class Signer:
             self._count_success(work, cached)
             return True
         try:
-            # 只在两次真实请求之间等待：跳过/账本命中不消耗节奏，
-            # 所以前面几首都已评过时，第一首真正要评的歌不用白等一轮。
-            if self.pacer is None or self.pacer.before_request():
-                delay = self.config.get_wait_time()
-                self.logger.info(f"等待 {delay:.1f} 秒后继续...")
-                self._sleep(delay)
+            # 与上游 ncmp 一致：每次真实评分请求前都等待，第一次也不例外。
+            # 账本命中 / 跳过已评过的歌不会走到这里，不消耗等待。
+            delay = self.config.get_wait_time()
+            self.logger.info(f"等待 {delay:.1f} 秒后继续...")
+            self._sleep(delay)
             csrf = str(self.session.cookies["__csrf"])
             score, tag = self._get_score_and_tag(work)
             # 批注：随评分一起提交（note_enabled 关闭时为空串，行为与旧版一致）
@@ -254,9 +237,16 @@ class Signer:
                 elif response["code"] == 405 and "资源状态异常" in error_msg:
                     self.logger.warning(f'歌曲「{work["name"]}」资源状态异常，跳过（不计入成功）')
                     return False
+                elif response["code"] == 405 and "没有更多" in error_msg:
+                    # 当天额度已用完：这是完成信号，不是评分失败。
+                    # 用独立异常安静地向上抛，避免打 ERROR 日志 + 多查一次确认接口。
+                    raise NoMoreWorksError(error_msg)
                 else:
                     raise RuntimeError(f"评分失败: {error_msg} (响应码: {response.get('code')})")
 
+        except NoMoreWorksError:
+            # 完成信号：不按异常处理，也不写「评分异常」日志
+            raise
         except CancelledError:
             # 取消异常向上透传，不被下面的通用 Exception 吞掉
             raise
@@ -299,7 +289,7 @@ class Signer:
             for task in works:
                 item = task.get("work") or {}
                 rated = (task.get("completed")
-                         or str(task.get("score") or "").strip())
+                         or scoring.clean_score(task.get("score")))
                 if str(item.get("id")) == work_key and rated:
                     return True
         except Exception as e:
