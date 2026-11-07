@@ -150,21 +150,27 @@ object TaskBus {
                         key = trackKey,
                     ),
                 )
-            } else if (item.completed) {
-                // 已有行（可能是上一轮摆的"待评"）升级成"已提交"
+            } else {
+                // 同一首歌再次出现（基础/额外清单重叠、或批次重叠）时只更新
+                // 已有行：额外清单分批拉取时同一首可能重复返回，不合并会让
+                // 曲目表从 20 行涨到 25 行
                 val old = cur[index]
                 val group = when {
                     old.group == "base" -> "base"
                     incomingGroup.isNotBlank() -> incomingGroup
                     else -> old.group
                 }
-                cur[index] = old.copy(
-                    state = TrackState.DONE,
+                val merged = old.copy(
                     score = old.score.ifBlank { item.score },
                     artist = old.artist.ifBlank { work.authorName },
                     group = group,
                     key = old.trackKey,
                 )
+                cur[index] = if (item.completed && old.state != TrackState.DONE) {
+                    merged.copy(state = TrackState.DONE)
+                } else {
+                    merged
+                }
             }
         }
     }
@@ -254,6 +260,8 @@ object TaskBus {
 
     /**
      * 按每日上限裁剪额外行（基础全留，额外最多 [extraLimit] 条）。
+     *
+     * 这是**展示上限**，不是评分额度：同一批（歌名|歌手）重复出现的行会合并去重。
      * 优先保留已提交的，避免旧批次/旧运行的行把 20/20 撑成 20/41。
      */
     fun capTracks(extraLimit: Int) {
@@ -262,7 +270,11 @@ object TaskBus {
     }
 
     private fun capList(all: List<TrackItem>, extraLimit: Int): List<TrackItem> {
-        val extras = all.filter { it.group == "extra" }
+        // 同一首歌可能被基础清单 + 额外清单、或两次拉取重复摆进来：
+        // 按 trackKey 去重后再计数，否则上限会把重复行算成两首
+        val dedup = LinkedHashMap<String, TrackItem>()
+        for (item in all) dedup.putIfAbsent(item.trackKey, item)
+        val extras = dedup.values.filter { it.group == "extra" }
         if (extras.size <= extraLimit) return all
         val keep = extras
             .sortedBy { if (it.state == TrackState.DONE) 0 else 1 }

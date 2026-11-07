@@ -502,8 +502,9 @@ class TaskRunner(
                     !it.completed && workKeyOf(it.work) !in doneIds
                 }
                 rememberCompleted(taskId, refreshedItems)
-                // 服务端分批返回：先把新一批整份摆进曲目表，再去评分，
-                // 不要等评到哪首才冒出一行
+                // 服务端分批返回：新批次整份摆进曲目表（addItems 内部按
+                // 「歌名|歌手」合并重复行，曲目表不会从 20 涨到 25），
+                // 再去评分，不要等评到哪首才冒出一行
                 onQueue(refreshedItems)
                 target = minOf(maxNew, maxOf(target, success + uncompleted.size))
                 if (uncompleted.isEmpty() || success >= target) {
