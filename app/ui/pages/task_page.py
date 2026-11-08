@@ -825,10 +825,13 @@ class TaskPage(QWidget):
             self._track_list.add(song, score=str(score), state="done",
                                  group=self._group_for(song))
             self._cap_tracks()
-            # 同时写进账本（AppConfig 同目录的 track_log.json）
+            # 同时写进账本（AppConfig 同目录的 track_log.json）。
+            # 评分回调只带歌名：从曲目表补歌手，否则账本记录只有歌名，
+            # 下次 seed / 同步时和服务端「歌名|歌手」的行对不上（手机端 24 行的根因）。
             try:
-                TrackLog().record(song, score=str(score),
-                                  group=self._group_for(song))
+                TrackLog().record(
+                    song, artist=self._track_list.meta_of(song),
+                    score=str(score), group=self._group_for(song))
             except Exception:
                 pass
         if not total or total <= 0:
@@ -1045,8 +1048,9 @@ class TaskPage(QWidget):
                              prefer="note")
         self._cap_tracks()
         try:
-            TrackLog().record(song, score=str(score), note=note,
-                              group=self._group_for(song))
+            TrackLog().record(
+                song, artist=self._track_list.meta_of(song, prefer="note"),
+                score=str(score), note=note, group=self._group_for(song))
         except Exception:
             pass
         self._refresh_rail()

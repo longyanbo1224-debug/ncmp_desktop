@@ -121,7 +121,13 @@ object TaskBus {
         val exact = cur.indexOfFirst { it.trackKey == wanted }
         if (exact >= 0) return exact
         // 旧数据 / 进度回调没有歌手时：退回按歌名匹配尚未确定键的行
-        return cur.indexOfFirst { it.song == song && it.key.isBlank() }
+        val unkeyed = cur.indexOfFirst { it.song == song && it.key.isBlank() }
+        if (unkeyed >= 0) return unkeyed
+        // 账本记录只存歌名（评分回调拿不到歌手）：歌手为空时按歌名复用已有行，
+        // 否则同一首会被追加成第二行、状态「已提交」，曲目表从 20 行涨到 24 行。
+        // 桌面端 track_list.add 对「任一方歌手为空」也是同样处理。
+        if (artist.isBlank()) return cur.indexOfFirst { it.song == song }
+        return -1
     }
 
     private fun addItems(cur: MutableList<TrackItem>, items: List<WorkItem>) {

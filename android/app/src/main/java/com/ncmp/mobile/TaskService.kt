@@ -112,23 +112,35 @@ class TaskService : Service() {
                         TaskBus.song.value = song
                         TaskBus.score.value = sc
                         val group = TaskBus.groupOf(song)
+                        // 评分回调只带歌名：从曲目表里补歌手再记账本，
+                        // 否则账本记录只有歌名，下次 seedRecords 会按「歌名」建行，
+                        // 和服务端「歌名|歌手」的行对不上、同一首歌被摆成两行
+                        val artist = TaskBus.tracks.value
+                            .firstOrNull { it.song == song }?.artist.orEmpty()
                         TaskBus.addTrack(
                             song, sc, group = group,
                             extraLimit = if (cfg.fullExtraTasks) 15 else 7,
                         )
                         if (song.isNotBlank() && sc.isNotBlank()) {
-                            trackLog.record(song, score = sc, group = group)
+                            trackLog.record(
+                                song, artist = artist, score = sc, group = group,
+                            )
                         }
                     },
                     onPercent = { TaskBus.percent.value = it },
                     onNote = { song, sc, note ->
                         val group = TaskBus.groupOf(song)
+                        val artist = TaskBus.tracks.value
+                            .firstOrNull { it.song == song }?.artist.orEmpty()
                         TaskBus.addTrack(
                             song, sc, note, group = group,
                             extraLimit = if (cfg.fullExtraTasks) 15 else 7,
                         )
                         if (song.isNotBlank()) {
-                            trackLog.record(song, score = sc, note = note, group = group)
+                            trackLog.record(
+                                song, artist = artist, score = sc,
+                                note = note, group = group,
+                            )
                         }
                     },
                     onPoints = { points ->

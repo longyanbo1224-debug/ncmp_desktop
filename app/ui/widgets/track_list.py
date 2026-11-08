@@ -295,6 +295,15 @@ class TrackList(QWidget):
         if row is not None:
             row.set_state(state)
 
+    def meta_of(self, song: str, prefer: str = "pending") -> str:
+        """某首歌在曲目表里的歌手（评分回调只带歌名，写账本时用它补全）。
+
+        账本记录若只有歌名，下次按「歌名|歌手」索引时会和曲目表的行对不上；
+        桌面端的 ``add()`` 有兜底不会多摆一行，但账本本身会丢歌手。
+        """
+        row = self._find_song(song, prefer)
+        return row.meta if row is not None else ""
+
     def mark_pending(self, song: str, meta: str = "") -> TrackRow:
         """预置一行"待评"：列表里先出现，状态等评分结果回来再改。"""
         return self.add(song, meta=meta, state="pending")
