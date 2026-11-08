@@ -342,6 +342,59 @@ class TestTodayPage(unittest.TestCase):
         self.assertEqual(page._track_list.count_by_group("base"), 5)
         self.assertEqual(page._track_list.count_by_group("extra"), 15)
 
+    def test_completed_extras_are_listed_before_pending(self):
+        """同一天多次执行：早上评过的额外曲目由本机账本补回，必须排在待评前面。
+
+        用户反馈的场景：今天已评 10 首（5 基础 + 5 额外），再点执行时服务端
+        放出一批新的 15 首待评。以前补回的 5 首「已提交」追加在末尾（16-20），
+        把本批次 5 首待评挤出了 20 行上限，页头「11/20、还剩 9 首」与列表对不上。
+        """
+        from app.track_log import STATE_SUBMITTED, TrackLog
+        import app.ui.pages.task_page as task_page_module
+
+        base = [
+            {"work": {"name": f"基础{i}", "authorName": "某"},
+             "completed": True, "score": 4, "_group": "base"}
+            for i in range(5)
+        ]
+        extras = [
+            {"work": {"name": f"额外{i}", "authorName": "某"},
+             "completed": False, "score": 0, "_group": "extra"}
+            for i in range(15)
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log = TrackLog(path=Path(tmp) / "track_log.json")
+            for i in range(5):
+                log.record(f"早评{i}", artist="某", score="3",
+                           state=STATE_SUBMITTED, group="extra")
+            original = task_page_module.TrackLog
+            task_page_module.TrackLog = lambda: log
+            try:
+                page = self._page()
+                page._begin_run("执行中…", "running")
+                page._on_works(base + extras)
+            finally:
+                task_page_module.TrackLog = original
+
+        rows = list(page._track_list._rows.values())
+        self.assertEqual(page._track_list.count(), 20)
+        self.assertEqual(page._track_list.count_by_group("base"), 5)
+        self.assertEqual(page._track_list.count_by_group("extra", state=None), 15)
+        # 已提交的 5 首排在最前（紧跟基础行），后面才是待评
+        self.assertEqual([row.state for row in rows[5:10]], ["done"] * 5)
+        self.assertTrue(all(row.state != "done" for row in rows[10:]))
+        # 数字与行对得上：10 已提交 / 20，剩 10 首待评
+        self.assertEqual(page._track_list.done_count(), 10)
+
+        # 再评一首：已提交 11、待评 9，仍是 20 行——页头与剩余任务一致
+        page._on_progress(1, 10, "额外0", "4")
+        rows = list(page._track_list._rows.values())
+        self.assertEqual(page._track_list.count(), 20)
+        self.assertEqual(page._track_list.done_count(), 11)
+        self.assertEqual(
+            sum(1 for row in rows if row.state == "pending"), 9)
+
     def test_extra_batch_after_base_reaches_twenty(self):
         """基础评完后服务端放出第二批次：曲目表从 15 行补到 20 行。
 

@@ -18,7 +18,8 @@ class MusicPartnerBot:
                  on_note: Optional[Callable[[dict, str, str], None]] = None,
                  on_works: Optional[Callable[[list], None]] = None,
                  quota_state: Optional[QuotaState] = None,
-                 local_submitted_count: int = 0):
+                 local_submitted_count: int = 0,
+                 local_extra_done: int = 0):
         self.config = config
         self.logger = logger
         self.session = session
@@ -37,6 +38,9 @@ class MusicPartnerBot:
         #: 本机今日曲目记录里已提交的条数（由界面层传入）：达到 基础+额外上限
         #: 时同样直接跳过额外阶段，不再请求服务端。
         self.local_submitted_count = int(local_submitted_count or 0)
+        #: 本机今日记录里已提交的「额外」曲目数（由界面层传入）：
+        #: 服务端额外清单是分批的，早上评过的可能不再列出，剩余额度得靠它补足。
+        self.local_extra_done = int(local_extra_done or 0)
         #: 当前账号 id（验证用户信息时拿到），账本按账号隔离
         self.account_id = ""
         #: 服务端明确返回「今日没有更多」：当天额外额度已用完。
@@ -154,7 +158,17 @@ class MusicPartnerBot:
             else:
                 # 基础任务评完后额外清单才会放出下一批：基础阶段跑过时重新拉一次，
                 # 否则一轮只评到第一批（例如 15 首），用户还得再点一次执行才到 20 首
-                extra_task.process_extra_tasks(task_data["id"], refresh=not complete)
+                # 服务端额外清单是分批的，早上评过的额外曲目这次可能不再列出；
+                # 本地记录的额外已评数要和清单里的已完成数取较大者，否则会把
+                # 剩余额度多算（进度 1/15、实际只剩 10 首）。
+                base_done = sum(1 for item in base_works if item.get("completed"))
+                local_extra_done = max(
+                    self.local_extra_done,
+                    max(0, self.local_submitted_count - base_done),
+                )
+                extra_task.process_extra_tasks(
+                    task_data["id"], refresh=not complete,
+                    local_extra_done=local_extra_done)
                 self.extra_all_done = bool(getattr(extra_task, "quota_exhausted", False))
                 if self.extra_all_done:
                     # 记住「今天这个任务额度已用完」，下次重跑直接跳过

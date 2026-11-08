@@ -101,6 +101,14 @@ class TaskService : Service() {
                     it.day == com.ncmp.mobile.data.TrackLogStore.today() &&
                         it.state == com.ncmp.mobile.data.STATE_SUBMITTED
                 }
+                // 今天已提交的「额外」曲目数：服务端额外清单是分批的，早上评过的
+                // 几首这次可能不再列出；剩余额度要把它算进去，否则进度会显示
+                // 1/15 而实际只剩 10 首。
+                val localExtraDone = trackLog.load().count {
+                    it.day == com.ncmp.mobile.data.TrackLogStore.today() &&
+                        it.state == com.ncmp.mobile.data.STATE_SUBMITTED &&
+                        it.group == "extra"
+                }
                 val r = TaskRunner(
                     api = api,
                     config = cfg,
@@ -203,6 +211,7 @@ class TaskService : Service() {
                     ledger = ledger,
                     quotaStore = store,
                     localSubmittedCount = localSubmittedCount,
+                    localExtraDone = localExtraDone,
                 )
                 runner = r
                 val result = r.run()

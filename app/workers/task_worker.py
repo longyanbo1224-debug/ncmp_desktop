@@ -134,15 +134,25 @@ class TaskWorker(QThread):
         # 先读本地历史：今天已经提交的曲目数。达到「基础 + 额外上限」时
         # bot 会直接跳过额外阶段，不再请求服务端（先本地、后服务端）。
         local_submitted = 0
+        local_extra_done = 0
         try:
             from app.track_log import STATE_SUBMITTED, TrackLog
 
+            entries = TrackLog().day()
             local_submitted = sum(
-                1 for entry in TrackLog().day()
+                1 for entry in entries
                 if str(entry.get("state") or STATE_SUBMITTED) == STATE_SUBMITTED
+            )
+            # 今天已经评过的额外曲目：服务端额外清单分批返回，早上评过的
+            # 可能不再列出；用它补足剩余额度，避免进度显示成 1/15。
+            local_extra_done = sum(
+                1 for entry in entries
+                if str(entry.get("state") or STATE_SUBMITTED) == STATE_SUBMITTED
+                and str(entry.get("group") or "") == "extra"
             )
         except Exception:
             local_submitted = 0
+            local_extra_done = 0
         bot = MusicPartnerBot(
             config=config,
             logger=Logger(),
@@ -153,6 +163,7 @@ class TaskWorker(QThread):
             on_note=self._on_note,
             on_works=self._on_works,
             local_submitted_count=local_submitted,
+            local_extra_done=local_extra_done,
         )
         try:
             ok = bot.run()

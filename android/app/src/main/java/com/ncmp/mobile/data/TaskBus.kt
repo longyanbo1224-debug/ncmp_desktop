@@ -281,13 +281,33 @@ object TaskBus {
         val dedup = LinkedHashMap<String, TrackItem>()
         for (item in all) dedup.putIfAbsent(item.trackKey, item)
         val extras = dedup.values.filter { it.group == "extra" }
-        if (extras.size <= extraLimit) return all
-        val keep = extras
-            .sortedBy { if (it.state == TrackState.DONE) 0 else 1 }
-            .take(extraLimit)
-            .map { it.trackKey }
-            .toSet()
-        return all.filter { it.group != "extra" || it.trackKey in keep }
+        val trimmed = if (extras.size <= extraLimit) {
+            all
+        } else {
+            val keep = extras
+                .sortedBy { if (it.state == TrackState.DONE) 0 else 1 }
+                .take(extraLimit)
+                .map { it.trackKey }
+                .toSet()
+            all.filter { it.group != "extra" || it.trackKey in keep }
+        }
+        return orderTracks(trimmed)
+    }
+
+    /**
+     * 额外分组内把「已提交」排在「待评」前面。
+     *
+     * 同一天多次执行时，早上评过的曲目不在本次服务端清单里，是由本机账本
+     * 补回来的；它们会追加在列表末尾，看上去像"最后几首已经评完了"，
+     * 和页头「今日 N/20」对不上。排序后已提交的连续在前，待评的连续在后，
+     * 行号与剩余数量才对得上。
+     *
+     * 稳定排序：同组内保持原有先后，评分过程中行不会来回跳。
+     */
+    private fun orderTracks(list: List<TrackItem>): List<TrackItem> {
+        val base = list.filter { it.group != "extra" }
+        val extras = list.filter { it.group == "extra" }
+        return base + extras.sortedBy { if (it.state == TrackState.DONE) 0 else 1 }
     }
 
     /** 记一首已评分的曲目（同一首歌只保留一行，批注后到就补上去）。 */

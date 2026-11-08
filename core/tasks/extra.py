@@ -105,7 +105,8 @@ class ExtraTask:
             except Exception:
                 pass
 
-    def process_extra_tasks(self, task_id: str, refresh: bool = False) -> None:
+    def process_extra_tasks(self, task_id: str, refresh: bool = False,
+                            local_extra_done: int = 0) -> None:
         """处理额外的评分任务。
 
         每轮结束后重新拉一次任务列表：单首失败被跳过时，服务端仍把它标成
@@ -136,7 +137,11 @@ class ExtraTask:
             self._remember_completed(task_id, getattr(self, "last_all", []) or [])
             full = bool(self.config.get('full_extra_tasks', False))
             limit = self._DAILY_MAX if full else 7
-            extra_before = completed_count
+            # 今日已完成的额外曲目：服务端清单里的已评作品 + 本机账本里今天
+            # 已提交的额外曲目，取较大者——服务端额外清单是分批的，早上评过的
+            # 几首这次可能不再列出，只按清单算会把剩余额度多算，进度显示成 1/15
+            # 而实际只剩 10 首，评到一半服务端才回「没有更多」。
+            extra_before = max(completed_count, int(local_extra_done or 0))
             max_new = max(0, limit - extra_before)
             target = min(len(extra_tasks), max_new)
 
@@ -146,9 +151,11 @@ class ExtraTask:
 
             # 如果已经完成任务，直接返回
             if target <= 0:
-                self.logger.info(f"今日已完成 {completed_count} 个额外评分任务，已达到每日上限")
+                self.logger.info(f"今日已完成 {extra_before} 个额外评分任务，已达到每日上限")
                 return
-            self.logger.info(f"发现 {len(extra_tasks)} 个待额外评定任务")
+            self.logger.info(
+                f"发现 {len(extra_tasks)} 个待额外评定任务"
+                f"（今日还可评 {target} 首）")
 
             # 跨轮累计的成功数：进度条只前进，补跑时不会倒回 0
             success_count = 0

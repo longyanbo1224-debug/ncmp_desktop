@@ -97,6 +97,20 @@ class ExtraRepairTest(unittest.TestCase):
         self.assertEqual(job.fetches, 2, "补跑前必须重新核对服务端")
         self.assertEqual(job.attempts, 15, "一轮应评满额外的 15 首")
 
+    def test_local_extra_done_is_subtracted_from_remaining_quota(self):
+        """今天早上已评 5 首额外，本次清单又给 15 首待评：只能再评 10 首。
+
+        服务端额外清单是分批的，早上评过的 5 首这次不再列出；只按清单算
+        剩余额度会显示成 1/15，实际评到 10 首服务端才回「没有更多」。
+        """
+        job = _FakeExtra([(15, 0)], fail_on=())
+        job.process_extra_tasks("task", local_extra_done=5)
+
+        self.assertEqual(job.attempts, 10, "今日额度 15 - 已评 5 = 10")
+        self.assertTrue(all(t == 10 for _, t in job.progress), job.progress)
+        messages = [m for _, m in job.logger.lines]
+        self.assertTrue(any("今日还可评 10 首" in m for m in messages), messages)
+
     def test_limited_mode_stops_at_seven(self):
         job = _FakeExtra([(10, 0)], full=False, fail_on=())
         job.process_extra_tasks("task")

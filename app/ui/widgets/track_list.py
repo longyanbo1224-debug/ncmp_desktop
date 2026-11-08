@@ -345,17 +345,40 @@ class TrackList(QWidget):
         )
 
     def cap_extra(self, limit: int) -> None:
-        """额外行超过每日上限时裁掉多余的，优先保留已提交的。"""
-        extras = [row for row in self._rows.values() if row.group == "extra"]
-        if len(extras) <= limit:
+        """裁剪额外行到每日上限，并把「已提交」排到「待评」前面。
+
+        两个目的：
+        1. 额外任务每天最多 15 首（基础 5 + 额外 15 = 20），多出来的旧批次行不展示；
+        2. 同一天多次执行时，早上评过的曲库不在本次服务端清单里，是由本机账本
+           补回来的，会追加在列表末尾——看上去像"最后几首已经评完了"。这里让
+           已提交的连续排在前、待评的连续排在后，页头「今日 N/20」才和行号对得上。
+
+        稳定排序：同组内保持原有先后。评分按待评行的顺序推进，刚评完的那一行
+        排序后仍然停在原位（它原本就是待评区的第一行），列表不会来回跳。
+        """
+        rows = list(self._rows.values())
+        extras = [row for row in rows if row.group == "extra"]
+        if len(extras) > limit:
+            extras.sort(key=lambda row: 0 if row.state == "done" else 1)
+            keep = {row.track_key for row in extras[:limit]}
+            rows = [
+                row for row in rows
+                if row.group != "extra" or row.track_key in keep
+            ]
+        ordered = (
+            [row for row in rows if row.group != "extra"]
+            + [row for row in rows if row.group == "extra"
+               and row.state == "done"]
+            + [row for row in rows if row.group == "extra"
+               and row.state != "done"]
+        )
+        current = [row.track_key for row in self._rows.values()]
+        if [row.track_key for row in ordered] == current:
             return
-        extras.sort(key=lambda row: 0 if row.state == "done" else 1)
-        keep = {row.track_key for row in extras[:limit]}
         data = [
             (row.track_key, row.song, row.meta, row.score, row.state,
              row.note, row.group)
-            for row in self._rows.values()
-            if row.group != "extra" or row.track_key in keep
+            for row in ordered
         ]
         self.clear()
         for key, song, meta, score, state, note, group in data:

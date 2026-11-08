@@ -41,6 +41,9 @@ class TaskRunner(
     private val quotaStore: SessionStore? = null,
     // 本机今日曲目记录里已提交的条数：达到基础 + 额外上限时同样直接跳过
     private val localSubmittedCount: Int = 0,
+    // 本机今日记录里已提交的「额外」曲目数：服务端额外清单分批返回，
+    // 早上评过的可能不再列出，剩余额度要靠它补足
+    private val localExtraDone: Int = 0,
 ) {
     @Volatile var cancelled = false
     private var currentStep = ""
@@ -117,6 +120,14 @@ class TaskRunner(
             extraItems?.let { rememberCompleted(daily.id, it) }
             onQueue(daily.items + extraItems.orEmpty())
             val preloadedPair = extraItems?.let { it to extraCompleted }
+            // 今天已经评过的额外曲目（本机账本口径）：服务端额外清单是分批的，
+            // 早上评过的 5 首这次可能不再列出；不计入的话 maxNew 会算成 15，
+            // 实际只剩 10 首额度，进度会显示成 1/15、评到一半服务端才回「没有更多」。
+            // 两种口径取较大者：按分组记的「额外」条数，以及「今日已提交 - 基础已完成」。
+            val localExtraDone = maxOf(
+                this.localExtraDone,
+                (localSubmittedCount - daily.completedCount).coerceAtLeast(0),
+            )
 
             if (!daily.complete) {
                 checkCancel()
@@ -157,6 +168,7 @@ class TaskRunner(
                     scoringExtra,
                     baseIds,
                     baseNames,
+                    localExtraDone,
                 )
                 if (quotaExhausted) {
                     // 记住「今天这个任务额度已用完」，下次本地直接跳过
@@ -441,14 +453,18 @@ class TaskRunner(
         preloaded: Pair<List<WorkItem>, Int>? = null,
         baseIds: Set<String> = emptySet(),
         baseNames: Set<String> = emptySet(),
+        localExtraDone: Int = 0,
     ) {
         val fetched = preloaded ?: api.getExtraTasks().let { (items, _) ->
             val kept = filterExtraItems(items, baseIds, baseNames)
             kept to kept.count { it.completed }
         }
         val completedCount = fetched.second
-        // 本轮开始前服务端已完成的额外曲目：计入今日结果，也补进本地账本
-        val extraBefore = completedCount
+        // 本轮开始前今日已完成的额外曲目：服务端清单里的已评作品 + 本机账本
+        // 里今天已提交的额外曲目（取较大者——两边可能各只看到一部分）。
+        // 少了这一步，早上评过的 5 首会让 maxNew 多算 5，target 显示 15
+        // 而实际只剩 10 首额度，评到一半服务端才回「没有更多」。
+        val extraBefore = maxOf(completedCount, localExtraDone)
         extraDone = extraBefore
         rememberCompleted(taskId, fetched.first)
         var uncompleted = fetched.first.filter { !it.completed }
@@ -468,7 +484,7 @@ class TaskRunner(
             log("今日已完成 $completedCount 个额外评分任务，已达到每日上限")
             return
         }
-        log("发现 ${uncompleted.size} 个待额外评定任务")
+        log("发现 ${uncompleted.size} 个待额外评定任务（今日还可评 $target 首）")
 
         var success = 0
         // 被服务端拒绝（资源状态异常）的歌：要能告诉用户"缺的是哪首"
